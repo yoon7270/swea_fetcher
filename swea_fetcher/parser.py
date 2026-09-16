@@ -167,8 +167,12 @@ def _parse_attachments(soup: BeautifulSoup) -> dict[str, tuple[str, str]]:
 # --- 공개 API -------------------------------------------------------------------
 
 
-def parse(html: str, page_kind: str, contest_prob_id: str) -> ProblemInfo:
-    """페이지 HTML 을 ProblemInfo 로 바꾼다. 첨부 in/out 중 하나라도 없으면 AttachmentNotFound."""
+def parse(html: str, page_kind: str, contest_prob_id: str, require_attachments: bool = True) -> ProblemInfo:
+    """페이지 HTML 을 ProblemInfo 로 바꾼다.
+
+    require_attachments=True (기본): 첨부 in/out 중 하나라도 없으면 AttachmentNotFound.
+    False: 첨부가 없어도 input_url/output_url=None 으로 돌려준다 (--skeleton-only 용).
+    """
     if page_kind not in PAGE_KINDS:
         raise ParseError(f"알 수 없는 page_kind: {page_kind!r}")
     soup = BeautifulSoup(html, "lxml")
@@ -183,15 +187,15 @@ def parse(html: str, page_kind: str, contest_prob_id: str) -> ProblemInfo:
 
     attachments = _parse_attachments(soup)
     missing = [k for k in ("in", "out") if k not in attachments]
-    if missing:
+    if missing and require_attachments:
         found = [v[1] for v in attachments.values()]
         raise AttachmentNotFound(
             f"첨부 링크가 없습니다 (누락: {', '.join(missing)}; 발견: {found or '없음'})",
             found=found,
         )
 
-    in_url, in_name = attachments["in"]
-    out_url, out_name = attachments["out"]
+    in_url, in_name = attachments.get("in", (None, None))
+    out_url, out_name = attachments.get("out", (None, None))
     return ProblemInfo(
         contest_prob_id=contest_prob_id,
         num=num,
