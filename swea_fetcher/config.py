@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -63,6 +64,12 @@ def _keyring():
         import keyring  # noqa: WPS433 — 지연 import
         import keyring.errors  # noqa: F401
 
+        if getattr(sys, "frozen", False) and sys.platform == "win32":
+            # PyInstaller exe 에서는 entry-point 기반 백엔드 탐색이 실패할 수 있어 명시 지정
+            from keyring.backends import Windows as _win  # noqa: WPS433
+
+            if not isinstance(keyring.get_keyring(), _win.WinVaultKeyring):
+                keyring.set_keyring(_win.WinVaultKeyring())
         return keyring
     except ImportError as e:  # pragma: no cover — 의존성 누락
         raise ConfigMissing("keyring 패키지가 없습니다. `pip install -e .` 를 다시 실행하세요") from e
