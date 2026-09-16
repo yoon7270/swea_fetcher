@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import difflib
 import getpass
 import logging
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -63,10 +65,14 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("topic", help="주제 폴더 이름 (예: BFS, Queue, IM_test)")
     f.add_argument("--num", type=int, default=None, help="페이지에서 번호를 못 찾았을 때 문제 번호를 직접 지정")
     f.add_argument("--force", action="store_true", help="input.txt / output.txt 를 덮어씁니다. {번호}.py 는 어떤 경우에도 덮어쓰지 않습니다")
+    f.add_argument("--skeleton-only", action="store_true", help="첨부를 받지 않고 폴더 + {번호}.py + 빈 input.txt 만 만듭니다 (샘플 첨부가 없는 문제용)")
+    f.add_argument("--dry-run", action="store_true", help="저장하지 않고 무엇을 어디에 저장할지만 보여줍니다")
+    f.add_argument("--refresh-index", action="store_true", help="번호 색인 캐시를 무시하고 다시 찾습니다 (클럽에 새 문제 상자가 추가됐는데 번호로 못 찾을 때)")
     f.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
 
-    i = sub.add_parser("init", help=".env 작성 (계정 정보는 %%USERPROFILE%%\\.swea-fetch\\ 에 저장) + 로그인 확인")
+    i = sub.add_parser("init", help="계정 설정 (.env + 비밀번호는 Windows 자격 증명 관리자) + 로그인 확인")
     i.add_argument("--no-check", action="store_true", help="로그인 확인 생략")
+    i.add_argument("--migrate", action="store_true", help="프롬프트 없이 .env 의 평문 SWEA_PW 를 자격 증명 관리자로 옮기고 .env 에서 제거")
     i.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
 
     lo = sub.add_parser("logout", help="저장된 세션 삭제")
@@ -101,7 +107,16 @@ def _setup_logging(verbose: bool) -> None:
 # --- fetch ------------------------------------------------------------------------
 
 
-def run_fetch(target: str, topic: str, num: int | None, force: bool, verbose: bool = False) -> int:
+def run_fetch(
+    target: str,
+    topic: str,
+    num: int | None,
+    force: bool,
+    verbose: bool = False,
+    skeleton_only: bool = False,
+    dry_run: bool = False,
+    refresh_index: bool = False,
+) -> int:
     """파이프라인 실행. 성공 시 0. 도메인 예외는 main 이 처리한다."""
     settings = config.load_settings()
     by_number = target.strip().isdigit()
@@ -112,12 +127,12 @@ def run_fetch(target: str, topic: str, num: int | None, force: bool, verbose: bo
 
     if by_number:
         log.info("문제 번호 %s 로 찾는 중 (공개 목록 → Solving Club 상자)", target.strip())
-        cid = lookup.find_by_number(session, settings, int(target.strip()))
+        cid = lookup.find_by_number(session, settings, int(target.strip()), refresh=refresh_index)
 
     log.info("문제 페이지 가져오는 중 (contestProbId=%s)", cid)
     html, kind = client.fetch_problem_page(session, settings, cid)
     log.debug("page_kind=%s, html=%d bytes", kind, len(html))
-    info = parser.parse(html, kind, cid)
+    info = parser.parse(html, kind, cid, require_attachments=not skeleton_only)
 
     if num is not None:
         if info.num is not None and info.num != num:
@@ -126,18 +141,92 @@ def run_fetch(target: str, topic: str, num: int | None, force: bool, verbose: bo
     if info.num is None:
         raise InvalidInput("문제 번호를 페이지에서 찾지 못했습니다. --num 으로 지정하세요")
 
-    log.info("첨부 다운로드")
-    in_bytes = client.download(session, info.input_url, settings)
-    out_bytes = client.download(session, info.output_url, settings)
+    topic = _resolve_topic(settings.root, topic)
+
+    in_bytes = out_bytes = None
+    if not skeleton_only:
+        log.info("첨부 다운로드")
+        in_bytes = client.download(session, info.input_url, settings)
+        out_bytes = client.download(session, info.output_url, settings)
+
+    if dry_run:
+        _print_dry_run(info, topic, settings, in_bytes, out_bytes, force, skeleton_only)
+        return 0
 
     try:
-        result = storage.save_problem(settings.root, topic, info, in_bytes, out_bytes, settings, force=force)
+        if skeleton_only:
+            result = storage.save_skeleton(settings.root, topic, info, settings)
+        else:
+            result = storage.save_problem(settings.root, topic, info, in_bytes, out_bytes, settings, force=force)
     except ValueError as e:
         raise InvalidInput(str(e)) from e
 
     log.info("저장 완료")
-    _print_result(info, result, settings)
+    _print_result(info, result, settings, skeleton_only)
     return 0
+
+
+def _resolve_topic(root: Path, topic: str) -> str:
+    """주제 폴더 이름 안내. 대소문자만 다른 기존 폴더가 있으면 그 이름을 쓰고, 비슷한 폴더는 알리기만 한다."""
+    topic = topic.strip()
+    try:
+        dirs = sorted(d.name for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
+    except OSError:
+        return topic
+    if topic in dirs:
+        return topic
+    same_ci = [d for d in dirs if d.lower() == topic.lower()]
+    if same_ci:
+        print(f"[알림] 기존 폴더 '{same_ci[0]}' 를 사용합니다 (입력: '{topic}')")
+        return same_ci[0]
+    close = difflib.get_close_matches(topic, dirs, n=3, cutoff=0.6)
+    if close:
+        print(f"[알림] 비슷한 폴더가 있습니다: {', '.join(close)} — 새 폴더 '{topic}' 를 만듭니다")
+    return topic
+
+
+def _preview(data: bytes | None, limit_lines: int = 3, limit_chars: int = 60) -> str:
+    """앞 limit_lines 줄을 ' / ' 로 이어 붙인 미리보기 (한 줄 limit_chars 자 제한)."""
+    if data is None:
+        return ""
+    text = storage.normalize_text(data)
+    all_lines = text.splitlines()
+    s = " / ".join(ln.strip() for ln in all_lines[:limit_lines])
+    if len(all_lines) > limit_lines:
+        s += " ..."
+    return s if len(s) <= limit_chars else s[: limit_chars - 3] + "..."
+
+
+def _print_dry_run(
+    info: ProblemInfo,
+    topic: str,
+    settings: config.Settings,
+    in_bytes: bytes | None,
+    out_bytes: bytes | None,
+    force: bool,
+    skeleton_only: bool,
+) -> None:
+    """저장 없이 계획만 출력. 충돌 검사는 존재 여부만 본다 (쓰기 없음)."""
+    try:
+        problem_dir = storage.resolve_problem_dir(settings.root, topic, info.num)
+    except ValueError as e:
+        raise InvalidInput(str(e)) from e
+    print(f"[DRY-RUN] {info.num}. {info.title}  (page_kind={info.page_kind}, contestProbId={info.contest_prob_id})")
+    print(f"  저장 예정: {problem_dir}{os.sep}")
+    input_path = problem_dir / settings.input_name
+    output_path = problem_dir / settings.output_name
+    py_path = problem_dir / f"{info.num}.py"
+    keep = "(기존 파일 유지)"
+    if skeleton_only:
+        print(f"    {settings.input_name:<12}{keep if input_path.exists() else '(빈 파일 생성 예정)'}")
+    else:
+        print(f"    {settings.input_name:<12}← {info.input_filename} ({len(in_bytes or b'')} B)   미리보기: {_preview(in_bytes)}")
+        print(f"    {settings.output_name:<12}← {info.output_filename} ({len(out_bytes or b'')} B)   미리보기: {_preview(out_bytes)}")
+    print(f"    {py_path.name:<12}{keep if py_path.exists() else '(생성 예정)'}")
+    existing = [p for p in (input_path, output_path) if p.exists()]
+    if existing and not skeleton_only:
+        names = ", ".join(p.name for p in existing)
+        print(f"  [주의] 이미 있음: {names} → " + ("--force 로 덮어쓰게 됩니다" if force else "실제 실행 시 AlreadyExists (--force 필요)"))
 
 
 def _fmt_size(path: Path) -> str:
@@ -148,14 +237,18 @@ def _fmt_size(path: Path) -> str:
     return f"{n} B" if n < 1024 else f"{n / 1024:.1f} KB"
 
 
-def _print_result(info: ProblemInfo, result: SaveResult, settings: config.Settings) -> None:
-    print(f"[OK] {info.num}. {info.title} → {result.problem_dir}")
+def _print_result(info: ProblemInfo, result: SaveResult, settings: config.Settings, skeleton_only: bool = False) -> None:
     written = set(result.written)
     skipped = set(result.skipped)
-    rows = [
-        (settings.input_name, f"({_fmt_size(result.problem_dir / settings.input_name)}, 원본 {info.input_filename})"),
-        (settings.output_name, f"({_fmt_size(result.problem_dir / settings.output_name)}, 원본 {info.output_filename})"),
-    ]
+    if skeleton_only:
+        print(f"[OK] {info.num}. {info.title} → {result.problem_dir} (뼈대만 — 샘플은 문제 페이지에서 직접 {settings.input_name} 에 붙여넣으세요)")
+        rows = [(settings.input_name, "(빈 파일 생성)" if result.problem_dir / settings.input_name in written else "(기존 파일 유지)")]
+    else:
+        print(f"[OK] {info.num}. {info.title} → {result.problem_dir}")
+        rows = [
+            (settings.input_name, f"({_fmt_size(result.problem_dir / settings.input_name)}, 원본 {info.input_filename})"),
+            (settings.output_name, f"({_fmt_size(result.problem_dir / settings.output_name)}, 원본 {info.output_filename})"),
+        ]
     py = result.problem_dir / f"{info.num}.py"
     if py in written:
         rows.append((py.name, "(뼈대 생성)"))
@@ -317,7 +410,10 @@ def _advice(e: SweaFetchError) -> str:
             f"현재 연속 실패 {n}회 — 5회면 계정이 잠깁니다"
         )
     if isinstance(e, InvalidInput):
-        return "입력 예시:\n" + "\n".join(f"  swea-fetch {ex} BFS" for ex in TARGET_EXAMPLES)
+        hint = ""
+        if "찾지 못했습니다" in str(e) and "문제 번호" in str(e):
+            hint = "  클럽에 새 문제 상자가 생긴 직후라면 --refresh-index 를 붙여 다시 시도하세요\n"
+        return hint + "입력 예시 (문제 번호가 가장 쉽습니다):\n" + "\n".join(f"  swea-fetch {ex} BFS" for ex in TARGET_EXAMPLES)
     if isinstance(e, ProblemNotFound):
         return "contestProbId 가 맞는지, 해당 문제에 접근 권한이 있는지 확인하세요"
     if isinstance(e, ParseError):
@@ -326,8 +422,8 @@ def _advice(e: SweaFetchError) -> str:
         found = ", ".join(e.found) if e.found else "없음"
         return (
             f"페이지에서 찾은 첨부: {found}\n"
-            "  샘플 입출력 첨부가 없는 문제입니다. 페이지 본문에서 직접 복사하세요.\n"
-            "  (`--skeleton-only` 옵션은 M3 에서 제공 예정)"
+            "  샘플 입출력 첨부가 없는 문제입니다. `--skeleton-only` 를 붙여 다시 실행하면 "
+            "폴더 + {번호}.py + 빈 input.txt 만 만듭니다 (샘플은 본문에서 직접 복사)"
         )
     if isinstance(e, AlreadyExists):
         files = "\n".join(f"  {p}" for p in e.existing)
@@ -355,7 +451,10 @@ def main(argv: list[str] | None = None) -> int:
             return run_init(no_check=args.no_check, migrate=args.migrate)
         if args.command == "logout":
             return run_logout(all_=args.all)
-        return run_fetch(args.target, args.topic, args.num, args.force, verbose)
+        return run_fetch(
+            args.target, args.topic, args.num, args.force, verbose,
+            skeleton_only=args.skeleton_only, dry_run=args.dry_run, refresh_index=args.refresh_index,
+        )
     except SweaFetchError as e:
         print(f"[오류] {e}", file=sys.stderr)
         advice = _advice(e)
