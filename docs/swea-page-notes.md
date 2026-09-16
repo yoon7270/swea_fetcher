@@ -39,6 +39,7 @@ SWEA 에는 문제 페이지가 **두 종류** 있고, 사용자의 실제 사�
 
 - `contestProbId` 는 `AZq-gSmq_RfHBISS` 같은 16자 영숫자(`-`,`_` 포함). 문제 번호와 무관
 - 비로그인 접근: **302 → `/main/identity/anonymous/loginPage.do`** (본문 0 byte). `login_redirect.html` 픽스처는 따로 없음
+- **오류 페이지**: 잘못된 ID 등으로 접근하면 HTTP 200 에 `<title>::: Error :::</title>`, 본문 `"죄송합니다. 시스템 오류입니다."` 가 오는 안내 페이지 (`div.content_sub` 없음). `fetch` 는 `title == '::: Error :::'` 를 `ProblemNotFound` 로 처리할 것
 - 세션 유지: 페이지 JS 가 60초마다 `POST /main/identity/anonymous/sessionExtension.do` 호출 (도구는 불필요)
 
 ### (B) Solving Club 페이지 구조 (확인됨)
@@ -71,7 +72,7 @@ SWEA 에는 문제 페이지가 **두 종류** 있고, 사용자의 실제 사�
   </div>
   ```
   → 상세 페이지도 같은 위젯이면 `span.week_num` / `span.week_text` 가 후보
-- 같은 `contestProbId` 로 `problemDetail.do?contestProbId=AZq-gSmq_RfHBISS` 를 열면 번호가 보이는지 확인 필요 (→ Solving Club 문제의 번호를 얻는 경로)
+- Solving Club 의 `contestProbId`(`AZq-gSmq_RfHBISS`) 로 `problemDetail.do?contestProbId=...` 를 열면 **시스템 오류 페이지**가 뜸 (로그인 상태에서 확인, 픽스처 `error_page.html`). 즉 Solving Club 문제는 일반 페이지로 우회할 수 없고, 번호 획득 경로는 별도 확인 필요
 
 ### 계정 정보 제거 내역 (픽스처)
 - 헤더의 닉네임 `span.name` → `DUMMY_USER`, `userInformationPopup('...')` 의 사용자 키 → `DUMMY_USER_KEY`
@@ -98,4 +99,5 @@ SWEA 에는 문제 페이지가 **두 종류** 있고, 사용자의 실제 사�
 | `tests/fixtures/login_redirect.html` | 해당 없음 | 302 응답이며 본문이 비어 있음 (위 설명) |
 | `tests/fixtures/problem_with_attachments.html` | 저장됨 | Solving Club 문제 페이지 (`problemView.do`). 닉네임·사용자 키 치환 완료 |
 | `tests/fixtures/problem_without_attachments.html` | TODO | 사용자가 로그인 후 저장 (있으면) |
-| `tests/fixtures/problem_detail_regular.html` | TODO | 일반 `problemDetail.do` 페이지 (번호 노출 확인용) |
+| `tests/fixtures/error_page.html` | 저장됨 | 잘못된 `contestProbId` 로 `problemDetail.do` 접근 시 시스템 오류 페이지. 계정 정보 없음 (관리자 메일 `swexpert@samsung.com` 만 있음, 공개 정보) |
+| `tests/fixtures/problem_detail_regular.html` | TODO | 일반 `problemDetail.do` 페이지 (번호 노출 확인용) — 일반 문제(예: 목록의 `27008`)로 열어야 함 |
