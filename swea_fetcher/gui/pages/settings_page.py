@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QCheckBox,
     QFileDialog,
     QFrame,
@@ -79,7 +80,7 @@ class SettingsPage(QWidget):
         g.setColumnMinimumWidth(0, 96)
         self.root_edit = QLineEdit()
         self.root_edit.setObjectName("RootInput")
-        self.root_edit.setPlaceholderText(str(Path.home() / "Desktop" / "swea"))
+        self.root_edit.setPlaceholderText("예: C:\\Users\\<you>\\Desktop\\swea")
         browse = QPushButton("찾아보기")
         browse.clicked.connect(self._browse)
         row = QHBoxLayout()
@@ -117,7 +118,7 @@ class SettingsPage(QWidget):
         g.addLayout(row, r, 1)
         r += 1
         h1 = QLabel("swea\\{주제}\\{번호}\\ 가 만들어질 상위 폴더")
-        set_class(h1, "muted")
+        set_class(h1, "hint")
         g.addWidget(h1, r, 1)
         g.addWidget(self.root_err, r + 1, 1)
         r += 2
@@ -129,7 +130,7 @@ class SettingsPage(QWidget):
         g.addLayout(pw_row, r, 1)
         r += 1
         h2 = QLabel("Windows 자격 증명 관리자에만 저장됩니다. 이미 저장돼 있으면 비워 두어도 됩니다")
-        set_class(h2, "muted")
+        set_class(h2, "hint")
         h2.setWordWrap(True)
         g.addWidget(h2, r, 1)
         g.addWidget(self.pw_err, r + 1, 1)
@@ -158,6 +159,7 @@ class SettingsPage(QWidget):
         self.timeout.setRange(1, 120)
         self.timeout.setSuffix(" 초")
         self.timeout.setFixedWidth(96)
+        self.timeout.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)  # 스핀 버튼이 높이 제약에 깨져 보임 (W5)
         self.timeout.setValue(int(float(self.qs.value("check/timeout", 10.0, type=float))))
         self.timeout.valueChanged.connect(self._timeout_changed)
         lt = QLabel("타임아웃")
@@ -165,7 +167,7 @@ class SettingsPage(QWidget):
         lt.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         lt.setBuddy(self.timeout)
         th = QLabel("풀이 실행 제한 시간")
-        set_class(th, "muted")
+        set_class(th, "hint")
         g2.addWidget(lt, 0, 0)
         g2.addWidget(self.timeout, 0, 1)
         g2.addWidget(th, 0, 2)
@@ -215,7 +217,9 @@ class SettingsPage(QWidget):
     def set_settings(self, settings: Settings | None) -> None:
         self.settings = settings
         values = config.read_env_file(self.config_dir)
-        self.root_edit.setText(str(settings.root) if settings else (values.get("SWEA_ROOT") or ""))
+        default_root = Path.home() / "Desktop" / "swea"
+        fallback = values.get("SWEA_ROOT") or (str(default_root) if default_root.is_dir() else "")
+        self.root_edit.setText(str(settings.root) if settings else fallback)
         self.id_edit.setText(settings.user_id if settings else (values.get("SWEA_ID") or ""))
         self.pw_edit.clear()
 

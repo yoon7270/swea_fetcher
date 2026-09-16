@@ -79,14 +79,14 @@ class CheckPage(QWidget):
         self.topic = QComboBox()
         self.topic.setObjectName("TopicCombo")
         self.topic.setEditable(True)
-        self.topic.setMinimumWidth(200)
+        self.topic.setMinimumWidth(160)
         self.topic.lineEdit().setPlaceholderText("주제")
         self.topic.setAccessibleName("주제 폴더")
         self.num = QLineEdit()
         self.num.setObjectName("NumInput")
         set_class(self.num, "mono")
         self.num.setPlaceholderText("번호")
-        self.num.setFixedWidth(120)
+        self.num.setFixedWidth(100)
         self.num.setAccessibleName("문제 번호")
         self.run_btn = QPushButton("실행")
         set_class(self.run_btn, "primary")
@@ -101,16 +101,18 @@ class CheckPage(QWidget):
         grid.addWidget(self.num, 0, 3)
         grid.addWidget(self.run_btn, 0, 4)
         grid.setColumnStretch(5, 1)
+        self._grid = grid
+        self._run_on_row2 = False
         # 입력창이 드롭을 가로채 파일 경로를 텍스트로 넣지 않도록 — 드롭은 페이지(dropEvent)가 처리한다
         for w in (self.topic, self.topic.lineEdit(), self.num, self.run_btn):
             w.setAcceptDrops(False)
-        self.hint = QLabel(f"또는 .py 파일을 이 창에 끌어다 놓으세요 · 타임아웃 {self.timeout():.0f}초 (설정에서 변경)")
-        set_class(self.hint, "muted")
-        grid.addWidget(self.hint, 1, 1, 1, 5)
+        self.hint = QLabel(self._hint_text())
+        set_class(self.hint, "hint")
+        grid.addWidget(self.hint, 2, 1, 1, 5)
         self.err_label = QLabel()
         set_class(self.err_label, "error")
         self.err_label.hide()
-        grid.addWidget(self.err_label, 2, 1, 1, 5)
+        grid.addWidget(self.err_label, 3, 1, 1, 5)
         root.addWidget(self.form_card)
 
         holder = QWidget()
@@ -152,8 +154,23 @@ class CheckPage(QWidget):
     def timeout(self) -> float:
         return float(self.qs.value("check/timeout", DEFAULT_TIMEOUT, type=float))
 
+    def _hint_text(self) -> str:
+        return f"또는 .py 파일이나 {{번호}} 폴더를 이 창에 끌어다 놓으세요 · 타임아웃 {self.timeout():.0f}초 (설정에서 변경)"
+
     def refresh_hint(self) -> None:
-        self.hint.setText(f"또는 .py 파일을 이 창에 끌어다 놓으세요 · 타임아웃 {self.timeout():.0f}초 (설정에서 변경)")
+        self.hint.setText(self._hint_text())
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        """창 너비 < 880 (= 페이지 너비 < 700, 사이드바 148 제외) 이면 [실행] 을 행2 로 내린다 (스펙 §6.2·§11, W2)."""
+        super().resizeEvent(e)
+        narrow = self.width() < 700
+        if narrow != self._run_on_row2:
+            self._grid.removeWidget(self.run_btn)
+            if narrow:
+                self._grid.addWidget(self.run_btn, 1, 1, 1, 1, Qt.AlignmentFlag.AlignLeft)
+            else:
+                self._grid.addWidget(self.run_btn, 0, 4)
+            self._run_on_row2 = narrow
 
     def _clear_invalid(self) -> None:
         set_invalid(self.num, False)
@@ -187,6 +204,8 @@ class CheckPage(QWidget):
         for w in (self.topic, self.num):
             w.setEnabled(not busy)
         self.run_btn.setEnabled(not busy)
+        if busy:
+            self.setFocus()
         self.run_btn.setText("실행 중…" if busy else "실행")
         self.busy.setVisible(busy)
         self.busy_changed.emit(busy, "검증 중…" if busy else "")

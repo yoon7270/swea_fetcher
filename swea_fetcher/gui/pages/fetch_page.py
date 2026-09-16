@@ -22,7 +22,7 @@ from ... import service
 from ...config import Settings
 from ...service import FetchOptions, FetchOutcome
 from ..theme import tokens
-from ..widgets import Badge, Banner, LogView, make_busy_bar, open_in_explorer, open_with_default_app, set_class, set_invalid, svg_icon
+from ..widgets import Badge, Banner, ElidedLabel, LogView, make_busy_bar, open_in_explorer, open_with_default_app, set_class, set_invalid, svg_icon
 from ..workers import FetchWorker
 
 
@@ -63,7 +63,7 @@ class FetchPage(QWidget):
         title = QLabel("문제 저장")
         set_class(title, "title")
         keys = QLabel("Enter 저장 · Ctrl+Enter 미리보기 · Esc 로그 지우기")
-        set_class(keys, "muted")
+        set_class(keys, "hint")
         head.addWidget(title)
         head.addStretch(1)
         head.addWidget(keys)
@@ -93,7 +93,7 @@ class FetchPage(QWidget):
         self.topic.lineEdit().setPlaceholderText("BFS, IM_test …")
         self.topic.setAccessibleName("주제 폴더")
         topic_hint = QLabel("루트 아래 폴더 이름")
-        set_class(topic_hint, "muted")
+        set_class(topic_hint, "hint")
         l1, l2 = QLabel("문제 번호"), QLabel("주제")
         for lab, w in ((l1, self.target), (l2, self.topic)):
             lab.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -150,9 +150,8 @@ class FetchPage(QWidget):
         th.addWidget(self.card_badge)
         th.addWidget(self.card_title, 1)
         cl.addLayout(th)
-        self.card_path = QLabel()
+        self.card_path = ElidedLabel()  # 긴 경로 가운데 생략, 가로 스크롤 방지 (W6)
         set_class(self.card_path, "mono")
-        self.card_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         cl.addWidget(self.card_path)
         self.card_files = _FileRows()
         cl.addWidget(self.card_files)
@@ -207,6 +206,8 @@ class FetchPage(QWidget):
         for w in (self.preview_btn, self.target, self.topic, self.force, self.skeleton, self.refresh):
             w.setEnabled(not busy)
         self.run_btn.setEnabled(not busy)
+        if busy:
+            self.setFocus()
         self.run_btn.setText("저장 중…" if busy and self._last_args and not self._last_args[2].dry_run else "저장")
         self.busy.setVisible(busy)
         self.busy_changed.emit(busy, "저장 중…" if busy else "")
@@ -217,7 +218,7 @@ class FetchPage(QWidget):
         self.err_label.hide()
 
     def _esc(self) -> None:
-        if self.banner.isVisible() and self.banner.hasFocus():
+        if self.banner.isVisible():  # 배너는 포커스를 받지 않으므로 표시 여부로 판단 (§10)
             self.banner.hide()
         else:
             self.log.clear()
@@ -333,14 +334,19 @@ class FetchPage(QWidget):
             for name, src in plan:
                 path = r.problem_dir / name
                 if path in written:
-                    desc = "뼈대 생성" if name.endswith(".py") else ("빈 파일" if skel else f"{_fmt_size(path)}, 원본 {src}")
+                    if name.endswith(".py"):
+                        desc = _ui("뼈대 생성")
+                    elif skel:
+                        desc = _ui("빈 파일")
+                    else:
+                        desc = f"{_fmt_size(path)}, {_ui('원본')} {_esc(src)}"
                     badge = _badge_html("생성", p.surface_alt, p.text_2)
                 elif path in skipped:
-                    desc = "기존 파일 유지"
+                    desc = _ui("기존 파일 유지")
                     badge = _badge_html("유지", p.surface_alt, p.text_2)
                 else:
                     continue
-                rows.append((f"{_pad(name)} ({_esc(desc)}) {badge}", None))
+                rows.append((f"{_pad(name)} ({desc}) {badge}", None))
             self.card_files.set_rows(rows)
             self.card_note.setVisible(skel)
             self.card_note.setText(f"샘플은 문제 페이지에서 직접 {s.input_name} 에 붙여넣으세요")
@@ -456,6 +462,11 @@ def _esc(s: str) -> str:
 def _pad(name: str, width: int = 12) -> str:
     """고정폭 글꼴에서 열을 맞추기 위한 공백 패딩 (nbsp)."""
     return _esc(name) + "&nbsp;" * max(1, width - len(name))
+
+
+def _ui(text: str) -> str:
+    """mono 행 안의 한글 설명은 UI 글꼴로 (스펙 §2.2 — Consolas 에 한글 글리프 없음)."""
+    return f"<span style='font-family:{tokens.FONT_FAMILY}'>{_esc(text)}</span>"
 
 
 def _badge_html(text: str, bg: str, fg: str) -> str:

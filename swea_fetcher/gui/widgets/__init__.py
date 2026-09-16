@@ -12,9 +12,10 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QStyledItemDelegate,
     QStyle,
@@ -198,6 +199,35 @@ class Badge(QLabel):
         self.show()
 
 
+# --- ElidedLabel (§5.10 경로 줄) -------------------------------------------------------
+
+
+class ElidedLabel(QLabel):
+    """가로 정책 Ignored + 가운데 생략. 긴 경로가 가로 스크롤을 만들지 않는다. 툴팁 = 전문."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._full = ""
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        self._full = text
+        self.setToolTip(text)
+        self._refresh()
+
+    def fullText(self) -> str:  # noqa: N802
+        return self._full
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        self._refresh()
+
+    def _refresh(self) -> None:
+        w = max(self.width() - 4, 40)
+        super().setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideMiddle, w))
+
+
 # --- EmptyState (§5.11) ---------------------------------------------------------------
 
 
@@ -275,10 +305,11 @@ class LogView(QWidget):
     def append(self, msg: str, error: bool = False) -> None:
         self._n += 1
         stamp = datetime.now().strftime("%H:%M:%S")
+        ts = f"<span style='font-family:{tokens.FONT_MONO}'>{stamp}</span>"
         if error:
-            self.text.appendHtml(f"<span style='color:{tokens.LIGHT.error_text}'>{stamp}  {_esc(msg)}</span>")
+            self.text.appendHtml(f"<span style='color:{tokens.LIGHT.error_text}'>{ts}  {_esc(msg)}</span>")
         else:
-            self.text.appendPlainText(f"{stamp}  {msg}")
+            self.text.appendHtml(f"{ts}  {_esc(msg)}")
         if not self.toggle.isChecked():
             self.toggle.setText(f"▶ 로그 ({self._n}줄)")
 
@@ -302,10 +333,14 @@ class _BackgroundDelegate(QStyledItemDelegate):
         bg = index.data(Qt.ItemDataRole.BackgroundRole)
         if bg is not None:
             painter.fillRect(option.rect, bg)
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
         opt = option
         opt.state &= ~QStyle.StateFlag.State_Selected
         opt.backgroundBrush = Qt.BrushStyle.NoBrush
         super().paint(painter, opt, index)
+        if selected and index.column() == 0:  # 선택 표시: 행 왼쪽 2px primary 세로선 (diff 색을 덮지 않게, 스펙 §5.9)
+            r = option.rect
+            painter.fillRect(r.left(), r.top(), 2, r.height(), QColor(tokens.LIGHT.primary))
 
 
 class DiffView(QTableWidget):
@@ -324,10 +359,19 @@ class DiffView(QTableWidget):
         self.verticalHeader().hide()
         self.verticalHeader().setDefaultSectionSize(tokens.CONTROL_H_SM)
         self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.setSelectionMode(QTableWidget.SelectionMode.NoSelection)  # 선택색이 diff 색을 가리지 않도록
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)  # 선택·복사 가능 (스펙 §10)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setShowGrid(False)
         self.setItemDelegate(_BackgroundDelegate(self))
+
+    def keyPressEvent(self, e) -> None:  # noqa: N802
+        """Ctrl+C = 선택 행의 '실제' 열 텍스트를 줄바꿈으로 이어 클립보드에."""
+        if e.matches(QKeySequence.StandardKey.Copy):
+            rows = sorted({i.row() for i in self.selectedIndexes()})
+            lines = [(self.item(r, 2).text() if self.item(r, 2) else "") for r in rows]
+            QApplication.clipboard().setText("\n".join(l for l in lines if l != "—"))
+            return
+        super().keyPressEvent(e)
 
     def set_rows(self, rows: list[tuple[str, str | None, str | None]]) -> int:
         """행을 채우고 첫 불일치 행 인덱스(없으면 -1)를 돌려준다. 첫 불일치 행으로 스크롤·선택."""
@@ -339,8 +383,8 @@ class DiffView(QTableWidget):
         for i, (kind, e, a) in enumerate(shown):
             mark = self._MARK[kind]
             num_txt = f"{i + 1} {mark}".strip()
-            exp_txt = e if e is not None else "(없음)"
-            act_txt = a if a is not None else "(없음)"
+            exp_txt = e if e is not None else "—"
+            act_txt = a if a is not None else "—"
             for col, val in enumerate((num_txt, exp_txt, act_txt)):
                 item = QTableWidgetItem(val)
                 item.setBackground(colors[kind])

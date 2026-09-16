@@ -67,6 +67,8 @@ class HistoryPage(QWidget):
         self.table.setHorizontalHeaderLabels(["번호", "제목", "주제", "저장 시각"])
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hh.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)  # S1
+        self.table.horizontalHeaderItem(0).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.table.setColumnWidth(0, 80)
         self.table.setColumnWidth(2, 120)
         self.table.setColumnWidth(3, 140)

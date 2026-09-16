@@ -87,8 +87,9 @@ class MainWindow(QMainWindow):
         self.status_login = QLabel("○ 세션 없음")
         self.status_login.setObjectName("LoginState")
         set_class(self.status_login, "login", "none")
-        self.status_root = QLabel("")
-        set_class(self.status_root, "muted")
+        self.status_root = QLabel("")  # 상태바 permanent 위젯은 Ignored 정책이 0폭으로 눌리므로 고정폭 elide 사용
+        set_class(self.status_root, "hint")
+        self.status_root.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         sb = self.statusBar()
         sb.addWidget(self.status_login)
         sb.addPermanentWidget(self.status_root)
@@ -168,7 +169,7 @@ class MainWindow(QMainWindow):
         self.status_login.setText("● 로그인됨" if cached else "○ 세션 없음")
         set_class(self.status_login, "login", "ok" if cached else "none")
         root = str(self.settings.root)
-        self.status_root.setText(root if len(root) <= 48 else root[:20] + "…" + root[-25:])
+        self.status_root.setText(self.status_root.fontMetrics().elidedText(root, Qt.TextElideMode.ElideMiddle, 360))
         self.status_root.setToolTip(root)
 
     # --- 창 상태 ------------------------------------------------------------------------

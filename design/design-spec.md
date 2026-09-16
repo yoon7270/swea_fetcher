@@ -64,7 +64,8 @@
 ### 2.2 타이포그래피
 
 - UI 글꼴: `"Malgun Gothic", "Segoe UI", sans-serif`
-- 고정폭: `Consolas, "Cascadia Mono", monospace` — 로그, 경로, diff, 미리보기 3줄, 문제 번호 입력창
+- 고정폭: `Consolas, "Cascadia Mono", monospace` — 경로, 파일명, diff 값, 미리보기 3줄, 문제 번호 입력창, 로그의 타임스탬프
+- **mono 사용 범위 규칙 (M4 검토 W1 로 추가)**: 고정폭에는 코드·경로·파일명·숫자·기호만 둔다. **한글 문장은 mono 금지** — Consolas 에 한글 글리프가 없어 폴백 글꼴로 크기가 달라진다. 로그 본문, 파일 행의 설명("원본 …", "뼈대 생성"), diff 의 빈 값 표시(`—` 기호 사용, "(없음)" 금지)는 UI 글꼴. 한 줄 안에 섞일 때는 `<span style='font-family:…'>` 로 부분 지정한다. 한글 지원 고정폭(D2Coding) 번들은 하지 않는다.
 - **번들 안 함 결정**: Pretendard 를 번들하면 PyInstaller 산출물 +2MB 와 폰트 로딩 코드가 생긴다. Malgun Gothic 은 Win10/11 기본 탑재라 배포 부담이 0. 한글 가독성은 13px 이상에서 충분하다. (다크·브랜딩 필요가 생기면 재검토)
 - Malgun Gothic 은 Bold(700) 만 있어 `semibold(600)` 지정 시 700 으로 렌더된다 — 의도된 허용.
 
@@ -127,7 +128,7 @@ QMainWindow  880×600 (min 720×480)   배경 bg
 │             ├─ 페이지 본문 …
 │             └─ (페이지별) 로그 영역
 └─ QStatusBar (h 26, surface, border-top)
-     ├─ 좌: QLabel[class=login]  "● 로그인됨" (state=ok, success_text) / "○ 세션 없음" (state=none, text_muted)
+     ├─ 좌: QLabel[class=login]  "● 로그인됨" (state=ok, success_text) / "○ 세션 없음" (state=none, text_muted) / "○ 설정 없음" (state=none, ConfigMissing 일 때)
      ├─ 중: showMessage() 임시 메시지 (4초 후 자동 소거)
      └─ 우: 루트 경로 QLabel[class=hint], 중간 생략(elide middle), 전체 경로는 툴팁
 ```
@@ -203,15 +204,16 @@ QMainWindow  880×600 (min 720×480)   배경 bg
 - `success` "통과" · `error` "실패" / "시간 초과" · `warning` "기대 출력 없음" / "이미 있음" · `running` "실행 중…" · `idle` "대기" / "생성" / "유지" / "미리보기".
 
 ### 5.8 LogView (`widgets.LogView`, 본문 QPlainTextEdit#log)
-- 배경 `surface_sunken`, border 1px, radius 6, 고정폭 sm, 글자 `text_secondary`, padding 8, 읽기 전용, 자동 스크롤.
-- 헤더: QToolButton "▾ 로그" / "▸ 로그" — 접기/펼치기, 접힘 상태 QSettings 기억. 오른쪽 QToolButton [지우기]. Esc = 지우기.
-- 한 줄 형식: `[HH:MM:SS] 메시지`. 예외의 traceback 은 여기만, 색 `danger_text`. 비밀번호·쿠키는 어떤 경우에도 표시 금지 (worker 가 필터).
+- 배경 `surface_sunken`, border 1px, radius 6, **UI 글꼴 sm** (본문이 한국어 문장이므로 — §2.2 규칙), 글자 `text_secondary`, padding 8, 읽기 전용, 자동 스크롤.
+- 헤더: QToolButton "▼ 로그" / "▶ 로그 (n줄)" (`▾/▸` 는 맑은 고딕에 글리프 없음) — 접기/펼치기, 접힘 상태 QSettings 기억. 오른쪽 QToolButton [지우기].
+- 한 줄 형식: `HH:MM:SS  메시지` — 타임스탬프만 mono span. 예외의 traceback 은 여기만, 색 `danger_text`. 비밀번호·쿠키는 어떤 경우에도 표시 금지 (worker 가 필터).
 - 빈 상태 플레이스홀더: "진행 로그가 여기에 표시됩니다" (`setPlaceholderText`).
 - 높이 기본 140, 최소 80. 창 높이 < 560 이면 기본 접힘.
 
 ### 5.9 DiffView (QTableWidget#diff, `widgets.DiffView`)
 - 열: `#`(줄 번호, w 40, `text_muted`) · `기대`(stretch) · `실제`(stretch). 고정폭 sm, 행 h 28, 헤더 `surface_sunken` xs.
-- 행 종류별 배경(BackgroundRole) + **줄 번호 열의 마커 문자** (색 단독 금지):
+- 행 종류별 배경(커스텀 델리게이트가 `BackgroundRole` 을 직접 칠함 — QSS `::item` 이 있으면 Qt 가 무시하므로) + **줄 번호 열의 마커 문자** (색 단독 금지):
+- 선택·복사 가능해야 한다(§10). 선택 표시는 배경색 대신 **행 왼쪽 2px `primary` 세로선** (diff 색을 덮지 않게). Ctrl+C = 선택 행의 "실제" 열 텍스트 복사.
 
 | kind | 배경 | `#` 열 표시 | 실제 열 |
 |---|---|---|---|
@@ -228,7 +230,9 @@ QMainWindow  880×600 (min 720×480)   배경 bg
 
 ### 5.10 ResultCard (QFrame[class=card])
 - surface, border 1px, radius 6, padding 16, 내부 spacing 8.
-- 구조 §6.1 참고. 파일 행은 고정폭 sm 3줄 (rich text 로 그릴 때 색은 `tokens.LIGHT.*` 만 사용), 각 줄 앞 상태 표시는 **기호 + 단어** — `●` `success` "생성" / `○` `text_3` "기존 파일 유지" / `●` `warning` "덮어씀".
+- 구조 §6.1 참고. 파일 행은 행마다 QLabel(rich text, 색은 `tokens.LIGHT.*` 만) — 파일명·크기·원본 파일명은 mono, 한글 설명은 UI 글꼴 span (§2.2).
+- 행 끝 상태 표기는 pill 이 아니라 **대괄호 + 단어 + 색** (Qt rich text 가 span 의 radius/padding 을 못 그림): `[생성]` `[유지]` `text_2` / `[덮어씀]` `[이미 있음]` `warning_text`. 색 단독 아님.
+- 경로 줄은 `QLabel` 을 `Ignored` 가로 정책 + `elidedText(ElideMiddle)` 로 그려 가로 스크롤을 만들지 않는다. 전체 경로는 툴팁.
 
 ### 5.11 EmptyState
 - 중앙 정렬, 아이콘 없음(내비 아이콘 재활용 금지 — 의미 혼동). `QLabel[class=empty-title]`(md, `text_secondary`) + `QLabel[class=empty-body]`(sm, `text_muted`) + 선택적 secondary 버튼 1개. 세로 간격 8, 버튼 위 16.
@@ -272,7 +276,7 @@ QWidget#page  (VBox, margin 24, spacing 16)
 | 대기 | 결과 슬롯 = EmptyState 없음(빈 공간), 로그 플레이스홀더. 번호 입력에 포커스. |
 | 진행 중 | Busy 막대 표시, [저장]→"저장 중…" disabled, [미리보기] disabled, 입력 3개 disabled. 로그에 progress 메시지 append. 상태바 임시 메시지 = 마지막 progress. 창 제목 "— 저장 중…". |
 | 성공 | Busy 숨김, 컨트롤 복원, 결과 슬롯 = ResultCard:<br>`[status-success 16] 25730. 항아리 게임` (md semibold)<br>경로 `C:\…\swea\IM_test\25730\` (mono sm, elide middle, 툴팁 전체)<br>`● input.txt — 생성 (1.2 KB, 원본 sample_input.txt)`<br>`● output.txt — 생성 (0.4 KB, 원본 sample_output.txt)`<br>`● 25730.py — 뼈대 생성` / 기존이면 `○ 25730.py — 기존 파일 유지`<br>버튼 행: [폴더 열기] [PyCharm 에서 열기] (secondary). 상태바 "저장 완료 · 25730".<br>notices(주제 이름 안내)가 있으면 카드 위에 **warning 배너** "기존 폴더 'BFS' 를 사용했습니다 (입력 'bfs')". 뼈대만이면 카드 아래 sm `text_secondary` "샘플은 문제 페이지에서 직접 input.txt 에 붙여넣으세요". |
-| 미리보기(dry-run) | ResultCard 제목 앞 배지 `idle` "미리보기". 파일 행에 `← sample_input.txt (1.2 KB)` + 아래 mono sm 3줄 미리보기(`surface_sunken` 블록, padding 8). 이미 있는 파일은 배지 `warning` "이미 있음". 버튼 행: [이대로 저장](primary sm — 덮어쓰기 필요하면 라벨 "덮어쓰고 저장"). 이 화면에서만 primary 가 2개가 되므로 폼의 [저장] 은 disabled 유지 → 실질 1개. |
+| 미리보기(dry-run) | ResultCard 제목 앞 배지 `idle` "미리보기". 파일 행에 `← sample_input.txt (1.2 KB)` + 아래 mono sm 3줄 미리보기(`surface_sunken` 블록, padding 8). 이미 있는 파일은 배지 `warning` "이미 있음". 버튼 행: [이대로 저장](primary sm — 충돌이 있으면 라벨 "덮어쓰고 저장"). 폼의 [저장] 과 primary 가 2개가 되지만 블록이 다르고 라벨이 달라 혼동이 없음을 실측 확인 — 폼 [저장] 은 활성 유지 (M4 검토 S8). |
 | 오류 | 배너 (§9). 결과 슬롯은 이전 내용 제거. 포커스는 원인 필드(InvalidInput→번호 입력)로. |
 | 입력 검증 실패 | 번호 비어 있음 → 입력 invalid + "문제 번호 또는 URL 을 입력하세요". 주제 비어 있음 → 콤보 invalid + "주제 폴더 이름을 입력하세요". 워커를 띄우지 않는다. |
 
@@ -294,7 +298,8 @@ QWidget#Page
 └─ (로그 없음 — 결과 탭이 로그 역할. 실행 로그가 필요하면 stderr 탭)
 ```
 
-드래그앤드롭: 창 전체가 drop target. `.py` 드롭 → 부모 폴더에서 주제·번호를 추출해 폼 채움 + 즉시 실행하지 않음(사용자가 [실행]). 드래그 중 카드 테두리 2px `primary` (dashed 불가 시 solid).
+드래그앤드롭: 페이지 전체가 drop target. **`.py` 파일 또는 `{번호}` 폴더** 드롭 → `{주제}\{번호}` 에서 주제·번호를 추출해 폼 채움 + 즉시 실행하지 않음(사용자가 [실행]). 자식 입력창은 드롭을 받지 않는다(경로가 텍스트로 들어간 사고 방지). 규칙에 맞지 않는 항목을 놓으면 warning 배너 "{주제}\{번호}\ 폴더 안의 .py 파일(또는 폴더)을 끌어다 놓으세요" + 본문 "놓은 항목: …". 드래그 중 카드 테두리 2px `primary` (`[state="drop"]`). 힌트 문구: "또는 .py 파일이나 {번호} 폴더를 이 창에 끌어다 놓으세요 · 타임아웃 N초 (설정에서 변경)".
+너비 < 880 에서 행1 이 넘치면 [실행] 을 행2 로 내린다 (720 에서 콤보 200 + 번호 120 + 버튼 96 은 넘침 — M4 검토 W2).
 
 **상태**
 
@@ -345,7 +350,7 @@ QWidget#Page  (QScrollArea 안에 — 최소 높이 480 에서 잘림 방지)
 │       │                 QLabel[class=hint] "Windows 자격 증명 관리자에만 저장됩니다. 이미 저장돼 있으면 비워 두어도 됩니다"
 │       └─ 버튼 행: [저장 후 로그인 확인](primary)  [저장만](secondary)
 ├─ 섹션 "검증"
-│   └─ QFrame[class=card]: "타임아웃"  QSpinBox (w 96, 초, 1~120, 기본 10)  QLabel[class=hint] "풀이 실행 제한 시간"
+│   └─ QFrame[class=card]: "타임아웃"  QSpinBox (w 96, 접미 " 초", 1~120, 기본 10, **스핀 버튼 없음** — 타이핑·방향키로 변경)  QLabel[class=hint] "풀이 실행 제한 시간"
 └─ 섹션 "세션·계정 삭제"
     └─ QFrame[class=card]
         ├─ 행: QLabel "저장된 로그인 세션만 지웁니다. 계정 정보는 유지"   [세션 삭제](secondary)
@@ -405,12 +410,15 @@ QWidget#Page  (QScrollArea 안에 — 최소 높이 480 에서 잘림 방지)
 
 `AlreadyExists`·`AttachmentNotFound` 는 "실패"가 아니라 "선택이 필요한 상황"이므로 warning 이다. 배너의 재실행 버튼은 폼의 체크박스 상태도 함께 바꾼다 (덮어쓰기 체크 on) — 사용자가 무엇이 달라졌는지 보게.
 
+조치 버튼 키 (구현 `Banner.action_clicked(key)`): `force` 덮어쓰고 다시 저장 · `skeleton` 뼈대만 저장 · `refresh` 색인 새로고침 후 재시도 · `retry` 다시 시도 · `settings` 설정으로 이동 · `fetch` 저장 페이지로 · `log` 로그 보기. 배너당 최대 2개, 본문 아래 오른쪽 정렬 행.
+
 ---
 
 ## 10. 키보드·접근성
 
 - 탭 순서(저장): 번호 → 주제 → 덮어쓰기 → 뼈대만 → 색인 → [저장] → [미리보기] → 결과 카드 버튼 → 로그 토글. 내비는 Ctrl+1~4 (Tab 순서에서는 맨 앞).
-- 단축키: Enter = 저장(번호·주제 입력에서), Ctrl+Enter = 미리보기, Esc = 로그 지우기(저장 페이지) / 배너 닫기(배너에 포커스일 때), F5 = 최근 새로고침, Ctrl+, = 설정.
+- 단축키: Enter = 저장(번호·주제 입력에서), Ctrl+Enter = 미리보기, Esc(저장 페이지) = **배너가 보이면 배너 닫기, 아니면 로그 지우기** (배너는 포커스를 받지 않으므로 표시 여부로 판단), F5 = 최근 새로고침, Ctrl+, = 설정, Ctrl+1~4 = 페이지.
+- 내비 `QListWidget#nav` 는 Fusion 기본 포커스 점선을 유지한다 (`outline: 0` 금지) — 키보드 포커스 위치가 보여야 함.
 - 모든 입력에 `setBuddy` 레이블 + `setAccessibleName`. 아이콘 전용 버튼(배너 ×)에 `setToolTip` + `setAccessibleName("닫기")`.
 - 포커스 링: 모든 포커스 가능 위젯에서 2px `primary` 가시. Qt 기본 점선 outline 은 QSS 로 제거하지 않는다(중복 허용).
 - 색 단독 의미 전달 금지 체크: 배너(아이콘+제목), 배지(텍스트), diff(마커), 로그인 상태(● / ○ 기호 차이 + 텍스트), 입력 오류(문구). ✓
@@ -474,7 +482,7 @@ HiDPI: 모든 값 px 토큰 → Qt 가 DPR 로 스케일. SVG 아이콘만 사�
 - 동적 프로퍼티를 바꾼 뒤 `style().unpolish(w); style().polish(w)` 필수 (`set_class` 가 이미 수행).
 - 포커스·invalid 시 테두리 1→2px 로 두꺼워지며 내부가 1px 밀리는 것을 막기 위해 QSS 에서 padding 을 1px 줄여 보정했다. 위젯 코드에서 padding 을 덮어쓰지 말 것.
 - 색·간격은 `tokens.LIGHT.<field>` / `tokens.SPACE` 배수 / `tokens.RADIUS*` 만. 위젯 코드에 `#RRGGBB` 리터럴이나 `setStyleSheet("…")` 인라인 금지. 예외 두 가지: diff 행 배경(`QColor(palette.diff_*)`), 결과 카드 rich text 색(`tokens.LIGHT.success` 등 — 리터럴 금지는 동일).
-- 현재 뼈대에서 스펙과 어긋나는 곳(정합성 검토 때 확인할 항목): `Banner.title.setStyleSheet("font-weight: 600;")` 인라인 → `class=banner-title` 로 교체. 배너에 상태 아이콘(16px, `design/icons/status-*.svg`) 추가. `DiffView` `#` 열에 마커 문자(`≠` `−` `+`) 추가.
+- 2026-09-17 정합성 검토 결과: 위 셀렉터 계약 준수 확인. 남은 수정 항목(builder 전달): W1 mono 한글 제거 · W2 검증 폼 720 폭 · W3 diff 선택/복사 · W4 `#nav` outline · W5 스핀 버튼 · W6 경로 elide.
 - Qt 미지원·대체안: 스피너 없음 → 진행 막대 + 버튼 라벨. 토스트 없음 → 상태바 메시지. 배너 닫기 × 는 `QToolButton` 텍스트 "✕". dashed 드롭 테두리 불가 시 solid 2px `primary`.
 - 진행 로그 시간 표기 `[HH:MM:SS]` 는 UI 스레드에서 붙인다(워커는 메시지만).
 
@@ -492,12 +500,12 @@ HiDPI: 모든 값 px 토큰 → Qt 가 DPR 로 스케일. SVG 아이콘만 사�
 
 ## 15. 미결·선택 사항
 
-- 다크 테마: 없음. 요청 시 `COLOR` dict 를 하나 더 두고 `render_qss` 에 넘기면 된다.
+- 다크 테마: 없음. 요청 시 `tokens.DARK` 에 `Palette` 를 채우고 `build_qss(DARK)` 로 넘기면 된다.
 - 작업 취소 버튼: `requests` 도중 취소가 안정적이지 않아 제외. 필요해지면 검증(subprocess kill)만 먼저.
 - `.ico` 생성은 빌드 단계(M4c). SVG 만 디자인 산출물.
 - Qt Designer `.ui` 파일: 만들지 않음. 레이아웃이 단순해 코드 레이아웃이 diff 리뷰에 유리.
 - `gui/theme/theme.qss`: 사용 안 함(builder 가 `build_qss()` 인라인 생성 방식을 택함). builder 가 삭제해도 된다.
-- 스펙 대체안 기록란 (builder 가 추가, 2026-09-16 M4b):
+- 스펙 대체안 기록란 (builder 가 추가, 2026-09-16 M4b) — **8건 모두 디자이너 승인 (2026-09-17)**. 조건: #2 는 `#nav` 의 `outline: 0` 제거(§10), #3 은 `NoSelection` 대신 선택·복사 허용(§5.9). 검토 전문은 builder 에게 전달한 Warning 6 / Suggestion 8 목록.
   1. **내비 위젯**: §3 의 `QToolButton[nav]` 대신 `QListWidget#nav` 사용 — `tokens.build_qss` 가 이미 `#nav` 셀렉터로 작성돼 있어 QSS 를 따름. 아이콘 재착색(§12)은 `QIcon.addPixmap(…, Selected)` 로 동일하게 구현.
   2. **포커스 규칙 2개 제거**: `QListWidget#nav:focus::item:selected` 와 `QCheckBox:focus::indicator` 는 Qt 가 위젯 전체 테두리로 해석해 리스트·체크박스 주위에 2px 파란 테두리가 항상 그려짐 → 제거하고 Fusion 기본 포커스 표시 사용 (`tokens.py` 주석).
   3. **DiffView 행 배경**: QSS `::item` 규칙이 있으면 Qt 가 `BackgroundRole` 을 무시 → `QStyledItemDelegate` 로 배경을 직접 칠하고(`widgets._BackgroundDelegate`), 선택 색이 diff 색을 덮지 않도록 `NoSelection`. 첫 불일치 행은 선택 대신 스크롤(가운데)로 표시.

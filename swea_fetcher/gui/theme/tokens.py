@@ -115,7 +115,7 @@ QLabel[class="app-title"] {{ font-size: {FONT_SIZE_MD}pt; font-weight: 600; padd
 
 /* ---------- 사이드바 내비 ---------- */
 QListWidget#nav {{
-    background: {p.surface}; border: none; border-right: 1px solid {p.border}; outline: 0;
+    background: {p.surface}; border: none; border-right: 1px solid {p.border};
     padding: 0 {s}px; min-width: {SIDEBAR_W}px; max-width: {SIDEBAR_W}px;
 }}
 QListWidget#nav::item {{
@@ -209,8 +209,9 @@ QLabel[class="badge"][state="idle"]    {{ background: {p.surface_alt}; color: {p
 /* ---------- 로그 / 코드 ---------- */
 QPlainTextEdit#log {{
     background: {p.surface_alt}; border: 1px solid {p.border}; border-radius: {RADIUS}px;
-    font-family: {FONT_MONO}; font-size: {FONT_SIZE_SM}pt; color: {p.text_2}; padding: {s}px;
+    font-family: {FONT_FAMILY}; font-size: {FONT_SIZE_SM}pt; color: {p.text_2}; padding: {s}px;
 }}
+/* (builder, W1) 로그 본문은 한국어 문장이라 UI 글꼴. 타임스탬프만 코드에서 mono span (§5.8) */
 
 /* ---------- 테이블 (최근 목록, diff) ---------- */
 QTableWidget, QTableView {{
@@ -255,4 +256,9 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
 /* ---------- 다이얼로그 ---------- */
 QMessageBox {{ background: {p.surface}; }}
 QMessageBox QLabel {{ min-width: 320px; }}
+/* ---------- builder 보강 (S7: app.py 에서 병합) ---------- */
+QFrame#Sidebar {{ background: {p.surface}; border-right: 1px solid {p.border}; }}
+QListWidget#nav {{ border-right: none; }}
+QFrame[class="card"][state="drop"] {{ border: 2px solid {p.primary}; }}
+QLabel#preview {{ background: {p.surface_alt}; color: {p.text_2}; border-radius: {RADIUS_SM}px; }}
 """
