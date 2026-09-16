@@ -1,0 +1,185 @@
+"""HTML → ProblemInfo. 선택자는 상단 상수에 모아 둔다 (사이트 변경 시 여기만 수정).
+
+페이지 종류 (docs/swea-page-notes.md):
+- "solver": 문제 풀기 화면. h3.problem_title = "25730. [07] 항아리 게임"  ← 번호가 있는 유일한 페이지
+- "club"  : Solving Club 상세. p.problem_title = "[07] 항아리 게임" (번호 없음)
+- "detail": 일반 문제 상세. 픽스처 미확보 — span.week_num / span.week_text 를 시도 (미검증)
+첨부: div.down_area a[href*="contestProbDown.do"], href 의 downType=in|out 으로 구분
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from urllib.parse import parse_qs, urljoin, urlparse
+
+from bs4 import BeautifulSoup, Tag
+
+from .errors import AttachmentNotFound, InvalidInput, ParseError
+from .models import ProblemInfo
+
+log = logging.getLogger("swea_fetcher.parser")
+
+BASE = "https://swexpertacademy.com"
+
+# --- 선택자 / 패턴 상수 ---------------------------------------------------------
+SEL_SOLVER_TITLE = "h3.problem_title"
+SEL_CLUB_TITLE = "p.problem_title"
+SEL_DETAIL_NUM = "span.week_num"
+SEL_DETAIL_TITLE = "span.week_text"
+SEL_ATTACH = 'div.down_area a[href*="contestProbDown.do"]'
+
+TITLE_RE = re.compile(r"^(\d+)\.\s*(?:\[\d+\]\s*)?(.+)$")  # "25730. [07] 항아리 게임"
+CLUB_TITLE_RE = re.compile(r"^\[(\d+)\]\s*(.+)$")  # "[07] 항아리 게임"
+CONTEST_PROB_ID_RE = re.compile(r"[A-Za-z0-9_-]{16}")
+
+PAGE_KINDS = ("solver", "club", "detail")
+
+
+# --- 입력 해석 ------------------------------------------------------------------
+
+
+def extract_contest_prob_id(text: str) -> str:
+    """URL 이든 ID 단독이든 contestProbId 를 뽑는다.
+
+    ① URL 쿼리 contestProbId=  ② 전체가 16자 패턴  ③ 문자열 안의 16자 패턴 (유일할 때만)
+    """
+    if text is None:
+        raise InvalidInput("입력이 비어 있습니다")
+    s = text.strip()
+    if not s:
+        raise InvalidInput("입력이 비어 있습니다")
+
+    # ① URL 쿼리
+    if "contestProbId" in s:
+        try:
+            qs = parse_qs(urlparse(s).query)
+        except ValueError:
+            qs = {}
+        vals = [v for v in qs.get("contestProbId", []) if CONTEST_PROB_ID_RE.fullmatch(v)]
+        if vals:
+            return vals[0]
+        m = re.search(r"contestProbId=([A-Za-z0-9_-]{16})(?![A-Za-z0-9_-])", s)
+        if m:
+            return m.group(1)
+
+    # ② 전체가 ID
+    if CONTEST_PROB_ID_RE.fullmatch(s):
+        return s
+
+    # ③ 문자열 안에 유일한 ID
+    found = sorted(set(re.findall(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{16}(?![A-Za-z0-9_-])", s)))
+    if len(found) == 1:
+        return found[0]
+    if len(found) > 1:
+        raise InvalidInput(f"contestProbId 후보가 여러 개입니다: {', '.join(found)}")
+    raise InvalidInput(f"contestProbId 를 찾을 수 없습니다: {s[:80]!r}")
+
+
+# --- 내부 도우미 ----------------------------------------------------------------
+
+
+def _own_text(tag: Tag) -> str:
+    """자식 태그(span.badge 등)를 제외한 태그 자신의 텍스트."""
+    return " ".join(t.strip() for t in tag.find_all(string=True, recursive=False) if t.strip())
+
+
+def _parse_solver_title(soup: BeautifulSoup) -> tuple[int, str]:
+    el = soup.select_one(SEL_SOLVER_TITLE)
+    if el is None:
+        raise ParseError(f"제목 요소를 찾지 못했습니다 ({SEL_SOLVER_TITLE})")
+    text = " ".join(el.get_text(" ", strip=True).split())
+    m = TITLE_RE.match(text)
+    if not m:
+        raise ParseError(f"제목에서 문제 번호를 찾지 못했습니다: {text!r}")
+    return int(m.group(1)), m.group(2).strip()
+
+
+def _parse_club_title(soup: BeautifulSoup) -> str:
+    el = soup.select_one(SEL_CLUB_TITLE)
+    if el is None:
+        raise ParseError(f"제목 요소를 찾지 못했습니다 ({SEL_CLUB_TITLE})")
+    text = " ".join(_own_text(el).split())
+    m = CLUB_TITLE_RE.match(text)
+    return (m.group(2) if m else text).strip()
+
+
+def _parse_detail_title(soup: BeautifulSoup) -> tuple[int | None, str]:
+    """일반 문제 페이지 — 픽스처 미확보라 미검증. 실패해도 예외 대신 (None, "")."""
+    num_el = soup.select_one(SEL_DETAIL_NUM)
+    title_el = soup.select_one(SEL_DETAIL_TITLE)
+    num: int | None = None
+    if num_el is not None:
+        m = re.match(r"^\s*(\d+)\.?", num_el.get_text(strip=True))
+        if m:
+            num = int(m.group(1))
+    title = title_el.get_text(" ", strip=True) if title_el is not None else ""
+    return num, title
+
+
+def _attachment_filename(a: Tag) -> str:
+    """<a> 안의 파일명. solver 페이지는 `<span>파일명</span><i><span class="hide">다운로드</span></i>`
+    구조라 숨은 라벨을 제외하고 첫 번째 span(또는 자신의 텍스트)만 쓴다."""
+    for span in a.find_all("span"):
+        if "hide" in (span.get("class") or []):
+            continue
+        text = span.get_text(strip=True)
+        if text:
+            return text
+    return _own_text(a) or a.get_text(strip=True)
+
+
+def _parse_attachments(soup: BeautifulSoup) -> dict[str, tuple[str, str]]:
+    """downType → (절대 URL, 파일명). 같은 타입이 여러 개면 첫 번째 + WARNING."""
+    result: dict[str, tuple[str, str]] = {}
+    for a in soup.select(SEL_ATTACH):
+        href = a.get("href") or ""
+        down_type = (parse_qs(urlparse(href).query).get("downType") or [""])[0].lower()
+        if down_type not in ("in", "out"):
+            continue
+        filename = _attachment_filename(a)
+        if down_type in result:
+            log.warning("첨부 %s 가 여러 개입니다. 첫 번째(%s)만 사용", down_type, result[down_type][1])
+            continue
+        result[down_type] = (urljoin(BASE, href), filename)
+    return result
+
+
+# --- 공개 API -------------------------------------------------------------------
+
+
+def parse(html: str, page_kind: str, contest_prob_id: str) -> ProblemInfo:
+    """페이지 HTML 을 ProblemInfo 로 바꾼다. 첨부 in/out 중 하나라도 없으면 AttachmentNotFound."""
+    if page_kind not in PAGE_KINDS:
+        raise ParseError(f"알 수 없는 page_kind: {page_kind!r}")
+    soup = BeautifulSoup(html, "lxml")
+
+    num: int | None
+    if page_kind == "solver":
+        num, title = _parse_solver_title(soup)
+    elif page_kind == "club":
+        num, title = None, _parse_club_title(soup)
+    else:
+        num, title = _parse_detail_title(soup)
+
+    attachments = _parse_attachments(soup)
+    missing = [k for k in ("in", "out") if k not in attachments]
+    if missing:
+        found = [v[1] for v in attachments.values()]
+        raise AttachmentNotFound(
+            f"첨부 링크가 없습니다 (누락: {', '.join(missing)}; 발견: {found or '없음'})",
+            found=found,
+        )
+
+    in_url, in_name = attachments["in"]
+    out_url, out_name = attachments["out"]
+    return ProblemInfo(
+        contest_prob_id=contest_prob_id,
+        num=num,
+        title=title,
+        input_url=in_url,
+        output_url=out_url,
+        input_filename=in_name,
+        output_filename=out_name,
+        page_kind=page_kind,
+    )
