@@ -4,7 +4,7 @@ SWEA(SW Expert Academy) 문제의 샘플 입출력 첨부를 받아 풀이 저�
 
 ```powershell
 swea-fetch init                 # 최초 1회: 계정 설정 + 로그인 확인
-swea-fetch 25730 IM_test        # 문제 번호 + 주제 폴더 → swea\IM_test¯30\ 에 3개 파일 생성
+swea-fetch 25730 IM_test        # 문제 번호 + 주제 폴더 → swea\IM_test\25730\ 에 3개 파일 생성
 swea-fetch 25730 IM_test --force
 ```
 
