@@ -50,18 +50,20 @@ def extract_contest_prob_id(text: str) -> str:
     if not s:
         raise InvalidInput("입력이 비어 있습니다")
 
-    # ① URL 쿼리
+    # ① URL 쿼리 — 키가 명시돼 있으면 그 값만 인정한다 (_menuId 등 다른 16자 토큰으로 흘러가지 않도록)
     if "contestProbId" in s:
         try:
-            qs = parse_qs(urlparse(s).query)
+            qs = parse_qs(urlparse(s).query, keep_blank_values=True)
         except ValueError:
             qs = {}
-        vals = [v for v in qs.get("contestProbId", []) if CONTEST_PROB_ID_RE.fullmatch(v)]
+        raw_vals = qs.get("contestProbId") or re.findall(r"contestProbId=([^&\s#]*)", s)
+        vals = [v for v in raw_vals if CONTEST_PROB_ID_RE.fullmatch(v)]
         if vals:
             return vals[0]
-        m = re.search(r"contestProbId=([A-Za-z0-9_-]{16})(?![A-Za-z0-9_-])", s)
-        if m:
-            return m.group(1)
+        if raw_vals:
+            raise InvalidInput(
+                f"contestProbId 값이 올바르지 않습니다: {raw_vals[0]!r} (16자 영숫자여야 합니다. 링크가 잘려 복사되지 않았는지 확인하세요)"
+            )
 
     # ② 전체가 ID
     if CONTEST_PROB_ID_RE.fullmatch(s):
@@ -126,7 +128,12 @@ def _attachment_filename(a: Tag) -> str:
         text = span.get_text(strip=True)
         if text:
             return text
-    return _own_text(a) or a.get_text(strip=True)
+    own = _own_text(a)
+    if own:
+        return own
+    # 폴백: 숨김 라벨(.hide)을 제외한 나머지 텍스트. 없으면 빈 문자열
+    visible = [t.strip() for t in a.find_all(string=True) if t.strip() and not t.find_parent(class_="hide")]
+    return " ".join(visible)
 
 
 def _parse_attachments(soup: BeautifulSoup) -> dict[str, tuple[str, str]]:
