@@ -5,7 +5,7 @@
 
 ## 로그인
 
-- **판정: (a) requests 폼 POST 로 가능** (JS 암호화·CSRF 토큰·캡차 없음. 단, 계정에 MFA 가 걸려 있으면 (b) 또는 수동 세션 주입 필요 — 사용자 계정 1회 로그인으로 확인 필요)
+- **판정: (a) requests 폼 POST 로 가능** (JS 암호화·CSRF 토큰·캡차 없음). 사용자 계정은 브라우저 로그인 시 2단계 인증 화면이 뜨지 않음을 확인(2026-09-16) → MFA 분기는 방어 코드로만 유지
 - 로그인 페이지: `GET /main/identity/anonymous/loginPage.do` (200, UTF-8)
 - 폼: `<form id="LoginForm" name="LoginForm" method="POST">` — `action` 속성 없음. 실제 전송은 JS `loginSecurityPledge()` 가 jQuery `$.ajax` 로 수행
   - **POST `/main/identity/anonymous/login.do`**, `application/x-www-form-urlencoded` (jQuery 기본), `dataType: json`
@@ -105,7 +105,7 @@ SWEA 에는 문제 관련 페이지가 **세 종류** 있고, 사용자의 실�
 
 ## 확정된 가정
 
-- A1-1: **확정(조건부)** — ID/PW 를 평문 form-urlencoded 로 `login.do` 에 POST 하면 JSON 으로 결과가 온다. 캡차·CSRF·JS 암호화 없음. 예외는 계정 단위 MFA(`message == "mfa"`) — 사용자 계정으로 1회 확인 필요. → `auth` 는 requests 만으로 구현, Playwright 불필요
+- A1-1: **확정** — ID/PW 를 평문 form-urlencoded 로 `login.do` 에 POST 하면 JSON 으로 결과가 온다. 캡차·CSRF·JS 암호화 없음. 사용자 계정에 MFA 없음 확인. → `auth` 는 requests 만으로 구현, Playwright 불필요
 - A2: **부분 확정 → 수정 필요** — 첨부는 (B)/(C) 모두 `div.down_area a[href*=contestProbDown.do]` 로 존재하고 `downType=in|out` 으로 입·출력이 구분된다. 단 **파일명은 `sample_input.txt` 고정이 아니라 `input7_sample.txt` 처럼 가변** → 파서는 파일명이 아니라 `downType` 으로 판별. 첨부 없는 문제의 형태는 미확인
 - A3: **확정 (단, 페이지 한정)** — 번호는 (C) 문제 풀기 화면의 `h3.problem_title` 에 `"25730. [07] 항아리 게임"` 형태로만 노출됨. (B) Solving Club 상세 페이지의 `p.problem_title` 은 `"[07] 항아리 게임"` 으로 번호가 없음. → `parse` 는 (C) 를 대상으로 하고, `--num` 은 예비 수단으로 유지
 
@@ -120,3 +120,9 @@ SWEA 에는 문제 관련 페이지가 **세 종류** 있고, 사용자의 실�
 | `tests/fixtures/problem_solver_page.html` | 저장됨 | (C) 문제 풀기 화면 (`solvingProblem.do`, "웹페이지, 전체" 저장). 실명·회원번호·제출 코드 치환 완료 |
 | `tests/fixtures/error_page.html` | 저장됨 | 잘못된 `contestProbId` 로 `problemDetail.do` 접근 시 시스템 오류 페이지. 계정 정보 없음 (관리자 메일 `swexpert@samsung.com` 만 있음, 공개 정보) |
 | `tests/fixtures/problem_detail_regular.html` | TODO | 일반 `problemDetail.do` 페이지 (번호 노출 확인용) — 일반 문제(예: 목록의 `27008`)로 열어야 함 |
+
+## M1 실측 과제 (미완 — M2 E2E 로 이월)
+
+- `POST /main/solvingProblem/solvingProblem.do` 에 `categoryId` 없이 `{contestProbId, categoryType=BOX, isPostMethod=Y}` 만 보내도 (C) 페이지가 오는지 — **미실측**. M1 시점에 `~/.swea-fetch/.env` 가 없어 실제 세션으로 확인하지 못함. `client.fetch_problem_page` 는 우선 이 형태로 POST 하고, 실패하면 `problemDetail.do` 로 폴백하도록 구현됨. M2 E2E 에서 안 되면 `parse.extract_contest_prob_id` 를 확장해 `categoryId`(=`probBoxId`) 도 받도록 할 것
+- `contestProbDown.do` 다운로드에 `Referer` 외 추가 헤더가 필요한지 — 미실측 (현재 `Referer: .../solvingProblem.do` 만 붙임)
+- 일반 (A) `problemDetail.do` 페이지의 번호·제목 선택자 — `span.week_num`/`span.week_text` 로 구현했으나 **미검증**
