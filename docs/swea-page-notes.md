@@ -133,3 +133,17 @@ E2E: `swea-fetch -v <첨부 링크 URL> _e2e_test` (문제 `AZq-gSmq_RfHBISS`, 2
 0 1 2 0...`). 사용자가 브라우저로 받아 둔 `input7_sample.txt` 와 바이트 단위 동일 (출력은 끝 줄바꿈만 도구가 추가) |
 | 세션 캐시 재사용 | `session.json` 복원 후 `GET userInformation.do` 200 → 재로그인 없이 진행됨 |
 | 일반 (A) `problemDetail.do` 페이지 선택자 | **여전히 미검증** (solver 경로가 먼저 성공하므로 폴백이 실행되지 않음). `span.week_num`/`span.week_text` 구현은 유지 |
+
+## Solving Club 색인 API (M2, 실제 세션으로 확인) — 문제 번호 → contestProbId
+
+주소창 URL 로는 문제를 특정할 수 없으므로(모든 클럽 화면이 POST 폼 이동), 문제 번호로 찾는 경로를 마련함. `lookup.py`.
+
+| 단계 | 요청 | 응답 |
+|---|---|---|
+| 내 클럽 | `POST /main/talk/solvingClub/myClubList.do`, 본문 `{}` (`Content-Type: application/json`) | `data.myClubList[] {solveclubId, title}` |
+| 클럽의 문제 상자 | `POST /main/talk/solvingClub/problemBoxList.do`, `{"solveclubId", "pageIndex"}` (JSON) | `data.problemBoxList[] {probBoxId, title}`, `data.endPage`. **최신순**. form-urlencoded 로 보내면 415 |
+| 상자의 문제 목록 | `GET /main/talk/solvingClub/problemBoxDetail.do?solveclubId=&probBoxId=` (GET 가능) | `div.header-caption` 마다 `input[name=checkContestProbId]`(ID), `span.week_num`(`"25730 ."`), `span.week_text a`(`[07] 항아리 게임` + 상태 badge) |
+
+- `clubView.do?solveclubId=` 도 GET 가능 (주소창에 노출되는 유일한 ID). `problemView.do`/`solvingProblem.do` 는 POST 전용
+- 일반 문제 목록 `problemList.do` 의 `problemTitle` 검색은 제목만 매칭 → 번호 검색 불가. 클럽 문제(25730)는 공개 목록에 없음
+- 성능: 상자 1개 스캔 ≈ 0.7초. 최신 상자부터 훑고 본 상자는 `problem_index.json` 에 캐시

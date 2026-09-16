@@ -3,9 +3,9 @@
 SWEA(SW Expert Academy) 문제의 샘플 입출력 첨부를 받아 풀이 저장소의 `swea\{주제}\{번호}\` 폴더 규칙대로 `input.txt`, `output.txt`, `{번호}.py` 뼈대를 한 번에 만들어 주는 명령줄 도구.
 
 ```powershell
-swea-fetch init                                                    # 최초 1회: 계정 설정 + 로그인 확인
-swea-fetch "https://swexpertacademy.com/...contestProbId=AZq-gSmq_RfHBISS" IM_test
-swea-fetch AZq-gSmq_RfHBISS BFS --force                            # ID 만 넣어도 됨, 덮어쓰기
+swea-fetch init                 # 최초 1회: 계정 설정 + 로그인 확인
+swea-fetch 25730 IM_test        # 문제 번호 + 주제 폴더 → swea\IM_test¯30\ 에 3개 파일 생성
+swea-fetch 25730 IM_test --force
 ```
 
 ## 설치
@@ -50,14 +50,23 @@ swea-fetch init
 swea-fetch <target> <topic> [--num N] [--force] [-v]
 ```
 
-### `target` — 문제를 가리키는 값 (3가지 중 아무거나)
+### `target` — 문제를 가리키는 값
 
-1. **첨부파일 링크 (가장 쉬움)** — 문제 페이지(Solving Club 상세 또는 "문제 풀기" 화면) 하단의 `input7_sample.txt` 같은 첨부 링크를 **우클릭 → "링크 주소 복사"** 한 뒤 그대로 붙여넣기.
-   `https://swexpertacademy.com/main/common/contestProb/contestProbDown.do?downType=in&contestProbId=AZq-gSmq_RfHBISS...`
-2. `problemDetail.do?contestProbId=...` 형태의 문제 URL
-3. `contestProbId` 16자 값 단독 (`AZq-gSmq_RfHBISS`)
+**문제 번호**만 넣으면 됩니다. 문제 화면 상단에 `25730. [07] 항아리 게임` 처럼 보이는 그 숫자입니다.
 
-"문제 풀기" 화면은 주소창 URL 로는 열 수 없는 페이지라(POST) 주소창 복사는 안 됩니다. 첨부 링크를 쓰세요.
+```powershell
+swea-fetch 25730 IM_test
+```
+
+번호를 주면 도구가 가입한 Solving Club 의 문제 상자(최신순)를 훑어 문제를 찾습니다. 오늘 상자의 문제는 1~3초, 한 번 본 상자는 `%USERPROFILE%\.swea-fetch\problem_index.json` 에 캐시돼 다음부턴 즉시 찾습니다. 못 찾으면(클럽 밖 문제 등) 아래 형식으로 직접 지정하세요.
+
+| 형식 | 예 |
+|---|---|
+| 첨부파일 링크 (문제 페이지 하단 `input*_sample.txt` 우클릭 → 링크 주소 복사) | `https://swexpertacademy.com/main/common/contestProb/contestProbDown.do?downType=in&contestProbId=AZq-gSmq_RfHBISS` |
+| 일반 문제 URL | `https://swexpertacademy.com/main/code/problem/problemDetail.do?contestProbId=AZq-gSmq_RfHBISS` |
+| `contestProbId` 16자 | `AZq-gSmq_RfHBISS` |
+
+문제 화면의 **주소창 URL 은 쓸 수 없습니다** (`.../solvingProblem.do` 처럼 문제 ID 가 없는 POST 페이지). 번호를 쓰세요.
 
 ### `topic` — 주제 폴더 이름
 
@@ -112,7 +121,7 @@ for test_case in range(1, T + 1):
 | 1 | 로그인 실패 (`LoginFailed`) | `.env` 의 ID/PW 확인 → `swea-fetch init` 으로 재작성. **SWEA 는 5회 연속 실패 시 계정을 잠급니다.** 도구는 3회에서 스스로 멈춤 |
 | 1 | 자동 로그인 중단 (`LoginLocked`) | 브라우저에서 로그인이 되는지 확인 후 `%USERPROFILE%\.swea-fetch\login_state.json` 삭제 |
 | 1 | 2단계 인증 (`MfaRequired`) | 계정의 MFA 를 해제하거나 수동 세션 주입 기능(M3 예정) 필요 |
-| 2 | 입력 해석 실패 (`InvalidInput`) | `target` 이 위 3가지 형식인지, 링크가 잘려 복사되지 않았는지 확인. `--num` 누락 시에도 발생 |
+| 2 | 입력 해석 실패 (`InvalidInput`) | 번호가 가입 클럽 상자에 없거나, URL 에 ID 가 없음(주소창 URL). 번호를 확인하거나 첨부 링크로 지정 |
 | 2 | 문제 없음 (`ProblemNotFound`) | `contestProbId` 가 맞는지, 그 문제에 접근 권한(클럽 가입 등)이 있는지 확인 |
 | 2 | 번호/제목 파싱 실패 (`ParseError`) | `--num` 으로 지정하거나 `-v` 출력을 제보 |
 | 3 | 파일 충돌 (`AlreadyExists`) | 기존 파일 확인 후 `--force` |

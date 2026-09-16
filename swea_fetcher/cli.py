@@ -14,7 +14,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import auth, client, config, parser, storage
+from . import auth, client, config, lookup, parser, storage
 from .errors import (
     AlreadyExists,
     AttachmentNotFound,
@@ -36,6 +36,7 @@ SUBCOMMANDS = ("fetch", "init", "logout")
 EXIT_UNEXPECTED = 10
 
 TARGET_EXAMPLES = (
+    "25730",
     "https://swexpertacademy.com/main/common/contestProb/contestProbDown.do?downType=in&contestProbId=AZq-gSmq_RfHBISS",
     "https://swexpertacademy.com/main/code/problem/problemDetail.do?contestProbId=AZq-gSmq_RfHBISS",
     "AZq-gSmq_RfHBISS",
@@ -56,8 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
     f = sub.add_parser("fetch", help="문제 저장 (기본)")
     f.add_argument(
         "target",
-        help="contestProbId 를 담은 문자열. 문제 페이지에서 첨부파일(input*_sample.txt) 링크를 "
-        "우클릭 → '링크 주소 복사' 해 붙여넣는 것이 가장 쉽습니다. problemDetail.do URL 이나 ID 단독도 가능",
+        help="문제 번호(예: 25730 — 문제 화면 상단에 보이는 숫자) 가 가장 쉽습니다. "
+        "그 외 첨부파일 링크 URL, problemDetail.do URL, contestProbId 단독도 가능",
     )
     f.add_argument("topic", help="주제 폴더 이름 (예: BFS, Queue, IM_test)")
     f.add_argument("--num", type=int, default=None, help="페이지에서 번호를 못 찾았을 때 문제 번호를 직접 지정")
@@ -103,10 +104,15 @@ def _setup_logging(verbose: bool) -> None:
 def run_fetch(target: str, topic: str, num: int | None, force: bool, verbose: bool = False) -> int:
     """파이프라인 실행. 성공 시 0. 도메인 예외는 main 이 처리한다."""
     settings = config.load_settings()
-    cid = parser.extract_contest_prob_id(target)
+    by_number = target.strip().isdigit()
+    cid = None if by_number else parser.extract_contest_prob_id(target)
 
     log.info("로그인 세션 확인")
     session = auth.get_session(settings)
+
+    if by_number:
+        log.info("문제 번호 %s 로 Solving Club 문제 상자에서 찾는 중", target.strip())
+        cid = lookup.find_by_number(session, settings, int(target.strip()))
 
     log.info("문제 페이지 가져오는 중 (contestProbId=%s)", cid)
     html, kind = client.fetch_problem_page(session, settings, cid)
