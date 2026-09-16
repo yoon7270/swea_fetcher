@@ -293,3 +293,90 @@ def test_problem_info_is_immutable(solver_html):
     info = parser.parse(solver_html, "solver", ID)
     with pytest.raises(Exception):
         info.num = 1  # type: ignore[misc]
+
+
+# =============================================================================
+# M2 추가: URL 검증 강화, detail 페이지, require_attachments
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        f"https://swexpertacademy.com{DOWN}?downType=in&contestProbId=BAD&_menuId={MENU_ID}&_menuF=true",
+        f"https://swexpertacademy.com{DOWN}?downType=in&contestProbId=&_menuId={MENU_ID}",
+        f"contestProbId={ID[:10]}",
+    ],
+)
+def test_extract_explicit_but_invalid_contest_prob_id(bad):
+    with pytest.raises(InvalidInput, match="올바르지 않습니다"):
+        parser.extract_contest_prob_id(bad)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://swexpertacademy.com/main/solvingProblem/solvingProblem.do",
+        "https://swexpertacademy.com/main/talk/solvingClub/problemView.do",
+    ],
+)
+def test_extract_post_page_url_gives_specific_hint(url):
+    with pytest.raises(InvalidInput, match="문제 번호"):
+        parser.extract_contest_prob_id(url)
+
+
+def test_parse_detail_fixture(detail_html):
+    info = parser.parse(detail_html, "detail", "AWIeW7FakkUDFAVH")
+    assert info.page_kind == "detail"
+    assert info.num == 4014
+    assert info.title == "[모의 SW 역량테스트] 활주로 건설"
+    assert info.input_filename == "sample_input.txt"
+    assert info.output_filename == "sample_output.txt"
+    assert "downType=in" in info.input_url and "downType=out" in info.output_url
+    assert "&amp;" not in info.input_url
+
+
+def test_parse_detail_prefers_problem_title_over_week_widgets():
+    html = (
+        "<html><body><p class='problem_title'>4014. 활주로 건설 <span class='badge'>D4</span></p>"
+        "<span class='week_num'>9999.</span><span class='week_text'>other</span>"
+        f"{BOTH}</body></html>"
+    )
+    info = parser.parse(html, "detail", ID)
+    assert (info.num, info.title) == (4014, "활주로 건설")
+
+
+def test_parse_detail_problem_title_without_number_falls_back_to_week():
+    html = (
+        "<html><body><p class='problem_title'>[07] 항아리 게임</p>"
+        "<span class='week_num'>27008.</span><span class='week_text'>A+B</span>"
+        f"{BOTH}</body></html>"
+    )
+    info = parser.parse(html, "detail", ID)
+    assert (info.num, info.title) == (27008, "A+B")
+
+
+def test_parse_without_required_attachments():
+    info = parser.parse(_solver_page("1234. A+B"), "solver", ID, require_attachments=False)
+    assert (info.num, info.title) == (1234, "A+B")
+    assert info.input_url is None and info.output_url is None
+    assert info.input_filename is None and info.output_filename is None
+
+
+def test_parse_without_required_attachments_still_returns_present_ones():
+    info = parser.parse(_solver_page("1. x", _attach("in", "i.txt")), "solver", ID, require_attachments=False)
+    assert info.input_filename == "i.txt" and info.output_url is None
+
+
+def test_parse_require_attachments_false_still_needs_title():
+    with pytest.raises(ParseError):
+        parser.parse("<html></html>", "solver", ID, require_attachments=False)
+
+
+def test_attachment_filename_hidden_label_only_is_empty():
+    html = _solver_page(
+        "1. x",
+        f"<div class='down_area'><a href='{DOWN}?downType=in&contestProbId={ID}'><i><span class='hide'>다운로드</span></i></a></div>"
+        + _attach("out", "o.txt"),
+    )
+    assert parser.parse(html, "solver", ID).input_filename == ""

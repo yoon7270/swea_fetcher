@@ -248,3 +248,82 @@ def test_decode_happens_before_any_file_is_created(root_dir, settings, problem_i
     with pytest.raises(RuntimeError):
         save_problem(root_dir, "sim", problem_info, IN, OUT, settings)
     assert not (root_dir / "sim").exists()
+
+
+# =============================================================================
+# M2 추가: force 롤백 복원, save_skeleton
+# =============================================================================
+
+
+def test_rollback_with_force_restores_overwritten_originals(root_dir, settings, problem_info, monkeypatch):
+    d = root_dir / "sim" / "25730"
+    d.mkdir(parents=True)
+    (d / "input.txt").write_bytes(b"old-in")
+    (d / "output.txt").write_bytes(b"old-out")
+
+    real_write = storage._write
+    calls = {"n": 0}
+
+    def flaky(path, content):
+        calls["n"] += 1
+        if calls["n"] == 2:  # output.txt 쓰기에서 실패 (input.txt 는 이미 덮어씀)
+            raise OSError("disk full")
+        real_write(path, content)
+
+    monkeypatch.setattr(storage, "_write", flaky)
+    with pytest.raises(OSError):
+        save_problem(root_dir, "sim", problem_info, IN, OUT, settings, force=True)
+    assert (d / "input.txt").read_bytes() == b"old-in"
+    assert (d / "output.txt").read_bytes() == b"old-out"
+    assert not (d / "25730.py").exists()
+
+
+def test_save_skeleton_creates_dir_empty_input_and_py(root_dir, settings, problem_info):
+    res = storage.save_skeleton(root_dir, "sim", problem_info, settings)
+    d = (root_dir / "sim" / "25730").resolve()
+    assert res.problem_dir == d
+    assert [p.name for p in res.written] == ["input.txt", "25730.py"]
+    assert res.skipped == []
+    assert (d / "input.txt").read_bytes() == b""
+    assert not (d / "output.txt").exists()
+    assert (d / "25730.py").read_text(encoding="utf-8").startswith("# 25730. 항아리 게임\n")
+
+
+def test_save_skeleton_keeps_existing_files(root_dir, settings, problem_info):
+    d = root_dir / "sim" / "25730"
+    d.mkdir(parents=True)
+    (d / "input.txt").write_text("my sample")
+    (d / "25730.py").write_text("# mine")
+    res = storage.save_skeleton(root_dir, "sim", problem_info, settings)
+    assert res.written == []
+    assert [p.name for p in res.skipped] == ["input.txt", "25730.py"]
+    assert (d / "input.txt").read_text() == "my sample"
+    assert (d / "25730.py").read_text() == "# mine"
+
+
+def test_save_skeleton_is_idempotent(root_dir, settings, problem_info):
+    storage.save_skeleton(root_dir, "sim", problem_info, settings)
+    res = storage.save_skeleton(root_dir, "sim", problem_info, settings)
+    assert res.written == [] and len(res.skipped) == 2
+
+
+def test_save_skeleton_without_num(root_dir, settings, problem_info):
+    with pytest.raises(ValueError, match="번호"):
+        storage.save_skeleton(root_dir, "sim", replace(problem_info, num=None), settings)
+
+
+def test_save_skeleton_rollback_removes_new_dir(root_dir, settings, problem_info, monkeypatch):
+    def boom(path, content):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(storage, "_write", boom)
+    with pytest.raises(OSError):
+        storage.save_skeleton(root_dir, "sim", problem_info, settings)
+    assert not (root_dir / "sim" / "25730").exists()
+
+
+def test_save_skeleton_custom_input_name(root_dir, settings, problem_info):
+    s = replace(settings, input_name="in.txt")
+    res = storage.save_skeleton(root_dir, "sim", problem_info, s)
+    assert [p.name for p in res.written] == ["in.txt", "25730.py"]
+    assert 'open("in.txt", "r")' in (res.problem_dir / "25730.py").read_text(encoding="utf-8")

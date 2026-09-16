@@ -43,6 +43,69 @@ def _reset_login_guard():
     auth._reset_process_guard()
 
 
+class FakeKeyringErrors:
+    class KeyringError(Exception):
+        pass
+
+    class PasswordDeleteError(KeyringError):
+        pass
+
+
+class FakeKeyring:
+    """keyring 모듈 대역. 메모리 dict 에 저장하고 호출을 기록한다. `fail` 을 세우면 KeyringError."""
+
+    errors = FakeKeyringErrors
+
+    def __init__(self) -> None:
+        self.store: dict[tuple[str, str], str] = {}
+        self.calls: list[tuple[str, str, str]] = []
+        self.fail: Exception | None = None
+
+    def _check(self) -> None:
+        if self.fail is not None:
+            raise self.fail
+
+    def get_password(self, service: str, user: str) -> str | None:
+        self.calls.append(("get", service, user))
+        self._check()
+        return self.store.get((service, user))
+
+    def set_password(self, service: str, user: str, password: str) -> None:
+        self.calls.append(("set", service, user))
+        self._check()
+        self.store[(service, user)] = password
+
+    def delete_password(self, service: str, user: str) -> None:
+        self.calls.append(("delete", service, user))
+        self._check()
+        if (service, user) not in self.store:
+            raise FakeKeyringErrors.PasswordDeleteError("no such password")
+        del self.store[(service, user)]
+
+    def get_keyring(self):  # _selftest 용
+        return self
+
+
+@pytest.fixture(autouse=True)
+def fake_keyring(monkeypatch: pytest.MonkeyPatch) -> FakeKeyring:
+    """실제 Windows 자격 증명 관리자를 절대 건드리지 않도록 config._keyring 을 대체한다."""
+    from swea_fetcher import config
+
+    kr = FakeKeyring()
+    monkeypatch.setattr(config, "_keyring", lambda: kr)
+    return kr
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """config.CONFIG_DIR 기본값을 tmp 로 돌려 실제 ~/.swea-fetch 를 읽지 않게 한다."""
+    from swea_fetcher import config
+
+    d = tmp_path / "_default_cfg"
+    d.mkdir()
+    monkeypatch.setattr(config, "CONFIG_DIR", d)
+
+
 # --- 파일 픽스처 -----------------------------------------------------------------
 
 
@@ -68,6 +131,11 @@ def error_html() -> str:
 @pytest.fixture(scope="session")
 def login_html() -> str:
     return load_fixture("login_page.html")
+
+
+@pytest.fixture(scope="session")
+def detail_html() -> str:
+    return load_fixture("problem_detail_regular.html")
 
 
 # --- Settings ------------------------------------------------------------------

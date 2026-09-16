@@ -341,3 +341,11 @@ def test_get_session_propagates_login_failure(settings, monkeypatch):
     _patch_session_factory(monkeypatch, fake)
     with pytest.raises(LoginFailed):
         auth.get_session(settings)
+
+
+def test_login_failure_unknown_code_with_braces_does_not_crash(settings):
+    s = FakeSession([login_page(), fail_login("weird{code}")])
+    with pytest.raises(LoginFailed) as ei:
+        auth.login(s, settings)
+    assert "weird{code}" in str(ei.value)
+    assert auth._read_failures(settings.login_state_file) == 1
