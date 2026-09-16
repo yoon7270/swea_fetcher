@@ -81,7 +81,7 @@ SWEA 에는 문제 관련 페이지가 **세 종류** 있고, 사용자의 실�
 2. `contestProbId` 문자열 직접 입력
 → `cli` 는 URL 이든 ID 든 받아 `contestProbId` 를 뽑고, `fetch` 가 (C) 를 POST 로 가져오는 구조가 유력
 
-### (A) 일반 문제 페이지 (TODO)
+### (A) 일반 문제 페이지 (M2 확인, M3 파서 반영)
 - 공개 목록 페이지 `/main/code/problem/problemList.do` 는 비로그인 200 이며 각 문제가
   ```html
   <div class="header-caption">
@@ -89,7 +89,7 @@ SWEA 에는 문제 관련 페이지가 **세 종류** 있고, 사용자의 실�
     <span class="week_text"><a href="#none" onclick="javascript:fn_move_page('AZ8R9tAKeaPHBITH');">A+B…</a></span>
   </div>
   ```
-  → 상세 페이지도 같은 위젯이면 `span.week_num` / `span.week_text` 가 후보
+  → 상세 페이지는 이 위젯이 아니라 **`p.problem_title` = `"4014. [모의 SW 역량테스트] 활주로 건설"`** (픽스처 `problem_detail_regular.html`). `parser._parse_detail_title` 은 이를 1순위로, `span.week_num`/`week_text` 는 폴백으로 둠. `_parse_detail_title` 은 실패해도 예외 대신 `(None, "")` 을 돌려주고 cli 가 `--num` 을 요구
 - Solving Club 의 `contestProbId`(`AZq-gSmq_RfHBISS`) 로 `problemDetail.do?contestProbId=...` 를 열면 **시스템 오류 페이지**가 뜸 (로그인 상태에서 확인, 픽스처 `error_page.html`). 즉 Solving Club 문제는 일반 페이지로 우회할 수 없고, 번호 획득 경로는 별도 확인 필요
 
 ### 계정 정보 제거 내역 (픽스처)
