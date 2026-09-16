@@ -1,14 +1,12 @@
-"""진입점: `swea-fetch <target> <topic>` / `swea-fetch init` / `swea-fetch logout`.
+"""진입점: `swea-fetch <target> <topic>` / `init` / `logout` / `check`.
 
-파이프라인: settings → contestProbId 추출 → 세션 → 문제 페이지 → 파싱 → 첨부 다운로드 → 저장.
-모든 도메인 예외는 SweaFetchError.exit_code 로 종료 코드에 매핑한다.
+파이프라인 로직은 service.py 에 있고, 여기서는 인자 파싱·출력·종료 코드만 다룬다.
+모든 도메인 예외는 SweaFetchError.exit_code 로 종료 코드에 매핑하고 e.hint 를 조치 문구로 출력한다.
 """
 
 from __future__ import annotations
 
 import argparse
-import dataclasses
-import difflib
 import getpass
 import logging
 import os
@@ -16,33 +14,15 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import auth, client, config, lookup, parser, storage
-from .errors import (
-    AlreadyExists,
-    AttachmentNotFound,
-    ConfigMissing,
-    InvalidInput,
-    LoginFailed,
-    LoginLocked,
-    MfaRequired,
-    NetworkError,
-    ParseError,
-    ProblemNotFound,
-    SweaFetchError,
-)
+from . import auth, checker, config, service
+from .errors import CheckFailed, ConfigMissing, InvalidInput, LoginFailed, SweaFetchError
 from .models import ProblemInfo, SaveResult
+from .service import FetchOptions, FetchOutcome
 
 log = logging.getLogger("swea_fetcher.cli")
 
-SUBCOMMANDS = ("fetch", "init", "logout")
+SUBCOMMANDS = ("fetch", "init", "logout", "check")
 EXIT_UNEXPECTED = 10
-
-TARGET_EXAMPLES = (
-    "25730",
-    "https://swexpertacademy.com/main/common/contestProb/contestProbDown.do?downType=in&contestProbId=AZq-gSmq_RfHBISS",
-    "https://swexpertacademy.com/main/code/problem/problemDetail.do?contestProbId=AZq-gSmq_RfHBISS",
-    "AZq-gSmq_RfHBISS",
-)
 
 
 # --- 인자 파싱 ---------------------------------------------------------------------
@@ -78,6 +58,12 @@ def build_parser() -> argparse.ArgumentParser:
     lo = sub.add_parser("logout", help="저장된 세션 삭제")
     lo.add_argument("--all", action="store_true", help=".env 와 자격 증명 관리자의 비밀번호까지 삭제 — 자리 반납용")
     lo.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
+
+    c = sub.add_parser("check", help="풀이 실행 후 output.txt 와 비교")
+    c.add_argument("topic", help="주제 폴더 이름")
+    c.add_argument("num", type=int, help="문제 번호")
+    c.add_argument("--timeout", type=float, default=checker.DEFAULT_TIMEOUT, help="실행 제한 시간(초), 기본 10")
+    c.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
     return p
 
 
@@ -99,8 +85,8 @@ def _setup_logging(verbose: bool) -> None:
         force=True,
     )
     if not verbose:
-        # 기본 모드에선 cli 의 진행 메시지만 INFO 로 보이게 하고 하위 모듈은 WARNING 이상만
-        for name in ("swea_fetcher.auth", "swea_fetcher.client", "swea_fetcher.parser", "swea_fetcher.storage"):
+        # 기본 모드에선 진행 메시지(service)만 INFO 로 보이게 하고 하위 모듈은 WARNING 이상만
+        for name in ("swea_fetcher.auth", "swea_fetcher.client", "swea_fetcher.parser", "swea_fetcher.storage", "swea_fetcher.lookup"):
             logging.getLogger(name).setLevel(logging.WARNING)
 
 
@@ -117,116 +103,20 @@ def run_fetch(
     dry_run: bool = False,
     refresh_index: bool = False,
 ) -> int:
-    """파이프라인 실행. 성공 시 0. 도메인 예외는 main 이 처리한다."""
+    """service.fetch_problem 호출 + 출력. 도메인 예외는 main 이 처리한다."""
     settings = config.load_settings()
-    by_number = target.strip().isdigit()
-    cid = None if by_number else parser.extract_contest_prob_id(target)
+    opts = FetchOptions(force=force, skeleton_only=skeleton_only, dry_run=dry_run, refresh_index=refresh_index, num_override=num)
 
-    log.info("로그인 세션 확인")
-    session = auth.get_session(settings)
+    def progress(msg: str) -> None:
+        if msg.startswith("[알림]"):
+            print(msg)
 
-    if by_number:
-        log.info("문제 번호 %s 로 찾는 중 (공개 목록 → Solving Club 상자)", target.strip())
-        cid = lookup.find_by_number(session, settings, int(target.strip()), refresh=refresh_index)
-
-    log.info("문제 페이지 가져오는 중 (contestProbId=%s)", cid)
-    html, kind = client.fetch_problem_page(session, settings, cid)
-    log.debug("page_kind=%s, html=%d bytes", kind, len(html))
-    info = parser.parse(html, kind, cid, require_attachments=not skeleton_only)
-
-    if num is not None:
-        if info.num is not None and info.num != num:
-            log.warning("페이지의 번호 %s 대신 --num %s 를 사용합니다", info.num, num)
-        info = dataclasses.replace(info, num=num)
-    if info.num is None:
-        raise InvalidInput("문제 번호를 페이지에서 찾지 못했습니다. --num 으로 지정하세요")
-
-    topic = _resolve_topic(settings.root, topic)
-
-    in_bytes = out_bytes = None
-    if not skeleton_only:
-        log.info("첨부 다운로드")
-        in_bytes = client.download(session, info.input_url, settings)
-        out_bytes = client.download(session, info.output_url, settings)
-
-    if dry_run:
-        _print_dry_run(info, topic, settings, in_bytes, out_bytes, force, skeleton_only)
-        return 0
-
-    try:
-        if skeleton_only:
-            result = storage.save_skeleton(settings.root, topic, info, settings)
-        else:
-            result = storage.save_problem(settings.root, topic, info, in_bytes, out_bytes, settings, force=force)
-    except ValueError as e:
-        raise InvalidInput(str(e)) from e
-
-    log.info("저장 완료")
-    _print_result(info, result, settings, skeleton_only)
-    return 0
-
-
-def _resolve_topic(root: Path, topic: str) -> str:
-    """주제 폴더 이름 안내. 대소문자만 다른 기존 폴더가 있으면 그 이름을 쓰고, 비슷한 폴더는 알리기만 한다."""
-    topic = topic.strip()
-    try:
-        dirs = sorted(d.name for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
-    except OSError:
-        return topic
-    if topic in dirs:
-        return topic
-    same_ci = [d for d in dirs if d.lower() == topic.lower()]
-    if same_ci:
-        print(f"[알림] 기존 폴더 '{same_ci[0]}' 를 사용합니다 (입력: '{topic}')")
-        return same_ci[0]
-    close = difflib.get_close_matches(topic, dirs, n=3, cutoff=0.6)
-    if close:
-        print(f"[알림] 비슷한 폴더가 있습니다: {', '.join(close)} — 새 폴더 '{topic}' 를 만듭니다")
-    return topic
-
-
-def _preview(data: bytes | None, limit_lines: int = 3, limit_chars: int = 60) -> str:
-    """앞 limit_lines 줄을 ' / ' 로 이어 붙인 미리보기 (한 줄 limit_chars 자 제한)."""
-    if data is None:
-        return ""
-    text = storage.normalize_text(data)
-    all_lines = text.splitlines()
-    s = " / ".join(ln.strip() for ln in all_lines[:limit_lines])
-    if len(all_lines) > limit_lines:
-        s += " ..."
-    return s if len(s) <= limit_chars else s[: limit_chars - 3] + "..."
-
-
-def _print_dry_run(
-    info: ProblemInfo,
-    topic: str,
-    settings: config.Settings,
-    in_bytes: bytes | None,
-    out_bytes: bytes | None,
-    force: bool,
-    skeleton_only: bool,
-) -> None:
-    """저장 없이 계획만 출력. 충돌 검사는 존재 여부만 본다 (쓰기 없음)."""
-    try:
-        problem_dir = storage.resolve_problem_dir(settings.root, topic, info.num)
-    except ValueError as e:
-        raise InvalidInput(str(e)) from e
-    print(f"[DRY-RUN] {info.num}. {info.title}  (page_kind={info.page_kind}, contestProbId={info.contest_prob_id})")
-    print(f"  저장 예정: {problem_dir}{os.sep}")
-    input_path = problem_dir / settings.input_name
-    output_path = problem_dir / settings.output_name
-    py_path = problem_dir / f"{info.num}.py"
-    keep = "(기존 파일 유지)"
-    if skeleton_only:
-        print(f"    {settings.input_name:<12}{keep if input_path.exists() else '(빈 파일 생성 예정)'}")
+    outcome = service.fetch_problem(settings, target, topic, opts, progress)
+    if outcome.result is None:
+        _print_dry_run(outcome, settings, force, skeleton_only)
     else:
-        print(f"    {settings.input_name:<12}← {info.input_filename} ({len(in_bytes or b'')} B)   미리보기: {_preview(in_bytes)}")
-        print(f"    {settings.output_name:<12}← {info.output_filename} ({len(out_bytes or b'')} B)   미리보기: {_preview(out_bytes)}")
-    print(f"    {py_path.name:<12}{keep if py_path.exists() else '(생성 예정)'}")
-    existing = [p for p in (input_path, output_path) if p.exists()]
-    if existing and not skeleton_only:
-        names = ", ".join(p.name for p in existing)
-        print(f"  [주의] 이미 있음: {names} → " + ("--force 로 덮어쓰게 됩니다" if force else "실제 실행 시 AlreadyExists (--force 필요)"))
+        _print_result(outcome.info, outcome.result, settings, skeleton_only)
+    return 0
 
 
 def _fmt_size(path: Path) -> str:
@@ -259,14 +149,22 @@ def _print_result(info: ProblemInfo, result: SaveResult, settings: config.Settin
         print(f"     {name.ljust(width)}  {note}")
 
 
+def _print_dry_run(outcome: FetchOutcome, settings: config.Settings, force: bool, skeleton_only: bool) -> None:
+    info, pv = outcome.info, outcome.preview or {}
+    print(f"[DRY-RUN] {info.num}. {info.title}  (page_kind={info.page_kind}, contestProbId={info.contest_prob_id})")
+    print(f"  저장 예정: {pv['problem_dir']}{os.sep}")
+    labels = {"create": "(생성 예정)", "create_empty": "(빈 파일 생성 예정)", "keep": "(기존 파일 유지)", "overwrite": "(덮어쓰기 예정)", "conflict": "(이미 있음)"}
+    for fp in pv["files"]:
+        if fp.source is not None:
+            print(f"    {fp.name:<12}← {fp.source} ({fp.size} B)   미리보기: {fp.preview}")
+        else:
+            print(f"    {fp.name:<12}{labels.get(fp.action, fp.action)}")
+    conflicts = [fp.name for fp in pv["files"] if fp.action in ("conflict", "overwrite")]
+    if conflicts and not skeleton_only:
+        print(f"  [주의] 이미 있음: {', '.join(conflicts)} → " + ("--force 로 덮어쓰게 됩니다" if force else "실제 실행 시 AlreadyExists (--force 필요)"))
+
+
 # --- init ---------------------------------------------------------------------------
-
-
-def _quote_env(value: str) -> str:
-    """python-dotenv 규칙: #, =, 공백, 따옴표가 있으면 큰따옴표로 감싼다."""
-    if any(ch in value for ch in ' #="\'') or value != value.strip():
-        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
-    return value
 
 
 def _ask(prompt: str, default: str | None = None) -> str:
@@ -320,27 +218,16 @@ def run_init(no_check: bool = False, config_dir: Path | None = None, migrate: bo
     del pw1, pw2
 
     had_plain = bool(config.read_env_file(config_dir).get(config.PASSWORD_KEY))
-    lines = [
-        f"SWEA_ROOT={_quote_env(str(root))}",
-        f"SWEA_ID={_quote_env(user_id)}",
-        "SWEA_INPUT_NAME=input.txt",
-        "SWEA_OUTPUT_NAME=output.txt",
-    ]
-    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    service.write_env(config_dir, root, user_id)
     print(f"[OK] 설정 저장: {env_file} (비밀번호는 Windows 자격 증명 관리자 '{config.KEYRING_SERVICE}' 에 저장)")
     if had_plain:
         print("[OK] .env 의 평문 비밀번호를 자격 증명 관리자로 옮겼습니다")
 
     if no_check:
         return 0
-    return _check_login(config_dir)
-
-
-def _check_login(config_dir: Path) -> int:
     print("로그인 확인 중...")
-    settings = config.load_settings(config_dir)
-    auth.get_session(settings)  # 실패 시 예외 → main 이 메시지 출력, 설정은 유지
-    print("[OK] 로그인 확인 완료. 세션 저장됨")
+    msg = service.verify_login(config.load_settings(config_dir))  # 실패 시 예외 → main 이 메시지 출력, 설정은 유지
+    print(f"[OK] {msg}")
     return 0
 
 
@@ -366,71 +253,49 @@ def _run_migrate(config_dir: Path) -> int:
 
 
 def run_logout(all_: bool = False, config_dir: Path | None = None) -> int:
-    """session.json, login_state.json 삭제. --all 이면 .env 도 삭제. 파일이 없어도 정상 종료."""
+    """session.json, login_state.json 삭제. --all 이면 .env 와 자격 증명도. 파일이 없어도 정상 종료."""
     config_dir = Path(config_dir) if config_dir is not None else config.CONFIG_DIR
-    targets = [config_dir / config.SESSION_FILE_NAME, config_dir / config.LOGIN_STATE_FILE_NAME]
-    if all_:
-        if not _confirm("계정 정보(.env 와 자격 증명 관리자의 비밀번호)가 삭제됩니다. 계속할까요?"):
-            print("취소했습니다.")
-            return 0
-        user_id = (config.read_env_file(config_dir).get("SWEA_ID") or "").strip()
-        if user_id:
-            try:
-                if config.delete_password(user_id):
-                    print(f"[OK] 자격 증명 관리자에서 '{user_id}' 비밀번호 삭제")
-            except ConfigMissing as e:
-                print(f"[경고] 자격 증명 관리자 접근 실패: {e}", file=sys.stderr)
-        targets.append(config_dir / config.ENV_FILE_NAME)
-
-    removed = []
-    for path in targets:
-        try:
-            path.unlink()
-            removed.append(path.name)
-        except FileNotFoundError:
-            pass
+    if all_ and not _confirm("계정 정보(.env 와 자격 증명 관리자의 비밀번호)가 삭제됩니다. 계속할까요?"):
+        print("취소했습니다.")
+        return 0
+    try:
+        removed = service.logout(config_dir, all_=all_)
+    except ConfigMissing as e:  # keyring 접근 불가 — 파일만이라도 지운다
+        print(f"[경고] 자격 증명 관리자 접근 실패: {e}", file=sys.stderr)
+        removed = service.logout(config_dir, all_=False)
     print(f"[OK] 삭제: {', '.join(removed) if removed else '삭제할 파일 없음'}")
     return 0
 
 
-# --- 오류 안내 ------------------------------------------------------------------------
+# --- check --------------------------------------------------------------------------
 
 
-def _advice(e: SweaFetchError) -> str:
-    if isinstance(e, ConfigMissing):
-        return "`swea-fetch init` 을 먼저 실행하세요"
-    if isinstance(e, LoginLocked):
-        return f"브라우저에서 직접 로그인이 되는지 확인 후 {config.CONFIG_DIR / config.LOGIN_STATE_FILE_NAME} 을 삭제하세요"
-    if isinstance(e, MfaRequired):
-        return "계정에 2단계 인증이 켜져 있어 자동 로그인이 불가합니다. MFA 해제 또는 M3 수동 세션 주입 기능이 필요합니다"
-    if isinstance(e, LoginFailed):
-        n = auth._read_failures(config.CONFIG_DIR / config.LOGIN_STATE_FILE_NAME)
-        return (
-            ".env 의 SWEA_ID / SWEA_PW 를 확인하세요 (`swea-fetch init` 으로 재작성 가능). "
-            f"현재 연속 실패 {n}회 — 5회면 계정이 잠깁니다"
-        )
-    if isinstance(e, InvalidInput):
-        hint = ""
-        if "찾지 못했습니다" in str(e) and "문제 번호" in str(e):
-            hint = "  클럽에 새 문제 상자가 생긴 직후라면 --refresh-index 를 붙여 다시 시도하세요\n"
-        return hint + "입력 예시 (문제 번호가 가장 쉽습니다):\n" + "\n".join(f"  swea-fetch {ex} BFS" for ex in TARGET_EXAMPLES)
-    if isinstance(e, ProblemNotFound):
-        return "contestProbId 가 맞는지, 해당 문제에 접근 권한이 있는지 확인하세요"
-    if isinstance(e, ParseError):
-        return "--num 으로 번호를 지정하거나, -v 로 실행한 결과를 제보해 주세요"
-    if isinstance(e, AttachmentNotFound):
-        found = ", ".join(e.found) if e.found else "없음"
-        return (
-            f"페이지에서 찾은 첨부: {found}\n"
-            "  샘플 입출력 첨부가 없는 문제입니다. `--skeleton-only` 를 붙여 다시 실행하면 "
-            "폴더 + {번호}.py + 빈 input.txt 만 만듭니다 (샘플은 본문에서 직접 복사)"
-        )
-    if isinstance(e, AlreadyExists):
-        files = "\n".join(f"  {p}" for p in e.existing)
-        return f"이미 있는 파일:\n{files}\n  덮어쓰려면 --force 를 붙이세요 ({{번호}}.py 는 유지됩니다)"
-    if isinstance(e, NetworkError):
-        return "네트워크 연결을 확인한 뒤 다시 시도하세요"
-    return ""
+def run_check(topic: str, num: int, timeout: float) -> int:
+    """풀이 실행 → 비교 → 결과 출력. 실패면 CheckFailed (exit 6)."""
+    settings = config.load_settings()
+    from . import storage  # 지연 import — resolve_problem_dir 만 필요
+
+    try:
+        problem_dir = storage.resolve_problem_dir(settings.root, topic, num)
+    except ValueError as e:
+        raise InvalidInput(str(e)) from e
+    if not problem_dir.is_dir():
+        raise InvalidInput(f"문제 폴더가 없습니다: {problem_dir}")
+
+    res = checker.run_and_compare(problem_dir, settings, timeout=timeout)
+    status = "통과" if res.passed else ("시간 초과" if res.timed_out else "실패")
+    print(f"[{'OK' if res.passed else 'FAIL'}] {num} {status}  ({res.elapsed:.2f}s)  {problem_dir}")
+    if res.note:
+        print(f"  {res.note}")
+    if not res.passed or res.stderr:
+        if res.stderr.strip():
+            print("--- stderr ---")
+            print(res.stderr.rstrip())
+        print("--- 기대 vs 실제 ---")
+        print(checker.format_diff(res.diff) if res.diff else "(출력 없음)")
+    if not res.passed:
+        raise CheckFailed(f"{num} 검증 실패 ({status})", hint="")
+    return 0
 
 
 # --- main -------------------------------------------------------------------------------
@@ -451,15 +316,17 @@ def main(argv: list[str] | None = None) -> int:
             return run_init(no_check=args.no_check, migrate=args.migrate)
         if args.command == "logout":
             return run_logout(all_=args.all)
+        if args.command == "check":
+            return run_check(args.topic, args.num, args.timeout)
         return run_fetch(
             args.target, args.topic, args.num, args.force, verbose,
             skeleton_only=args.skeleton_only, dry_run=args.dry_run, refresh_index=args.refresh_index,
         )
     except SweaFetchError as e:
         print(f"[오류] {e}", file=sys.stderr)
-        advice = _advice(e)
-        if advice:
-            print(f"  → {advice}", file=sys.stderr)
+        hint = _hint_for(e)
+        if hint:
+            print(f"  → {hint}", file=sys.stderr)
         return e.exit_code
     except KeyboardInterrupt:
         print("\n중단했습니다.", file=sys.stderr)
@@ -471,6 +338,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[오류] 내부 오류: {type(e).__name__}: {e}", file=sys.stderr)
             print("  → -v 로 다시 실행하면 상세 출력이 나옵니다", file=sys.stderr)
         return EXIT_UNEXPECTED
+
+
+def _hint_for(e: SweaFetchError) -> str:
+    """예외의 hint 에 cli 전용 보강(연속 실패 횟수, --refresh-index 안내)을 붙인다."""
+    hint = e.hint
+    if type(e) is LoginFailed:
+        n = auth._read_failures(config.CONFIG_DIR / config.LOGIN_STATE_FILE_NAME)
+        hint = f"{hint} — 현재 도구 기록 연속 실패 {n}회"
+    if isinstance(e, InvalidInput) and "찾지 못했습니다" in str(e) and "문제 번호" in str(e):
+        hint = "클럽에 새 문제 상자가 생긴 직후라면 --refresh-index 를 붙여 다시 시도하세요\n" + hint
+    return hint.replace("\n", "\n    ")
 
 
 if __name__ == "__main__":

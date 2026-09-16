@@ -1,0 +1,151 @@
+"""풀이 실행·검증: {num}.py 를 input.txt 로 실행해 output.txt 와 행 단위로 비교한다.
+
+- cwd=problem_dir 로 실행 (뼈대가 open("input.txt") 상대경로를 쓰므로)
+- stdin 도 input.txt 로 연결 (사용자가 sys.stdin= 줄을 지웠을 때 대비)
+- 비교: \\r\\n→\\n, 각 줄 우측 공백 제거, 끝 빈 줄 제거
+- 타임아웃 시 프로세스 kill. stdout/stderr 는 MAX_OUTPUT 바이트에서 잘라 표시
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .config import Settings
+
+DEFAULT_TIMEOUT = 10.0
+MAX_OUTPUT = 1_000_000  # 1 MB
+
+DiffRow = tuple[str, str | None, str | None]  # ("same"|"changed"|"missing"|"extra", expected_line, actual_line)
+
+
+@dataclass
+class CheckResult:
+    passed: bool
+    expected: str
+    actual: str
+    stderr: str
+    elapsed: float
+    timed_out: bool
+    diff: list[DiffRow] = field(default_factory=list)
+    note: str = ""  # 안내 (기대 출력 없음 등)
+    returncode: int | None = None
+
+
+# --- 비교 -------------------------------------------------------------------------
+
+
+def normalize_lines(text: str) -> list[str]:
+    """줄바꿈 통일, 우측 공백 제거, 끝 빈 줄 제거."""
+    # "\r\r\n" 은 Windows 텍스트 모드 이중 변환의 흔적 → 줄바꿈 하나로 취급
+    text = text.replace("\r\r\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
+    lines = [ln.rstrip() for ln in text.split("\n")]
+    while lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
+
+def diff_lines(expected: str, actual: str) -> list[DiffRow]:
+    """행 단위 비교. 위치가 같은 행끼리 짝을 맞춘다 (알고리즘 문제 출력은 행 순서가 고정)."""
+    exp = normalize_lines(expected)
+    act = normalize_lines(actual)
+    rows: list[DiffRow] = []
+    for i in range(max(len(exp), len(act))):
+        e = exp[i] if i < len(exp) else None
+        a = act[i] if i < len(act) else None
+        if e is None:
+            rows.append(("extra", None, a))
+        elif a is None:
+            rows.append(("missing", e, None))
+        elif e == a:
+            rows.append(("same", e, a))
+        else:
+            rows.append(("changed", e, a))
+    return rows
+
+
+def _truncate(data: bytes) -> tuple[str, bool]:
+    cut = len(data) > MAX_OUTPUT
+    text = data[:MAX_OUTPUT].decode("utf-8", errors="replace")
+    return (text + "\n... (출력이 1 MB 를 넘어 잘렸습니다)" if cut else text), cut
+
+
+# --- 실행 -------------------------------------------------------------------------
+
+
+def find_solution(problem_dir: Path) -> Path | None:
+    """{num}.py 우선, 없으면 main.py, 그다음 유일한 .py."""
+    problem_dir = Path(problem_dir)
+    cand = problem_dir / f"{problem_dir.name}.py"
+    if cand.is_file():
+        return cand
+    if (problem_dir / "main.py").is_file():
+        return problem_dir / "main.py"
+    pys = sorted(p for p in problem_dir.glob("*.py"))
+    return pys[0] if len(pys) == 1 else None
+
+
+def run_and_compare(problem_dir: Path, settings: Settings, timeout: float = DEFAULT_TIMEOUT) -> CheckResult:
+    """풀이를 실행해 output.txt 와 비교한다. 파일이 없으면 passed=False + note."""
+    problem_dir = Path(problem_dir)
+    solution = find_solution(problem_dir)
+    input_path = problem_dir / settings.input_name
+    output_path = problem_dir / settings.output_name
+
+    if solution is None:
+        return CheckResult(False, "", "", "", 0.0, False, note=f"풀이 파일이 없습니다 ({problem_dir.name}.py)")
+    if not input_path.is_file():
+        return CheckResult(False, "", "", "", 0.0, False, note=f"{settings.input_name} 이 없습니다")
+
+    expected = output_path.read_text(encoding="utf-8", errors="replace") if output_path.is_file() else ""
+    note = "" if output_path.is_file() else f"기대 출력({settings.output_name})이 없습니다 — 뼈대만 받은 문제. 실행 결과만 표시합니다"
+
+    start = time.perf_counter()
+    timed_out = False
+    returncode: int | None = None
+    with open(input_path, "rb") as stdin:
+        proc = subprocess.Popen(
+            [sys.executable, "-X", "utf8", str(solution)],
+            cwd=str(problem_dir),
+            stdin=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            out_b, err_b = proc.communicate(timeout=timeout)
+            returncode = proc.returncode
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            out_b, err_b = proc.communicate()
+            timed_out = True
+    elapsed = time.perf_counter() - start
+
+    actual, _ = _truncate(out_b)
+    stderr, _ = _truncate(err_b)
+    if timed_out:
+        stderr = (stderr + "\n" if stderr else "") + f"[시간 초과] {timeout:.0f}초를 넘어 중단했습니다 (무한 루프?)"
+
+    rows = diff_lines(expected, actual)
+    passed = bool(expected.strip()) and not timed_out and returncode == 0 and all(r[0] == "same" for r in rows)
+    if returncode not in (0, None) and not timed_out and not note:
+        note = f"프로그램이 오류로 끝났습니다 (exit {returncode}) — stderr 를 확인하세요"
+    return CheckResult(passed, expected, actual, stderr, elapsed, timed_out, rows, note, returncode)
+
+
+def format_diff(rows: list[DiffRow]) -> str:
+    """CLI 출력용 텍스트. ' ' 같음 / '~' 다름 / '-' 누락 / '+' 초과."""
+    mark = {"same": " ", "changed": "~", "missing": "-", "extra": "+"}
+    lines = []
+    for kind, e, a in rows:
+        if kind == "same":
+            lines.append(f"  {e}")
+        elif kind == "changed":
+            lines.append(f"~ 기대: {e}\n  실제: {a}")
+        elif kind == "missing":
+            lines.append(f"- 기대: {e}  (실제 출력 없음)")
+        else:
+            lines.append(f"+ 실제: {a}  (기대에 없음)")
+    return "\n".join(lines)

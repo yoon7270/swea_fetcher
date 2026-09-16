@@ -16,13 +16,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "pytest-qt"]
+gui = ["PySide6"]
 
 [project.scripts]
 swea-fetch = "swea_fetcher.cli:main"
+swea-fetch-gui = "swea_fetcher.gui.app:main"
 
 [tool.setuptools.packages.find]
 include = ["swea_fetcher*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+qt_api = "pyside6"
