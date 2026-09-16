@@ -111,7 +111,7 @@ def run_fetch(target: str, topic: str, num: int | None, force: bool, verbose: bo
     session = auth.get_session(settings)
 
     if by_number:
-        log.info("문제 번호 %s 로 Solving Club 문제 상자에서 찾는 중", target.strip())
+        log.info("문제 번호 %s 로 찾는 중 (공개 목록 → Solving Club 상자)", target.strip())
         cid = lookup.find_by_number(session, settings, int(target.strip()))
 
     log.info("문제 페이지 가져오는 중 (contestProbId=%s)", cid)

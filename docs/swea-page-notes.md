@@ -119,7 +119,7 @@ SWEA 에는 문제 관련 페이지가 **세 종류** 있고, 사용자의 실�
 | `tests/fixtures/problem_without_attachments.html` | TODO | 사용자가 로그인 후 저장 (있으면) |
 | `tests/fixtures/problem_solver_page.html` | 저장됨 | (C) 문제 풀기 화면 (`solvingProblem.do`, "웹페이지, 전체" 저장). 실명·회원번호·제출 코드 치환 완료 |
 | `tests/fixtures/error_page.html` | 저장됨 | 잘못된 `contestProbId` 로 `problemDetail.do` 접근 시 시스템 오류 페이지. 계정 정보 없음 (관리자 메일 `swexpert@samsung.com` 만 있음, 공개 정보) |
-| `tests/fixtures/problem_detail_regular.html` | TODO | 일반 `problemDetail.do` 페이지 (번호 노출 확인용) — 일반 문제(예: 목록의 `27008`)로 열어야 함 |
+| `tests/fixtures/problem_detail_regular.html` | 저장됨 | 일반 `problemDetail.do` (4014). 실명·회원번호 → `DUMMY_USER`. 출제자 공개 닉네임은 유지 |
 
 ## M1 실측 과제 → M2 E2E 에서 확정 (2026-09-16, 실제 세션)
 
@@ -145,5 +145,5 @@ E2E: `swea-fetch -v <첨부 링크 URL> _e2e_test` (문제 `AZq-gSmq_RfHBISS`, 2
 | 상자의 문제 목록 | `GET /main/talk/solvingClub/problemBoxDetail.do?solveclubId=&probBoxId=` (GET 가능) | `div.header-caption` 마다 `input[name=checkContestProbId]`(ID), `span.week_num`(`"25730 ."`), `span.week_text a`(`[07] 항아리 게임` + 상태 badge) |
 
 - `clubView.do?solveclubId=` 도 GET 가능 (주소창에 노출되는 유일한 ID). `problemView.do`/`solvingProblem.do` 는 POST 전용
-- 일반 문제 목록 `problemList.do` 의 `problemTitle` 검색은 제목만 매칭 → 번호 검색 불가. 클럽 문제(25730)는 공개 목록에 없음
-- 성능: 상자 1개 스캔 ≈ 0.7초. 최신 상자부터 훑고 본 상자는 `problem_index.json` 에 캐시
+- 일반 문제 목록 `problemList.do` 의 `problemTitle` 검색은 **번호도 매칭**(검색창 placeholder "문제 번호, 키워드"). `4014`,`1209`,`20728` 등은 여기서, `16268` 은 `userProblemList.do` 에서 찾힘. 부분 일치라 `span.week_num == "{num}."` 로 정확 매칭 필요. 클럽 전용 문제(25730, 24973, 27482, 16456)는 두 목록 모두에 없음 → 클럽 상자 스캔
+- 탐색 순서(`lookup.find_by_number`): 캐시 → Problem 목록 → User Problem 목록 → 클럽 상자(최신순). 성능: 목록 검색 ≈ 0.3초/회, 상자 1개 스캔 ≈ 0.7초. 본 상자·찾은 문제는 `problem_index.json` 에 캐시

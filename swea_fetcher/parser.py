@@ -3,7 +3,7 @@
 페이지 종류 (docs/swea-page-notes.md):
 - "solver": 문제 풀기 화면. h3.problem_title = "25730. [07] 항아리 게임"  ← 번호가 있는 유일한 페이지
 - "club"  : Solving Club 상세. p.problem_title = "[07] 항아리 게임" (번호 없음)
-- "detail": 일반 문제 상세. 픽스처 미확보 — span.week_num / span.week_text 를 시도 (미검증)
+- "detail": 일반 문제 상세 problemDetail.do. p.problem_title = "4014. [모의 SW 역량테스트] 활주로 건설" (M2 확인)
 첨부: div.down_area a[href*="contestProbDown.do"], href 의 downType=in|out 으로 구분
 """
 
@@ -112,7 +112,14 @@ def _parse_club_title(soup: BeautifulSoup) -> str:
 
 
 def _parse_detail_title(soup: BeautifulSoup) -> tuple[int | None, str]:
-    """일반 문제 페이지 — 픽스처 미확보라 미검증. 실패해도 예외 대신 (None, "")."""
+    """일반 문제 페이지. p.problem_title 의 "NNNN. 제목" 을 우선 쓰고, 없으면 목록형 week_num/week_text 폴백.
+    실패해도 예외 대신 (None, "") — cli 가 --num 을 요구한다."""
+    el = soup.select_one(SEL_CLUB_TITLE)  # detail 도 p.problem_title 을 쓴다
+    if el is not None:
+        text = " ".join(_own_text(el).split())
+        m = TITLE_RE.match(text)
+        if m:
+            return int(m.group(1)), m.group(2).strip()
     num_el = soup.select_one(SEL_DETAIL_NUM)
     title_el = soup.select_one(SEL_DETAIL_TITLE)
     num: int | None = None

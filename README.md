@@ -58,7 +58,7 @@ swea-fetch <target> <topic> [--num N] [--force] [-v]
 swea-fetch 25730 IM_test
 ```
 
-번호를 주면 도구가 가입한 Solving Club 의 문제 상자(최신순)를 훑어 문제를 찾습니다. 오늘 상자의 문제는 1~3초, 한 번 본 상자는 `%USERPROFILE%\.swea-fetch\problem_index.json` 에 캐시돼 다음부턴 즉시 찾습니다. 못 찾으면(클럽 밖 문제 등) 아래 형식으로 직접 지정하세요.
+번호를 주면 도구가 이 순서로 문제를 찾습니다 — 로컬 캐시 → SWEA 공개 Problem 목록 검색 → User Problem 목록 검색 → 가입한 Solving Club 의 문제 상자(최신순). 일반 문제·모의고사 문제 모두 번호만으로 됩니다 (보통 1~3초, 한 번 찾은 문제는 `%USERPROFILE%\.swea-fetch\problem_index.json` 에 캐시). 어디서도 못 찾으면 아래 형식으로 직접 지정하세요.
 
 | 형식 | 예 |
 |---|---|
