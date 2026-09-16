@@ -1,0 +1,2470 @@
+<!DOCTYPE html>
+<!-- saved from url=(0065)https://swexpertacademy.com/main/solvingProblem/solvingProblem.do --><html><head><meta content="text/html; charset=utf-8" http-equiv="Content-Type"/>
+<meta content="width=device-width, initial-scale=1, shrink-to-fit=no" name="viewport"/>
+<meta content="IE=Edge" http-equiv="X-UA-Compatible"/>
+<title>SW Expert Academy</title>
+<link href="https://swexpertacademy.com/main/favicon.ico" rel="shortcut icon" type="image/x-icon"/>
+<link href="./raw_solver_files/sw_common.css" rel="stylesheet"/>
+<!-- main -->
+<link href="./raw_solver_files/sw_main.css" rel="stylesheet"/>
+<link href="./raw_solver_files/sw_responsive.css" rel="stylesheet"/>
+<!-- sub main -->
+<link href="./raw_solver_files/sub_main.css" rel="stylesheet"/>
+<link href="./raw_solver_files/sub_responsive.css" rel="stylesheet"/>
+<!-- sub -->
+<link href="./raw_solver_files/sub_learn.css" rel="stylesheet"/>
+<link href="./raw_solver_files/sub_code.css" rel="stylesheet"/>
+<!--공통 JS-->
+<script src="./raw_solver_files/jquery-3.5.0.min.js.다운로드"></script>
+<script src="./raw_solver_files/tether.js.다운로드"></script>
+<script src="./raw_solver_files/bootstrap.min.js.다운로드"></script>
+<script src="./raw_solver_files/sw_common.js.다운로드"></script>
+<!-- IE10 viewport hack for Surface/desktop Windows 8 bug -->
+<script src="./raw_solver_files/ie10-viewport-bug-workaround.js.다운로드"></script>
+<!--[if lt IE 9]>
+	<script src="/main/js/html5shiv.min.js"></script>
+	<script src="/main/js/respond.min.js"></script>
+	<![endif]-->
+<!-- get the required files from 3rd party sources -->
+<!-- [hide] <link href='https://fonts.googleapis.com/css?family=Roboto' rel='stylesheet' type='text/css'> -->
+<link href="./raw_solver_files/roboto.css" rel="stylesheet" type="text/css"/>
+<script src="./raw_solver_files/hkcommonbox.js.다운로드"></script>
+<script src="./raw_solver_files/common.js.다운로드"></script>
+<script language="Javascript" src="./raw_solver_files/codemirror.js.다운로드" type="text/javascript"></script>
+<script language="Javascript" src="./raw_solver_files/matchbrackets.js.다운로드" type="text/javascript"></script>
+<script language="Javascript" src="./raw_solver_files/active-line.js.다운로드" type="text/javascript"></script>
+<script language="Javascript" src="./raw_solver_files/clike.js.다운로드" type="text/javascript"></script>
+<script language="Javascript" src="./raw_solver_files/python.js.다운로드" type="text/javascript"></script>
+<script language="Javascript" src="./raw_solver_files/annotatescrollbar.js.다운로드" type="text/javascript"></script>
+<script language="Javascript" src="./raw_solver_files/fullscreen.js.다운로드" type="text/javascript"></script>
+<script language="Javascript" src="./raw_solver_files/dialog.js.다운로드" type="text/javascript"></script>
+<script language="Javascript" src="./raw_solver_files/searchcursor.js.다운로드" type="text/javascript"></script>
+<script language="Javascript" src="./raw_solver_files/search.js.다운로드" type="text/javascript"></script>
+<script language="Javascript" src="./raw_solver_files/jump-to-line.js.다운로드" type="text/javascript"></script>
+<script language="Javascript" src="./raw_solver_files/match-highlighter.js.다운로드" type="text/javascript"></script>
+<script language="Javascript" src="./raw_solver_files/matchesonscrollbar.js.다운로드" type="text/javascript"></script>
+<script language="Javascript" src="./raw_solver_files/dialog.js.다운로드" type="text/javascript"></script>
+<link href="./raw_solver_files/codemirror.css" rel="stylesheet"/>
+<link href="./raw_solver_files/dialog.css" rel="stylesheet"/>
+<link href="./raw_solver_files/fullscreen.css" rel="stylesheet"/>
+<link href="./raw_solver_files/eclipse.css" rel="stylesheet"/>
+<link href="./raw_solver_files/matchesonscrollbar.css" rel="stylesheet"/>
+<script language="Javascript" src="./raw_solver_files/jquery.form.js.다운로드" type="text/javascript"></script>
+<script src="./raw_solver_files/common-problem.js.다운로드" type="text/javascript"></script>
+<script type="text/javascript">
+	var contextPath="/main";
+	</script>
+</head>
+<body>
+<style>
+.problem_title.category {color:#999; margin:-10px 0 20px 0; font-size:16px;}
+.prob_left {width: 8px !important;}
+.prob_right {left: 85px  !important;}
+</style>
+<link href="./raw_solver_files/sub_main.css" rel="stylesheet"/>
+<script src="./raw_solver_files/tether.min.js.다운로드"></script>
+<script src="./raw_solver_files/util.js.다운로드"></script>
+<script src="./raw_solver_files/tooltip.js.다운로드"></script>
+<script src="./raw_solver_files/popover.js.다운로드"></script>
+<script type="text/javascript">
+var utf8length = 0;
+var isEditChange = false;
+var prevSelCodeLang = "";
+var isSubmit=false;
+
+//var remainSeconds = '' - 0;
+//왼쪽에 보이는 Count 시간 조정
+var remainSeconds = 14401;
+
+var cEditor;
+var mainEditor;
+
+//var prob1Seconds = '508146' - 0;
+var prob1Seconds = 0;
+
+$(document).ready(function()
+{
+	displayCategoryItem('BOX');
+	
+	checkIsFirstOpen('AZq-gSmq_RfHBISS', 'AaCJF07qQGDHBISr', 'BOX');
+
+	
+	displayMySubmitTime();
+	var starttime = new Date("");
+	var endtime = new Date("");
+	
+// 	displayContesttime(starttime,endtime);
+// 	displayTimer('remainTime', remainSeconds);
+// 	displayTimer('probTime1', prob1Seconds);
+
+	/*  */
+
+	tickMinute();
+	//tickSecond();
+	
+	toggleOpen = false;
+// 		init_tabs();
+		
+	var langCd = initCodeLang('C,P,Y'); // 선택가능 언어 셋팅
+	//langCd = ""; // 현업 요청으로 언어 자동 선택 안되게 함. 현업 요청으로 다시 선택되게함.
+
+	// 관리자가 문제 등록시 선택 가능언어로 셋팅하고 응시자가 저장한 값이 있으면 그 값을 셋팅.
+	
+		langCd = "Y";
+	
+
+	prevSelCodeLang = langCd;
+	
+	var chLang;
+    if(langCd == "J")
+    {
+        chLang = "java";
+    }
+    else if(langCd == "C")
+    {
+        chLang = "c";
+    }
+    else if(langCd == "P")
+    {
+        chLang = "cpp";
+    }
+    else if(langCd == "Y")
+    {
+        chLang = "py";
+    }
+    
+	cEditor = CodeMirror.fromTextArea(document.getElementById("textSource"),
+    {
+        lineNumbers: true,
+        styleActiveLine: true,
+        matchBrackets: true,
+        smartIndent: true,
+        indentUnit: 4,
+        mode: getLangMode(chLang),
+        theme: "eclipse",
+	    extraKeys: {
+	      "F11": function(cm) {
+	        cm.setOption("fullScreen", !cm.getOption("fullScreen"));
+	        if (!cm.getOption("fullScreen")) {
+	        	$("#aside").show();
+	        	$("#btnarea").show();
+	        }else {
+	        	$("#aside").hide();
+	        	$("#btnarea").hide();
+	        }
+	      },
+	      "Esc": function(cm) {
+	        if (cm.getOption("fullScreen")) {
+	        	cm.setOption("fullScreen", false);
+	        	$("#aside").show();
+	        	$("#btnarea").show();
+	        }
+	      }
+		}
+   	});
+    
+	
+// 	cEditor.on("change", onEditChange);
+	CodeMirror.signal(cEditor, "change", onEditChange);
+	
+    
+
+    
+// 	var langObj = document.getElementsByName("lang").options;
+	var langObj = $("#sel_lang");
+	
+	for(var i = 0; i < langObj.length ; i++)
+	{
+	    if(langObj[i].value == langCd)
+	    {
+	    	langObj[i].selected = true;
+	    	
+	    	break;
+	    }
+	}
+	
+	var tempLang = "";
+	
+	if(prevSelCodeLang == null || prevSelCodeLang == "") {
+		changeStyle("c");
+		lastLangSourceLoad("C");
+	} else {
+		if(prevSelCodeLang == "J")
+	    {
+			tempLang = "java";
+	    }
+	    else if(prevSelCodeLang == "C")
+	    {
+	    	tempLang = "c";
+	    }
+	    else if(prevSelCodeLang == "P")
+	    {
+	    	tempLang = "cpp";
+	    }
+	    else if(prevSelCodeLang == "Y")
+	    {
+	    	tempLang = "py";
+	    }
+		
+		changeStyle(tempLang);
+		lastLangSourceLoad(prevSelCodeLang);
+	}
+	
+	$(".more-less-left.button").on('click', function(){
+		var element1 = document.getElementById("problem_left");
+		element1.classList.toggle("prob_left");
+		var element2 = document.getElementById("problem_right");
+		element2.classList.toggle("prob_right");
+		var element3 = document.getElementById("more-less-left");
+		element3.classList.toggle("next_page");
+		var element4 = document.getElementById("title_submit");
+		element4.classList.toggle("collapse");
+		var element5 = document.getElementById("submit_num");
+		element5.classList.toggle("collapse");
+	});
+});
+
+function displayCategoryItem(categoryType){
+	if(categoryType == 'KATA'){
+		$(".problem_wrap .header").find('h1').find('span').text('코드 카타  수련');
+		document.getElementById("kataCategoryButton").style.display = '';
+		document.getElementById("defaultCategoryButton").style.display = 'none';
+	}else{
+		document.getElementById("kataCategoryButton").style.display = 'none';
+		document.getElementById("defaultCategoryButton").style.display = '';
+	}
+}
+	
+function displayMySubmitTime(){
+    let submitDate, displayText;
+	
+        submitDate = "2026-09-11 08:44:14".split(' ');
+        displayText = "";
+        if (submitDate) {
+            if (submitDate.length >= 2) {
+                displayText = submitDate[0] + "<br>" + submitDate[1];
+            } else {
+                displayText = submitDate[0];
+            }
+        }
+        $("#submitTime0").html(displayText);
+	
+}
+
+function displayContesttime(starttime,endtime)
+{
+    var year = starttime.getFullYear();
+    var month = starttime.getMonth() + 1;
+    var date = starttime.getDate();
+    var starthour = starttime.getHours();
+    var startminute= starttime.getMinutes();
+    var endhour = endtime.getHours();
+    var endminute= endtime.getMinutes();
+
+	if(month < 10) { month = "0" + month };
+	if(date < 10) { date = "0" + date };
+	if(starthour < 10) { starthour = "0" + starthour };
+	if(startminute < 10) { startminute = "0" + startminute };
+	if(endhour < 10) { endhour = "0" + endhour };
+	if(endminute < 10) { endminute = "0" + endminute };
+
+    $("#contestTime").html(year + "-" + month + "-" + date + " " + starthour + ":" + startminute + " ~ " + endhour + ":" + endminute);
+}
+
+// 시간을 시계로 표시
+function displayTimer(id, sec)
+{
+    var Seconds = sec;
+
+    var Hours = Math.floor(Seconds / 3600);
+    Seconds -= Hours * (3600);
+
+    var Minutes = Math.floor(Seconds / 60);
+    Seconds -= Minutes * (60);
+
+    $("#" + id + "_hour").html(leadingZero(Hours));
+	$("#" + id + "_min").html(leadingZero(Minutes));
+	$("#" + id + "_sec").html(leadingZero(Seconds));
+	
+    
+    $("#" + id).html(leadingZero(Hours) + ":" + leadingZero(Minutes) + ":" + leadingZero(Seconds));
+}
+
+// 시분초 2자리 만들기
+function leadingZero(Time)
+{
+    return (Time < 10)  ? "0" + Time  : +Time;
+}
+
+// 10분마다 호출 세션 끊기지 않도록
+function tickMinute()
+{
+	//var params = {contestId : ''};
+	var url = contextPath + "/scs/satti/contest/contestRemainTime.do";
+
+	$.ajax(
+	{
+		type : "POST",
+		url : url,
+		data : {},
+		async: false,
+		success : function(ret)
+		{
+			if (ret == "" || ret.existSession != "Y") {
+				doAlert("세션이 만료되었습니다. 로그인 페이지로 이동합니다.", function() {
+					document.location.href = contextPath + "/main.do";
+				});
+			} else {
+				//remainSeconds = ret.remainEtime;
+				//displayTimer('remainTime', remainSeconds);
+				
+				if(remainSeconds>0){
+					window.setTimeout("tickMinute()", 60 * 1000 * 10);
+				} 
+			}
+			
+		},
+		error : function(request, err, ex)
+		{
+			doAlert(err + " ===> " + ex, function() {
+					
+			}); 
+		}
+	});
+};
+
+// 1초마다 호출
+/*
+function tickSecond()
+{
+	displayTimer('remainTime', --remainSeconds);
+	if(remainSeconds <= 0)
+	{
+		$("#remainTime").html("00 : 00 : 00");
+		bootbox.alert("제출 시간이 종료되었습니다.\n수고하셨습니다."," ","2",null, function(result) {
+				goEndOnTime();
+				//return;
+		}); 
+		//pop_alert("제출 시간이 종료되었습니다.\n수고하셨습니다.","","5");
+	}
+	else{
+		
+			displayTimer('probTime1', prob1Seconds++);
+			convertTimerColor('probTime1');
+		 
+
+		window.setTimeout("tickSecond()", 1000);
+	}
+}
+*/
+// 모의검정 Session 유지용 Dummy
+function remainSession()
+{
+	var REMAIN_SESSION_URL = contextPath + "/scs/satti/remainSessionSSO.do";
+	
+	$.ajax(
+	{
+		type : "POST",
+		url : REMAIN_SESSION_URL,
+		async: false,
+		success : function(){
+		},
+	});
+	window.setTimeout("remainSession()", 60 * 1000);
+}
+
+//신입 accept 시 타이머 초록색으로
+function convertTimerColor(timerId){
+	$("#"+timerId).removeClass("tim");
+	$("#"+timerId).addClass("timeing");
+}
+
+function getLangMode(lang)
+{
+	var langMode;
+	
+    if(lang == "java")
+    {
+    	langMode = "text/x-java";
+    }
+    else if(lang == "c")
+    {
+    	langMode = "text/x-csrc";
+    }
+    else if(lang == "cpp")
+    {
+    	langMode = "text/x-c++src";
+    }
+    else if(lang == "py")
+    {
+    	langMode = "text/x-python";
+    }
+    
+	return langMode;
+}
+
+//
+function initCodeLang(codeLang)
+{
+//     var langObj = document.getElementsByName("lang").options;
+	var langObj = $("#sel_lang");
+
+    var codeLangSet = "";
+    var arrCodeLang = codeLang.split(",");
+
+    // 관리자가 셋팅한 언어만 disable 을 false 시킨다.
+//     for(var i = 0; i < arrCodeLang.length; i++)
+//     {
+//         for(var j = 0; j < langObj.length; j++)
+//         {
+//             if(arrCodeLang[i] == langObj[j].value)
+//             {
+//                 langObj[j].disabled = false;
+//             }
+//         }
+//     }
+
+    // 관리자 문제 등록시 설정한 문제풀기 언어를 가져온다.
+    // C, C++, Java 순으로 default 셋팅하기위함.
+    var returnValue = "";
+    if(codeLang.indexOf("C") != -1)
+    {
+        returnValue = "C";
+    }
+    else if(codeLang.indexOf("P") != -1)
+    {
+        returnValue = "P";
+    }
+    else if(codeLang.indexOf("J") != -1)
+    {
+        returnValue = "J";
+    }
+    else
+    {
+    	returnValue = "Y";
+    }
+    return returnValue;
+}
+
+// 임시소스 로드
+function imsiSourceLoad(codeLangCd)
+{
+	cEditor.setValue("");
+	    var params =
+	    {
+	        codeLangCd : codeLangCd,
+	        contestProbId : $("#contestProbId").val()
+	    };
+
+	    var url = contextPath + "/scs/satti/sourceTempLoad.do";
+	    $.ajax(
+	    {
+	        type : "POST",
+	        url : url,
+	        data : params,
+	        async : false,
+	        success : function(ret)
+	        {
+	            if(codeLangCd == ret.lang)
+	            {
+	                if(ret.code)
+	                {
+	                    var code1 = ret.code.split("&lt;").join("<");
+	                    var code2 = code1.split("&gt;").join(">");
+        				cEditor.setValue(code2);
+	                    isEditChange = false;
+	                }
+	            }
+	        },
+	        error : function(request, err, ex)
+	        {
+	        	bootbox.alert(err + " ===> " + ex, " ","4",null, function(result) {
+				}); 
+	        }
+	    });
+}
+
+// 소스창 보이기 여부
+function displayTextSource(langCd)
+{
+	if(langCd == "")
+	{
+		$("#textSourceDiv").hide();
+		$("#textInfoDiv").show();
+	}
+	else
+	{
+		$("#textSourceDiv").show();
+		$("#textInfoDiv").hide();
+	}
+}
+
+
+// 언어코드 변경
+function transCodeLangType(codeLang)
+{
+    var returnValue = "";
+    var arrCodeLang = codeLang.split(",");
+
+    for(var i = 0; i < arrCodeLang.length; i++)
+    {
+        if(i == arrCodeLang.length - 1)
+        {
+            if(arrCodeLang[i] == "C")
+            {
+                returnValue += "*.c";
+            }
+            else if(arrCodeLang[i] == "P")
+            {
+                returnValue += "*.cpp";
+            }
+            else if(arrCodeLang[i] == "J")
+            {
+                returnValue += "*.java";
+            }
+            else if(arrCodeLang[i] == "Y")
+            {
+                returnValue += "*.py";
+            }
+        }
+        else
+        {
+            if(arrCodeLang[i] == "C")
+            {
+                returnValue += "*.c,";
+            }
+            else if(arrCodeLang[i] == "P")
+            {
+                returnValue += "*.cpp,";
+            }
+            else if(arrCodeLang[i] == "J")
+            {
+                returnValue += "*.java,";
+            }
+            else if(arrCodeLang[i] == "Y")
+            {
+                returnValue += "*.py,";
+            }
+        }
+    }
+
+    return returnValue;
+}
+
+// 편집 스타일 변경
+function changeStyle(lang)
+{
+	cEditor.setOption("mode", getLangMode(lang));
+	
+	
+
+//     var langObj = document.getElementsByName("lang").options;
+    var langObj = $("#sel_lang");
+    if(lang == "java")
+    {
+        lang = "J";
+    }
+    else if(lang == "c")
+    {
+        lang = "C";
+    }
+    else if(lang == "cpp")
+    {
+        lang = "P";
+    }
+    else if(lang == "py")
+    {
+        lang = "Y";
+    }
+
+    for(var i = 0; i < langObj.length; i++)
+    {
+        if(langObj[i].value == lang)
+        {
+            langObj[i].selected = true;
+            break;
+        }
+    }
+    
+    changeElements(lang);
+}
+
+function changeElements(lang) {		
+	$("#btnf_init").css("visibility", "visible");
+	//$("#fileData").attr("disabled", false);
+	$("#btnf_save").css("visibility", "visible");
+	$("#btnf_compile").css("visibility", "visible");
+	$("#btnf_test").css("visibility", "visible");
+	$(".gotest").css("visibility", "visible")
+	$("#webedit").css("visibility", "visible");
+	$("#webedit").css("visibility", "visible");
+	$(".editbox").show();
+	$(".filep").show();
+	$(".refer").show();
+}
+
+// 마지막 소스로드
+function lastLangSourceLoad(codeLangCd)
+{
+	cEditor.setValue("");
+	if(codeLangCd == 'P')
+	{
+//			$("#mainCode").html("(main.cpp)");
+		$("#userCode").html("(user.cpp)");
+	}
+	
+	if(codeLangCd == 'J')
+	{
+//			$("#mainCode").html("(Solution.java)");
+		$("#userCode").html("(UserSolution.java)");
+	}
+	
+    var params =
+    {
+    	codeLangCd : codeLangCd,
+        contestProbId : $("#contestProbId").val(),
+        categoryType : 'BOX',
+        categoryId : 'AaCJF07qQGDHBISr'
+    };
+
+    var url = contextPath + "/scs/satti/lastLangSourceLoad.do";
+    $.ajax(
+    {
+        type : "POST",
+        url : url,
+        data : params,
+        async : false,
+        success : function(ret)
+        {
+            if(codeLangCd == ret.lang)
+            {
+
+            	if(ret.code)
+                {
+                    var code1 = ret.code.split("&lt;").join("<");
+                    var code2 = code1.split("&gt;").join(">");
+//	                    $("#textSource").val(code2);
+            		cEditor.setValue(code2);
+                    isEditChange = false;
+                }
+                
+                if(ret.mainSource)
+                {
+                	var code1 = ret.mainSource.split("&lt;").join("<");
+                    var code2 = code1.split("&gt;").join(">");
+//	                    $("#textSource").val(code2);
+            		mainEditor.setValue(code2);
+                    isEditChange = false;
+                }
+            }
+        },
+        error : function(request, err, ex)
+        {
+        	doAlert(err + " ===> " + ex, function(result) {
+			});
+        	//pop_alert(err + " ===> " + ex,"","5");
+        }
+    });
+}
+
+function loadInitCodeLang()
+{
+	var lang;
+	var msg = "정말로 초기화하시겠습니까?<br>작성중인 코드가 지워집니다.";
+	
+	doConfirm(msg, function(result) {
+		if(result){
+			
+// 	        var langObj = document.getElementsByName("lang").options;
+	        var langObj = $("#sel_lang");
+	        for(var i = 0; i < langObj.length; i++)
+	        {
+	            if(langObj[i].selected == true)
+	            {
+	                lang = langObj[i].value;
+	            }
+	        }
+
+		    var chLang = "";
+		    
+		    if(lang == "J")
+		    {
+		        chLang = "java";
+		    }
+		    else if(lang == "C")
+		    {
+		        chLang = "c";
+		    }
+		    else if(lang == "P")
+		    {
+		        chLang = "cpp";
+		    }
+		    else if(lang == "Y")
+		    {
+		        chLang = "py";
+		    }
+		    
+		    changeStyle(chLang);
+	        imsiSourceLoad(lang);
+			}
+	}); 
+
+}
+
+function loadPreStepCode()
+{
+	cEditor.setValue("");
+	var codeLangCd = '';
+    var langObj = $("#sel_lang");
+    for(var i = 0; i < langObj.length; i++)
+    {
+        if(langObj[i].selected == true)
+        {
+        	codeLangCd = langObj[i].value;
+        }
+    }
+	
+    var params =
+    {
+    	codeLangCd : codeLangCd,
+        contestProbId : $("#contestProbId").val(),
+        categoryType : 'BOX',
+        categoryId : 'AaCJF07qQGDHBISr'
+    };
+
+    var url = contextPath + "/scs/satti/preStepSourceLoad.do";
+    $.ajax(
+    {
+        type : "POST",
+        url : url,
+        data : params,
+        async : false,
+        success : function(ret)
+        {
+            if(codeLangCd == ret.lang)
+            {
+            	if(ret.code)
+                {
+                    var code1 = ret.code.split("&lt;").join("<");
+                    var code2 = code1.split("&gt;").join(">");
+            		cEditor.setValue(code2);
+                    isEditChange = false;
+                }
+             
+            }
+        },
+        error : function(request, err, ex)
+        {
+        	doAlert(err + " ===> " + ex, function(result) {});
+        }
+    });
+}
+
+function codeLangOnChange(lang) {
+	var isShowConfirm = true;
+	
+	var msg = "언어 변경 시 작성 중인 코드가 지워집니다.<br>변경하시겠습니까?";
+	
+	if(prevSelCodeLang == lang) {
+		isShowConfirm = false;
+	} else {
+		if(prevSelCodeLang == "A") {
+			if(lang != "A")
+				isShowConfirm = false;	
+		} else {
+			isShowConfirm = true;
+		}
+	}
+	
+	if(isShowConfirm) {
+		doConfirm(msg, function(result) {
+			if(result){
+				prevSelCodeLang = lang;
+			    
+				var chLang = "";
+			    
+				if(lang == "J")
+			    {
+			        chLang = "java";
+			    }
+			    else if(lang == "C")
+			    {
+			        chLang = "c";
+			    }
+			    else if(lang == "P")
+			    {
+			        chLang = "cpp";
+			    }
+			    else if(lang == "Y")
+			    {
+			        chLang = "py";
+			    }
+				
+			    var url = contextPath + "/identity/user/updateFavoriteLang.do";
+			    var params =
+			    {
+			        codeLangCd : lang
+			    };
+
+			    $.ajax(
+			    {
+			        type : "POST",
+			        url : url,
+			        data : params,
+			        success : function(ret)
+			        {
+			        },
+			        error : function(request, err, ex)
+			        {
+			        }
+			    });
+
+			    changeStyle(chLang);
+	    		lastLangSourceLoad(lang);			    	
+			} else {
+				$("#sel_lang").val( prevSelCodeLang ).change();
+			}
+		});
+	} else {
+		prevSelCodeLang = lang;
+		   
+		var chLang = "";
+		   
+		if(lang == "J")
+		{
+			chLang = "java";
+		}
+		else if(lang == "C")
+		{
+			chLang = "c";
+		}
+		else if(lang == "P")
+		{
+			chLang = "cpp";
+		}
+		else if(lang == "Y")
+		{
+			chLang = "py";
+		}
+		
+		changeStyle(chLang);
+		   
+		lastLangSourceLoad(lang); 				    	
+	}
+}
+
+
+
+
+// 편집창 변경
+function onEditChange()
+{
+	isEditChange = true;
+}
+
+// 임시저장 처리
+function onEditSave()
+{
+	var lang = "";
+// 	var langObj = document.getElementsByName("lang").options;
+    var langObj = $("#sel_lang");
+    for(var i = 0; i < langObj.length; i++)
+    {
+        if(langObj[i].selected == true)
+        {
+            lang = langObj[i].value;
+        }
+    }
+    
+    if(lang == "A")
+    	return ;
+	
+//	    var value = editAreaLoader.getValue("textSource");
+	var value = cEditor.getValue();
+	
+	var buttonName = "임시저장";
+	
+	if(calculate_msglen(value) > 102400){
+		doAlert("소스코드가 100KB를 초과하였습니다. 100KB 내로 소스코드를 작성하세요.", function(result) {
+				//return false;
+		});
+	}
+	if(checkEmojiString(value) == false){
+		return false;
+	}
+	
+//     var langObj = document.getElementsByName("lang").options;
+	var langObj = $("#sel_lang");
+    var codeLangCd = "";
+    for(var i = 0; i < langObj.length; i++)
+    {
+        if(langObj[i].selected)
+        {
+            codeLangCd = langObj[i].value;
+            break;
+        }
+    }
+
+    var contestProbId = document.mainForm.contestProbId.value;
+//	    var solveclubId = document.mainForm.solveclubId.value;
+	var categoryId = document.mainForm.categoryId.value;
+	var categoryType = document.mainForm.categoryType.value;
+
+    var params =
+    {
+        submitCode : value,
+        codeLangCd : codeLangCd,
+        contestProbId : contestProbId,
+        categoryId : categoryId,
+        categoryType : categoryType,
+        solveStatusCd : "T"
+    };
+
+    var url = contextPath + "/scs/satti/insertTempSource.do";
+    $.ajax(
+    {
+        type : "POST",
+        url : url,
+        data : params,
+        success : function(ret)
+        {
+            if(ret.success == 'Y')
+            {
+                isEditChange = false;
+                doAlert("저장되었습니다.", function(result) {
+    			});
+                //pop_alert("저장되었습니다.",buttonName,"5");
+            }
+        },
+        error : function(request, err, ex)
+        {
+            hideLoading();
+            doAlert(err + " ===> " + ex, function(result) {
+			});
+            //pop_alert(err + " ===> " + ex,buttonName,"5");
+        }
+    });
+
+    return false;
+}
+
+// 컴파일 처리
+function onEditCompile()
+{
+	var lang = "";
+// 	var langObj = document.getElementsByName("lang").options;
+    var langObj = $("#sel_lang");
+    for(var i = 0; i < langObj.length; i++)
+    {
+        if(langObj[i].selected == true)
+        {
+            lang = langObj[i].value;
+        }
+    }
+	
+	$("#btnf_compile").attr("onClick","return false;");
+	
+//	    var value = editAreaLoader.getValue("textSource");
+	var value = cEditor.getValue();
+	
+	var buttonName = "컴파일";
+	
+    if(value == "")
+    {
+        //editAreaLoader.setValue("textSource", "");
+        doAlert("입력하신 소스코드가 없습니다.", function(result) {
+				//return false;
+        	//$("#btnf_compile").removeAttr("disabled");
+        	$("#btnf_compile").attr("onClick","return onEditCompile();");
+		});
+        //pop_alert("입력하신 소스코드가 없습니다.",buttonName,"5");
+        //return false;
+    }
+    else
+    {
+    	if(calculate_msglen(value) > 102400){
+    		doAlert("소스코드가 100KB를 초과하였습니다. 100KB 내로 소스코드를 작성하세요.", function(result) {
+    			 $("#btnf_compile").attr("onClick","return onEditCompile();");
+ 			});
+		}
+    	if(checkEmojiString(value) == false){
+			return false;
+		}
+    	
+        var langType = "";
+//         var langObj = document.getElementsByName("lang").options;
+		var langObj = $("#sel_lang");
+        langType = "";
+        for(var i = 0; i < langObj.length; i++)
+        {
+            if(langObj[i].selected)
+            {
+                langType = langObj[i].value;
+                break;
+            }
+        }
+        if(langType == "J")
+        {
+            langType = "java";
+        }
+        else if(langType == "C")
+        {
+            langType = "c";
+        }
+        else if(langType == "P")
+        {
+            langType = "cpp";
+        }
+        else if(langType == "Y")
+        {
+            langType = "py";
+        }
+        
+        var probId = document.mainForm.contestProbId.value;
+// 	    var solveclubId = document.mainForm.solveclubId.value;
+		var categoryId = document.mainForm.categoryId.value;
+		var categoryType = document.mainForm.categoryType.value;
+
+        showLoading(false, contextPath + "/images/common/loading5.gif", 90, 84);
+        var params =
+        {
+            source : value,
+            langType : langType,
+            //fileName : fileName,
+            probId : probId,
+//	            solveclubId : solveclubId
+	        categoryId : categoryId,
+	        categoryType : categoryType,
+			useOptimize : ''
+        };
+
+        var url = contextPath + "/commonCompileRun/compile.do";
+        $.ajax(
+        {
+            type : "POST",
+            url : url,
+            data : params,
+            dataType : "json",
+            success : function(json)
+            {
+                hideLoading();
+                
+                var vo = json.vo;
+				
+                if(json.result == "success"){
+                	// TODO 컴파일 리턴
+	                if(vo.exitValue == "0")
+	                {
+	                	doAlert("성공적으로 컴파일 되었습니다.", function(result) {
+	                		//$("#btnf_compile").removeAttr("disabled");
+	                		$("#btnf_compile").attr("onClick","return onEditCompile();");
+	        			});
+	                	//pop_alert("성공적으로 컴파일 되었습니다.",buttonName,"5");
+	                }
+	                else
+	                {
+	                	var alertMsg = "컴파일 오류<br>";
+	                    if(vo.exitValue == "H")
+	                    {
+	                    	alertMsg += vo.cmpError;
+	                    	doAlert(alertMsg, function(result) {
+	                    		//$("#btnf_compile").removeAttr("disabled");
+	                    		$("#btnf_compile").attr("onClick","return onEditCompile();");
+	            			});
+	                    	//pop_alert2("컴파일 오류",vo.cmpError,buttonName,"5");
+	                    }
+	                    else if(vo.exitValue == "EB")
+	                    {
+	                    	doAlert("소스코드가 100KB를 초과하였습니다. 100KB 내로 소스코드를 작성하세요.", function(result) {
+	                    		//$("#btnf_compile").removeAttr("disabled");
+	                    		$("#btnf_compile").attr("onClick","return onEditCompile();");
+	            			});
+	                    	//pop_alert2("컴파일 오류","소스코드가 100KB를 초과하였습니다. 100KB 내로 소스코드를 작성하세요.",buttonName,"5");
+	                    }
+	                    else if(vo.exitValue == "NS")
+	                    {
+		                	var alertMgt ="";
+		                	var contestTypeCd = '';
+		                	if(contestTypeCd == 'IG' || contestTypeCd == 'ADV' || contestTypeCd == 'PFC' || contestTypeCd == 'PFH' || contestTypeCd == 'EXP')
+		                	{
+		                		alertMgt = "표준입출력라이브러리만 사용가능합니다. <br>";
+		                	}
+		                	alertMsg += alertMgt+"허용하지 않는 라이브러리가 사용되었습니다.<br> >" + vo.cmpError; 
+		                	doAlert(alertMsg, function(result) {
+		                		//$("#btnf_compile").removeAttr("disabled");
+		                		//return false;
+		                		$("#btnf_compile").attr("onClick","return onEditCompile();");
+	            			});
+		                	//pop_alert2("컴파일 오류",alertMgt+"허용하지 않는 라이브러리가 사용되었습니다.\n >" + vo.cmpError,buttonName,"5");
+		                    //return false;
+	                    }
+	                    else if(vo.exitValue == "FI")
+	                    {
+	                    	alertMsg += "파일 입력 메소드가 사용되었습니다. <br>> " + vo.cmpError+"<br>(제출 코드에는 표준 입출력만 사용해야 합니다.)";
+	                    	doAlert(alertMsg, function(result) {
+	                    		//$("#btnf_compile").removeAttr("disabled");
+	                    		$("#btnf_compile").attr("onClick","return onEditCompile();");
+	                    	});
+	                    	//pop_alert2("컴파일 오류","파일 입력 메소드가 사용되었습니다. \n> " + vo.cmpError+"\n(제출 코드에는 표준 입출력만 사용해야 합니다.)",buttonName,"5");
+	                    }
+	                    else if(vo.exitValue == "UP")
+	                    {
+	                    	alertMsg += "다음 라인에서 package가 선언되었습니다. <br>> " + vo.cmpError+"<br>(제출 코드에는 package 예약어를 사용하면 안됩니다.)";
+	                    	doAlert(alertMsg, function(result) {
+	                    		//$("#btnf_compile").removeAttr("disabled");
+	                    		$("#btnf_compile").attr("onClick","return onEditCompile();");
+	                    	});
+	                    }
+	                    else if(vo.exitValue == "SC")
+	                    {
+	                    	alertMsg += "System call 함수는 사용할 수 없습니다. <br>> " + vo.cmpError;
+	                    	doAlert(alertMsg, function(result) {
+	                    		//$("#btnf_compile").removeAttr("disabled");
+	                    		$("#btnf_compile").attr("onClick","return onEditCompile();");
+	                    	});
+	                    	//pop_alert2("컴파일 오류","System call 함수는 사용할 수 없습니다. \n> " + vo.cmpError,buttonName,"5");
+	                    }
+	                    else
+	                    {
+	                    	alertMsg += "컴파일 오류 : <br>오류 메세지 : <br>" + vo.cmpError;
+	                    	doAlert(alertMsg, function(result) {
+	                    		//$("#btnf_compile").removeAttr("disabled");
+	                    		$("#btnf_compile").attr("onClick","return onEditCompile();");
+	                    	});
+	                    	//pop_alert2("컴파일 오류","컴파일 오류 : \n오류 메세지 : \n" + vo.cmpError,buttonName,"5");
+	                    }
+	                }
+                } else {
+                	doAlert("Server Error", function(result) {
+                		//$("#btnf_compile").removeAttr("disabled");
+                		$("#btnf_compile").attr("onClick","return onEditCompile();");
+        			});
+                	//pop_alert("Server Error",buttonName,"5");
+                }
+               
+            },
+            error : function(request, err, ex)
+            {
+                hideLoading();
+                doAlert(err + " ===> " + ex, function(result) {
+                	//$("#btnf_compile").removeAttr("disabled");
+                	$("#btnf_compile").attr("onClick","return onEditCompile();");
+    			});
+                //pop_alert(err + " ===> " + ex,buttonName,"5");
+            }
+        });
+    }
+    return false;
+}
+
+function getLangType() {
+// 	var langObj = document.getElementsByName("lang").options;
+	var langObj = $("#sel_lang");
+    langType = "";
+
+    for(var i = 0; i < langObj.length; i++)
+    {
+        if(langObj[i].selected)
+        {
+            langType = langObj[i].value;
+            break;
+        }
+    }
+
+    return langType;
+}
+
+// 제출 처리
+function onEditSubmit()
+{
+	$("#btnf_proposal").attr("onClick","return false;");
+	var languageType = getLangType();
+// 	var langObj = document.getElementsByName("lang").options;
+	var langObj = $("#sel_lang");
+    var probId = document.mainForm.contestProbId.value;
+//	    var solveclubId = document.mainForm.solveclubId.value;
+	var categoryId = document.mainForm.categoryId.value;
+	var categoryType = document.mainForm.categoryType.value;
+
+
+//	    var value = editAreaLoader.getValue("textSource");
+    var value = cEditor.getValue();
+    
+    var buttonName = "제출";
+   
+    if(value == "")
+    {
+    	doAlert("입력하신 소스코드가 없습니다.", function(result) {
+				//return false;
+    		$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+		});
+    	//pop_alert("입력하신 소스코드가 없습니다.",buttonName,"5");
+        return false;
+    }
+    
+	if(calculate_msglen(value) > 102400){
+		doAlert("소스코드가 100KB를 초과하였습니다. 100KB 내로 소스코드를 작성하세요.", function(result) {
+				//return false;
+			$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+		});
+		//pop_alert("소스코드가 100KB를 초과하였습니다. 100KB 내로 소스코드를 작성하세요.",buttonName,"5");
+	    return false; 
+	}
+	if(checkEmojiString(value) == false){
+		return false;
+	}
+    var langType = "";
+    
+//     var langObj = document.getElementsByName("lang").options;
+	var langObj = $("#sel_lang");
+    langType = "";
+
+    for(var i = 0; i < langObj.length; i++)
+    {
+        if(langObj[i].selected)
+        {
+            langType = langObj[i].value;
+            break;
+        }
+    }
+
+    if(langType == "J")
+    {
+        langType = "java";
+    }
+    else if(langType == "C")
+    {
+        langType = "c";
+    }
+    else if(langType == "P")
+    {
+        langType = "cpp";
+    }
+    else if(langType == "Y")
+    {
+        langType = "py";
+    }
+    var params =
+    {
+        source : value,
+        langType : langType,
+        //fileName : fileName,
+        probId : probId,
+        categoryId : categoryId,
+        categoryType : categoryType,
+		useOptimize : ''
+//	        solveclubId : solveclubId
+    };
+
+    showLoading(false, contextPath + "/images/common/loading5.gif", 90, 84);
+
+	var url = contextPath + "/commonCompileRun/compile.do";
+    $.ajax(
+    {
+        type : "POST",
+        url : url,
+        data : params,
+        dataType : "json",
+        success : function(json)
+        {
+            hideLoading();
+            
+            if(json.result == "success"){
+            	var vo = json.vo;
+				
+	            // TODO 컴파일 리턴
+	            if(vo.exitValue == "0")
+	            {
+	            	
+	            	var limitSubmit = "99";
+
+		           // bootbox.alert("성공적으로 컴파일 되었습니다.", buttonName, "2", null, function(result) {
+		            		
+	    				var msg = "제출 가능 횟수가 1회 감소합니다.<br>정말로 제출하시겠습니까?";
+
+	    				doConfirm(msg, function(result) {
+				 			setTimeout("",500);
+				 			if(result && !isSubmit){
+				 				isSubmit=true;
+					            $("#btnarea").hide();
+					            showLoading(false, contextPath + "/images/common/loading5.gif", 90, 84);
+					            url = contextPath + "/commonCompileRun/submit.do";
+					            $.ajax(
+					            {
+					                type : "POST",
+					                url : url,
+					                data : params,
+					                dataType : "json",
+					                success : function(json)
+					                {
+					                    hideLoading();
+					                    
+					                    if(json.result == "success"){
+					                        	
+					                     	$("#btnarea").show();
+					                     	
+					                     	processSubmit(json);
+					                     	
+					                     	/* if("N" == "Y") {
+							                    processSubmitExpert(json);
+					                     	} else {
+							                    processSubmit(json);
+					                     	} */
+					                    } else {
+					                      	$("#btnarea").show();
+					                      	doAlert("Server Error", function(result) {
+					                       		$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+					                       		isSubmit=false;
+					               			});
+					                       	//pop_alert("Server Error",buttonName,"5");
+					                    }
+					                        
+					                },
+					                error : function(request, err, ex)
+					                {
+					                    hideLoading();
+					                    $("#btnarea").show();
+					                    doAlert("제출 오류<br>" + err + " ===> " + ex, function(result) {
+					                      	$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+					                       	isSubmit=false;
+					           			});
+					                        //pop_alert2("제출 오류",err + " ===> " + ex,buttonName,"5");
+					                }
+					            });
+				 			}else{
+				 				isSubmit=false;
+				 				$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+				 			}
+						});
+	    			//});
+	            }
+	            else
+	            {
+	            	var alertMsg = "제출 오류<br>";
+	                if(vo.exitValue == "H")
+	                {
+	                	alertMsg += vo.cmpError;
+	                	doAlert(alertMsg, function(result) {
+	        					//return false;
+	                		$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+	        			});
+	                	//pop_alert2("제출 오류",vo.cmpError,buttonName,"5");
+	                    return false;
+	                }
+	                else if(vo.exitValue == "EB")
+                    {
+	                	doAlert("소스코드가 100KB를 초과하였습니다. 100KB 내로 소스코드를 작성하세요.", function(result) {
+	                		$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+	        			});
+	                	//pop_alert("소스코드가 100KB를 초과하였습니다. 100KB 내로 소스코드를 작성하세요.",buttonName,"5");
+                    }
+	                else if(vo.exitValue == "NS")
+	                {
+	                	var alertMgt ="";
+	                	if('' == 'IG' || '' == 'ADV' || '' == 'PFC' || '' == 'PFH' || '' == 'EXP')
+	                	{
+	                		alertMgt = "표준입출력라이브러리만 사용가능합니다. <br>";
+	                	}
+	                	alertMsg += alertMgt+"허용하지 않는 라이브러리가 사용되었습니다. <br> > " + vo.cmpError;
+	                	doAlert(alertMsg, function(result) {
+	        					 //return false;
+	                		$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+	        			});
+	                	//pop_alert2("제출 오류",alertMgt+"허용하지 않는 라이브러리가 사용되었습니다.\n >" + vo.cmpError,buttonName,"5");
+	                    return false;
+	                }
+                    else if(vo.exitValue == "FI")
+                    {
+                    	alertMsg += "파일 입력 메소드가 사용되었습니다. <br>> " + vo.cmpError+"<br>(제출 코드에는 표준 입출력만 사용해야 합니다.)";
+                    	doAlert(alertMsg, function(result) {
+                    		$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+	        			});
+                    	//pop_alert2("제출 오류","파일 입력 메소드가 사용되었습니다. \n> " + vo.cmpError+"\n(제출 코드에는 표준 입출력만 사용해야 합니다.)",buttonName,"5");
+                    }
+                    else if(vo.exitValue == "UP")
+                    {
+                    	alertMsg += "다음 라인에서 package가 선언되었습니다. <br>> " + vo.cmpError+"<br>(제출 코드에는 package 예약어를 사용하면 안됩니다.)";
+                    	doAlert(alertMsg, function(result) {
+                    		$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+            			});
+                    }
+                    else if(vo.exitValue == "SC")
+                    {
+                    	alertMsg += "System call 함수는 사용할 수 없습니다. <br>> " + vo.cmpError;
+                    	doAlert(alertMsg, function(result) {
+                    		$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+	        			});
+                    	//pop_alert2("제출 오류","System call 함수는 사용할 수 없습니다. \n> " + vo.cmpError,buttonName,"5");
+                    }
+	                else
+	                {
+	                	alertMsg += "컴파일 오류 : <br>오류 메세지 : <br>" + vo.cmpError
+	                	doAlert(alertMsg, function(result) {
+	        					//return false;
+	                		$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+	        			});
+	                	//pop_alert2("제출 오류","컴파일 오류 : \n오류 메세지 : \n" + vo.cmpError,buttonName,"5");
+	                    return false;
+	                }
+	            }
+            } else {
+            	doAlert("Server Error", function(result) {
+    					//return false;
+            		$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+    			});
+            	//pop_alert("Server Error",buttonName,"5");
+            	return false;
+            }
+            
+            
+        },
+        error : function(request, err, ex)
+        {
+            hideLoading();
+            doAlert(err + " ===> " + ex, function(result) {
+					//return false;
+            	$("#btnf_proposal").attr("onClick","return onEditSubmit();");
+			});
+            //pop_alert2("제출 오류",err + " ===> " + ex,buttonName,"5");
+            return false;
+        }
+    });
+    return false;
+}
+
+// 제출 리턴처리
+function processSubmit(json)
+{
+    var vo = json.vo;
+    
+    var failString = "채점용 input 파일로 채점한 결과 fail 입니다.";
+	
+    if(json.submitFailed != "")
+    {
+        //submit 불가능한 경우
+        var submitFailStr = "";
+        if(json.submitFailed == "ES")
+        {
+            submitFailStr = "제출이 불가능합니다. <br> 제출 횟수를 다 채웠습니다.";
+            doAlert(submitFailStr, function(result) {
+					goProblemAfterSubmit();
+			});
+        }
+        else if(json.submitFailed == "TU")
+        {
+            submitFailStr = "제출이 불가능합니다. <br>제출 시간이 종료되었습니다.";
+            doAlert(submitFailStr, function(result) {
+					goProblemAfterSubmit();
+			});
+        }
+        return false;
+    }
+    
+    
+    if(vo.runError != "")
+    {
+        //alert("실패 \n (오답)");
+   		var usrScore = vo.usrScore;
+    	if(usrScore == "" || usrScore == null){
+    		usrScore = "0";
+    	}
+        
+        failString += "<br>(오답";
+
+  			if((vo.testCaseNo != null && vo.testCaseNo != "0" && vo.testCaseNo != ""))
+  			{
+      			failString += " :  "+ vo.testCaseNo + "개의 테스트케이스 중 " + vo.correctedCases +"개가 맞았습니다.";
+  			}else{
+	            	failString += ": "+ usrScore +" / 100.0";
+  			}
+        failString += ")<br><br>";
+   		
+        if(vo.timeOut != "") {
+        	failString += "제한시간 초과가 발생하였습니다. 제한시간 초과로 전체 혹은 일부 테스트 케이스는 채점이 되지 않을 수 있습니다.<br>";
+   		} else if(vo.runError != "") {
+   			failString += "런타임 에러가 발생하였습니다. 런타임 에러로 전체 혹은 일부 테스트 케이스는 채점이 되지 않을 수 있습니다. <br>";
+   			failString += "Error Message :<br>";
+   			failString += vo.runError.substring(0,255);
+   			failString += "<br><br>";
+   		}
+        
+        if(vo.gradingResult != "" && vo.gradingResult != null){
+        	failString += "("+vo.gradingResult+") "+ "일부 Output을 해석할 수 없습니다.<br>";
+    	}
+        
+        	doAlert("오답<br>"+failString, function(result) {
+    			goProblemAfterSubmit();
+			});
+        
+        return false;
+    }
+    
+    if(vo.runValue != "" && vo.runValue != null)
+    {
+	    if(vo.timeOut != "" && vo.runValue.indexOf("Fail") != -1 
+	    		&& vo.usrScore != "100" && vo.usrScore != "100.0" && vo.usrScore != "100.00")
+	    {
+    		var usrScore = vo.usrScore;
+        	if(usrScore == "" || usrScore == null){
+        		usrScore = "0";
+        	}
+            //alert(ret.runValue);
+            failString += "<br>(오답";
+
+   			if((vo.testCaseNo != null && vo.testCaseNo != "0" && vo.testCaseNo != ""))
+   			{
+       			failString += " :  "+ vo.testCaseNo + "개의 테스트케이스 중 " + vo.correctedCases +"개가 맞았습니다.";
+   			}else{
+	            	failString += ": "+ usrScore +" / 100.0";
+   			}
+            failString += ")<br><br>";
+    		
+            if(vo.timeOut != "") {
+            	failString += "제한시간 초과가 발생하였습니다. 제한시간 초과로 전체 혹은 일부 테스트 케이스는 채점이 되지 않을 수 있습니다.<br>";
+    		} else if(vo.runError != "") {
+    			failString += "런타임 에러가 발생하였습니다. 런타임 에러로 전체 혹은 일부 테스트 케이스는 채점이 되지 않을 수 있습니다. <br>";
+    			failString += "Error Message :<br>";
+    			failString += vo.runError.substring(0,255);
+    			failString += "<br><br>";
+    		}
+	    	
+	    	if(vo.gradingResult != "" && vo.gradingResult != null){
+	    		failString += "("+vo.gradingResult+") "+ "일부 Output을 해석할 수 없습니다.<br>";
+        	}
+	    	
+	    	doAlert("오답<br>"+failString,function(result) {
+     			goProblemAfterSubmit();
+			});
+	    	
+	        return false;
+	    }
+	    
+        //alert(ret.runValue);
+        if(vo.runValue.indexOf("Pass") != -1 && (vo.usrScore != "0" || vo.usrScore != "") && vo.timeOut == "")
+        {
+        	var successMessage = "";
+    		
+        	successMessage = "제출이 완료되었습니다.";
+    		successMessage += "<br><br>";
+    		
+    		if(vo.timeOut != "") {
+    			successMessage += "제한시간 초과가 발생하였습니다. 제한시간 초과로 전체 혹은 일부 테스트 케이스는 채점이 되지 않을 수 있습니다.<br>";
+    		} else if(vo.runError != "") {
+    			successMessage += "런타임 에러가 발생하였습니다. 런타임 에러로 전체 혹은 일부 테스트 케이스는 채점이 되지 않을 수 있습니다. <br>";
+    			successMessage += "Error Message :<br>";
+    			successMessage += vo.runError.substring(0,255);
+    			successMessage += "<br><br>";
+    		}
+    		
+    		doAlert("축하합니다. Pass입니다.<br>"+successMessage, function(result) {
+    			//KATA 문제 풀이 성공, 현재 상태가 완성이 아닌 경우(다음 단계 문제가 있거나 본 문제 풀이로 KATA를 완성한 경우)체크   
+    			if('BOX' == 'KATA' && '' == 'N'){
+    				goKataProblemAfterPass();
+    			 }else{
+            		goProblemAfterSubmit();
+    			 }
+					//return false;
+			});
+            return false;
+        }
+        else
+        {
+    		var usrScore = vo.usrScore;
+        	if(usrScore == "" || usrScore == null){
+        		usrScore = "0";
+        	}
+            
+            failString += "<br>(오답";
+
+   			if((vo.testCaseNo != null && vo.testCaseNo != "0" && vo.testCaseNo != ""))
+   			{
+       			failString += " :  "+ vo.testCaseNo + "개의 테스트케이스 중 " + vo.correctedCases +"개가 맞았습니다.";
+   			}else{
+	            	failString += ": "+ usrScore +" / 100.0";
+   			}
+            failString += ")<br><br>";
+    		
+            if(vo.timeOut != "") {
+            	failString += "제한시간 초과가 발생하였습니다. 제한시간 초과로 전체 혹은 일부 테스트 케이스는 채점이 되지 않을 수 있습니다.<br>";
+    		} else if(vo.runError != "") {
+    			failString += "런타임 에러가 발생하였습니다. 런타임 에러로 전체 혹은 일부 테스트 케이스는 채점이 되지 않을 수 있습니다. <br>";
+    			failString += "Error Message :<br>";
+    			failString += vo.runError.substring(0,255);
+    			failString += "<br><br>";
+    		}
+            
+            if(vo.gradingResult != "" && vo.gradingResult != null){
+            	failString += "("+vo.gradingResult+") "+ "일부 Output을 해석할 수 없습니다.<br>";
+        	}
+        	
+            doAlert("오답<br>"+failString, function(result) {
+		   		goProblemAfterSubmit();
+			});
+            
+            return false;
+        }
+    }
+}
+
+function processSubmitExpert(json)
+{
+    var vo = json.vo;
+    
+    var failString = "Fail";
+    
+    failString = "채점한 결과 fail 입니다.";
+	
+    if(json.submitFailed != "")
+    {
+        //submit 불가능한 경우
+        var submitFailStr = "";
+        if(json.submitFailed == "ES")
+        {
+            submitFailStr = "제출 횟수를 다 채웠습니다.";
+            doAlert("제출이 불가능합니다. <br>" + submitFailStr, function(result) {
+					goProblemAfterSubmit();
+			});
+        }
+        else if(json.submitFailed == "TU")
+        {
+            submitFailStr = "제출 시간이 종료되었습니다.";
+            doAlert("제출이 불가능합니다. <br>" + submitFailStr, function(result) {
+					goProblemAfterSubmit();
+			});
+        }
+        else if(json.submitFailed == "AP")
+        {
+            submitFailStr = "이미 통과하였습니다.";
+            doAlert("제출이 불가능합니다. <br>" + submitFailStr, function(result) {
+					goProblemAfterSubmit();
+			});
+        }
+    }
+    
+    
+    if(vo.runValue != "")
+    {
+	    if(vo.runValue.indexOf("Fail") != -1 && vo.userResult == "")
+	    {
+    		var usrScore = vo.usrScore;
+        	if(usrScore == "" || usrScore == null){
+        		usrScore = "0";
+        	}
+            //alert(ret.runValue);
+            failString += "<br>(응시자 결과가 없습니다.)<br>";
+    		
+            if(vo.timeOut != "") {
+            	failString += "제한시간 초과가 발생하였습니다. 제한시간 초과로 전체 혹은 일부 테스트 케이스는 채점이 되지 않을 수 있습니다.<br>";
+    		} else if(vo.runError != "") {
+    			failString += "런타임 에러가 발생하였습니다. 런타임 에러로 전체 혹은 일부 테스트 케이스는 채점이 되지 않을 수 있습니다. <br>";
+    			failString += "Error Message :<br>";
+    			failString += vo.runError.substring(0,255);
+    			failString += "<br><br>";
+    		}
+	            
+            if(vo.gradingResult != "" && vo.gradingResult != null){
+       			successMessage += "("+vo.gradingResult+") "+ "일부 Output을 해석할 수 없습니다.<br>";
+        	}
+            
+            doAlert("제출 오류<br>"+failString, function(result) {
+     			goProblemAfterSubmit();
+					
+				});
+	    	
+	        return false;
+	    }
+	    
+        //alert(ret.runValue);
+        if(vo.runValue.indexOf("Pass") != -1 && (vo.userResult != ""))
+        {
+        	var successMessage = "제출이 완료되었습니다.";
+       		successMessage += "<br><br>";
+       		successMessage += "제출 코드 Output : <br> "+ vo.userResult + "<br><br>";
+       		
+       		if(vo.timeOut != "" ) {
+       			successMessage += "제한시간 초과가 발생하였습니다. 제한시간 초과로 전체 혹은 일부 테스트 케이스는 채점이 되지 않을 수 있습니다.<br><br>";
+       		}else if(vo.runError != "") {
+       			successMessage += "런타임 에러가 발생하였습니다. 런타임 에러로 전체 혹은 일부 테스트 케이스는 채점이 되지 않을 수 있습니다. <br>";
+       			successMessage += "Error Message :<br>";
+       			successMessage += vo.runError.substring(0,255);
+       			successMessage += "<br><br>";
+       		}
+       		
+       		if(vo.gradingResult != "" && vo.gradingResult != null){
+       			successMessage += "("+vo.gradingResult+") "+ "일부 Output을 해석할 수 없습니다.<br>";
+        	}
+       		
+       		successMessage += "위 결과는 디버깅 및 최적화에 도움을 드리는 목적으로 제공됩니다.<br>";
+        	successMessage += "최종 점수는 평가용 인풋 데이터로 채점되며, 가채점 결과와 다를 수 있습니다.<br>";
+        	successMessage += "평가용 인풋 데이터는 강화된 예외 처리를 포함하며, 테스트 케이스의 수가 더 많습니다.";
+        	
+        	doAlert("제출<br>"+successMessage, function(result) {
+        			goProblemAfterSubmit();
+					//return false;
+			});
+            return false;
+        }
+    }
+}
+
+// 제출후 문제풀기 화면이동
+function goProblemAfterSubmit(contestProbId)
+{
+	isEditChange = false;
+	mainForm.target = "";
+	mainForm.method = "post";
+	if(contestProbId === undefined){
+		mainForm.contestProbId.value = "AZq-gSmq_RfHBISS";
+	}else{
+		mainForm.contestProbId.value = contestProbId;		
+	}
+	mainForm.action = "/main/solvingProblem/solvingProblem.do";
+	mainForm.submit();
+}
+
+//KATA 문제 풀이 성공 시 다음 단계로 전환 또는 완성 메세지 출력  
+function goKataProblemAfterPass(){
+	opener.location.reload();
+	$.ajax({
+      type	: 'GET',
+      url	: '/main/code/codeKata/nextCodeKataProblem.do',
+      data	: {"kataId":'AaCJF07qQGDHBISr'},
+      success : function(ret){
+    	  if(ret.message == 'Success'){
+    		  var completeYn = ret.data.CompleteYn;
+    		  if(completeYn == 'Y'){
+				doAlert("축하합니다.<br> 카타를 완성하셨습니다.", function(result) {
+					goProblemAfterSubmit();
+				});
+    		  }else{
+        		doConfirm("다음 단계 문제를 이어서 도전하시겠습니까?", function(result) {
+					if(result){
+				  		var nextKataProb = ret.data.nextKataProb;
+				  		goProblemAfterSubmit(nextKataProb.contestProbId);
+					}else{   			   
+						goProblemAfterSubmit();
+					}
+        		});
+    		  }
+    	  }
+     },
+     error : function (request, err, ex) {
+	   			doAlert(err + " ===> " + ex, function() {});
+	   			return true;
+	 		}
+     });
+}
+
+// 응시종료
+function goEndOnTime()
+{
+    document.mainForm.action = "/main/scs/satti/end.do";
+    document.mainForm.submit();
+}
+
+function layer_open(el){
+	//$('.layer').addClass('open');
+	$('#bg').height($('#wrap').height());
+	$('#bg').width($('#wrap').width());
+	$('#bg').fadeIn();
+	$('#answerLayer').fadeIn();
+	var temp = $('#' + el);
+	if (temp.outerHeight() < $(document).height() ) temp.css('margin-top', '-'+temp.outerHeight()/2+'px');
+	else temp.css('top', '0px');
+	if (temp.outerWidth() < $(document).width() ) temp.css('margin-left', '-'+temp.outerWidth()/2+'px');
+	else temp.css('left', '0px');
+}
+
+function fn_answerLayerClose(){
+	$('#answerLayer').fadeOut();
+	$('#bg').fadeOut();
+	
+	return false;
+}
+
+function pop_aboutEditor()
+{
+	var url = "/main/scs/satti/pop_aboutEditor.do?";
+	window.open(url,'abouteditor','top=100,left=350,width=370, height=364,scrollbars=yes,status=0,resizable=yes,menubar=0,toolbar=0,location=0,titlebar=0,directories=0,addressbar:0');
+}
+
+// 웹소켓 컴파일 부분 구현 시작
+// 150622 - 실시간 디버깅 변경 (웹소켓 제거)
+function onRun(){
+		
+	$('#tab02').addClass('on').parent('li').siblings('li').find('a.on').removeClass('on');
+    $('#tab_content02').show().siblings('div.tab_content').hide();
+	
+    $('#tab02').blur();
+    
+		$("#btnarea").attr("disabled",true);
+		
+		var probId = mainForm.contestProbId.value;
+//		var solveclubId = mainForm.solveclubId.value;
+		var value = cEditor.getValue();
+		var categoryId = document.mainForm.categoryId.value;
+	var categoryType = document.mainForm.categoryType.value;
+		
+		// test이면  true
+		var isTest = true;
+		var inputData = $('#scs_input').val();
+    var rv = -1; // Return value assumes failure. 
+
+		if(value == "")
+    {
+			
+			addCompileMsg("입력하신 소스코드가 없습니다.",null,"E");// 입력하신 소스코드가 없습니다.
+        return false;
+    }
+    
+	if(calculate_msglen(value) > 102400){
+		addCompileMsg("소스코드가 100KB를 초과하였습니다. 100KB 내로 소스코드를 작성하세요.",null,"E"); // 소스코드가 128KB를 초과하였습니다. 128KB 내로 소스코드를 작성하세요.
+	    return false;
+	}
+	
+	if(calculate_msglen(inputData) > 1048576){
+		addCompileMsg("Input data가 1MB를 초과하였습니다. 1MB 내로 Input data를 작성하세요.", null,"E"); // Input Data가 1MB를 초과하였습니다. 1MB 내로 작성하세요.
+	    return false;
+	}
+	
+	if(checkEmojiString(value) == false || checkEmojiString(inputData) == false){
+		return false;
+	}
+    var langType = "";
+//     var langObj = contestForm.lang.options;
+    var langObj = $("#sel_lang");
+    langType = "";
+
+    for(var i = 0; i < langObj.length; i++)
+    {
+        if(langObj[i].selected)
+        {
+            langType = langObj[i].value;
+            break;
+        }
+    }
+
+    if(langType == "J")
+    {
+        langType = "java";
+    }
+    else if(langType == "C")
+    {
+        langType = "c";
+    }
+    else if(langType == "P")
+    {
+        langType = "cpp";
+    }
+    else if(langType == "Y")
+    {
+        langType = "py";
+    }
+
+	   	var params =
+   	{
+    	source : value,
+    	langType : langType,
+    	probId : probId,
+//     	solveclubId : solveclubId,
+    	test : isTest,
+    	inputData : inputData,
+    	categoryId : categoryId,
+        categoryType : categoryType,
+    	action : "compile",
+		useOptimize : ''
+   	};
+	   
+	    var myurl = contextPath + "/commonCompileRun/testRun.do";
+	   
+	  	$.ajax(
+	  			{
+	  				type : "POST",
+	  				url : myurl,
+	  				data : params,
+	  				async: true,
+	  				beforeSend : function(){
+	  					showLoading(false, contextPath + "/images/common/loading5.gif", 90, 84);		
+	  				},
+	  				complete : function(){
+	  					hideLoading();
+	  				},
+	  				success : function(ret){
+	  						var message = ret;
+	  						
+	  						if(message.testInput=="Y") {
+ 	  	            		addCompileMsg("Input data가 없으므로 Sample input으로 테스트됩니다.",message.compileTime,"W");
+	  						}
+	  						
+	  	            		if(message.result=="EI"){
+	  	            			
+	  	            			addCompileMsg("TEST 기능에서는 1MB 이상의 입력에 대해 테스트가 불가합니다<br/>※ sample_input.txt 이 1MB 이상인 경우 테스트 불가",message.compileTime,"W");
+	  	            			/* if(message.testInput=="Y") {
+	 	  	            			addCompileMsg("TEST 기능에서는 1MB 이상의 입력에 대해 테스트가 불가합니다<br/>※ sample_input.txt 이 1MB 이상인 경우 테스트 불가",message.compileTime,"W");
+	  	            			} else {
+ 	  	            			addCompileMsg("Input data가 1MB를 초과하였습니다. 1MB 내로 Input data를 작성하세요.",message.compileTime,"W");
+	  	            			} */
+	  	            			
+	  	            		} else if(message.result == "success"){
+
+	  	            			// TODO 컴파일 리턴
+	  	            			if(message.submitFailed != "" && message.submitFailed != null)
+	  			            	{
+  			            	        //submit 불가능한 경우
+  			            	        var submitFailStr = "";
+  			            	        if(message.submitFailed == "ES")
+  			            	        {
+  			            	            submitFailStr = "제출 횟수를 다 채웠습니다.";
+  			            	            addCompileMsg(submitFailStr,message.compileTime,"E");
+  			            	        }
+  			            	        else if(message.submitFailed == "TU")
+  			            	        {
+  			            	            submitFailStr = "제출 시간이 종료되었습니다.";
+  			            	            addCompileMsg(submitFailStr,message.compileTime,"E");
+  			            	            //$('#output').val(submitFailStr); // 시간이 종료되었습니다.
+  			            	        }
+  			            	        else if(message.submitFailed == "AP")
+  			            	        {
+  			            	            submitFailStr = "이미 통과하였습니다."; 
+  			            	            addCompileMsg(submitFailStr,message.compileTime,"E");
+  			            	            
+  			            	            //$('#output').val(submitFailStr); // 이미 통과하였습니다.
+  			            	        }
+  			            	        return false;
+	  			            	}
+	  			            	    
+	  				            if(message.vo.exitValue == "0")
+	  				            {
+	  			            		addCompileMsg("성공적으로 컴파일 되었습니다.",message.compileTime,"S");
+	  				            	//$("#output").val("성공적으로 컴파일 되었습니다."); //성공적으로 컴파일 되었습니다.
+	  			            		addCompileMsg("실행을 시작합니다.",message.compileTime,"S");
+
+	  			             		if(message.cutInput == "Y"){
+	  			            	    	addCompileMsg("Input size는 " + message.inputSize +" byte 이하로 제한되었습니다.",message.compileTime,"W");
+	  			            	    	addCompileMsg("참고로 INPUT 값을 넣지 않으면 제공되는 Sample Input이 기본 INPUT으로 설정되어 실행됩니다.",message.compileTime,"W");
+	  			             			return false;
+	  			             		}
+	  			             	
+	  			            	    if(message.vo.runError != null && message.vo.runError != "")
+	  			            	    {
+	  			            	        if(message.vo.runError.indexOf("Memory Limit Exceeded") != -1 )
+	  			            	        {
+	  			            	        	if(message.vo.cutOutput == true){
+	  			            			    	addCompileMsg("Output size는 " + message.vo.maxOutputSize +" byte 이내로 제한되어 출력되었습니다.",message.compileTime,"W");
+	  			            			    }
+	  			            	        	
+	  			            	        	if(message.vo.userResult != null){
+	  			            	            	addCompileMsg(message.vo.userResult,message.compileTime,"P");
+	  			            	            }
+	  			            	        	addCompileMsg("오류로 인한 실행 중지(메모리 초과오류 발생일 가능성 높음).",message.compileTime,"E");
+	  			            	        	//$('#output').val(failString + "\n오류로 인한 실행 중지(메모리 초과오류 발생일 가능성 높음).");
+	  			            	        	// 오류로 인한 실행 중지(메모리 초과오류 발생일 가능성 높음).
+	  			            	        }
+	  			            	        else 
+	  			            	        {
+	  			            	        	if(message.vo.cutOutput == true){
+	  			            			    	addCompileMsg("Output size는 " + message.vo.maxOutputSize +" byte 이내로 제한되어 출력되었습니다.",message.compileTime,"W");
+	  			            			    }
+	  			            	        	
+	  			            	        	if(message.vo.userResult != null){
+	  			            	            	addCompileMsg(message.vo.userResult,message.compileTime,"P");
+	  			            	            }
+	  			            	        	addCompileMsg("(Runtime error)<br>Error Message:<br>" + message.vo.runError,message.compileTime,"E");
+	  			            	        	
+	  			            	        	//$('#output').val(failString + "\n(Runtime error)\nError Message:\n" + vo.runError);
+	  			            	        }
+	  			            	        return false;
+	  			            	    }
+	  			            	    
+	  			            	    if(message.vo.runValue != "" || message.vo.timeOut != "")
+	  			                	{
+	  			            	    	if(message.vo.timeOut != "" && message.vo.runValue.indexOf("Fail") != -1 
+	  			            		    		&& (message.vo.usrScore == "0" || message.vo.usrScore == "" || message.vo.usrScore == "0.0"))
+	  			            		    {
+	  			            	    		if(message.vo.cutOutput == true){
+	  			            			    	addCompileMsg("Output size는 " + message.vo.maxOutputSize +" byte 이내로 제한되어 출력되었습니다.",message.compileTime,"W");
+	  			            			    }
+	  			            	    		
+	  			            	    		if(message.vo.userResult != null){
+	  			            	            	addCompileMsg(message.vo.userResult,message.compileTime,"P");
+	  			            	            }
+	  			            	    		addCompileMsg("(제한시간 초과)",message.compileTime,"E");
+	  			            	    		//$('#output').val(failString + "\n(제한시간 초과)");
+	  			            	    		return false;
+	  			            		    }
+	  			            	    	
+	  			            	    	if(message.vo.timeOut != "") {
+	  			            	    		
+	  			            	    		if(message.vo.cutOutput == true){
+	  			            			    	addCompileMsg("Output size는 " + message.vo.maxOutputSize +" byte 이내로 제한되어 출력되었습니다.",message.compileTime,"W");
+	  			            			    }
+	  			            	    		
+	  			            	    		if(message.vo.userResult != null){
+	  			            	            	addCompileMsg(message.vo.userResult,message.compileTime,"P");
+	  			            	            }
+	  			            	    		addCompileMsg("제한시간 초과",message.compileTime,"E");
+	  			                		}else if(message.vo.runError != "") {
+	  			                			addCompileMsg("런타임 에러가 발생하였습니다. 런타임 에러로 전체 혹은 일부 테스트 케이스는 채점이 되지 않을 수 있습니다. <br>" + "Error Message :<br>"+message.vo.runError.substring(0,255),message.compileTime,"E");
+	  			                		}else if(message.vo.runValue.indexOf("Fail") != -1) {
+	  			                			addCompileMsg(null,message.compileTime,"E");
+	  			                		}else if(message.vo.runValue.indexOf("Output") != -1) {
+	  			                			addCompileMsg(message.vo.runValue, message.compileTime, "E");
+	  			                		}
+	  			            	    	
+	  			            	    	return false;
+	  			                	}
+	  			            	    
+	  			            	    if(message.vo.userResult != "" && message.vo.userResult != null)
+	  			            	    {
+	  			            	    	if(message.vo.cutOutput == true){
+	  			            		    	addCompileMsg("Output size는 " + message.vo.maxOutputSize +" byte 이내로 제한되어 출력되었습니다.",message.compileTime,"W");
+	  			            		    }
+	  			            	    	
+	  			            	    	addCompileMsg(message.vo.userResult,message.compileTime,"P");
+	  			            	    	//$('#output').val(vo.userResult);
+	  			            	    	
+	  			            	    	addCompileMsg("실행이 완료되었습니다. 실행 시간 : "+message.vo.executionTime+"s" ,message.compileTime,"S");
+	  			            	    	return false;
+	  			            	    }
+	  				            	
+	  				            }
+	  				            else
+	  				            {
+	  				                if(message.vo.exitValue == "H")
+	  				                {
+	  				                	addCompileMsg(message.vo.cmpError,message.compileTime,"E");
+	  				                	//$('#output').val(vo.cmpError);
+	  				                }else if(message.vo.exitValue == "EB"){
+	  		                    		alert("소스코드가 100KB를 초과하였습니다. 100KB 내로 소스코드를 작성하세요.");
+	  		                    	}else if(message.vo.exitValue == "NS"){
+	  				                	var alertMgt ="";
+	  				                	addCompileMsg(alertMgt+"허용하지 않는 라이브러리가 사용되었습니다. \n>" + message.vo.cmpError,message.compileTime,"E");
+	  				                	//$('#output').val(alertMgt+"허용하지 않는 라이브러리가 사용되었습니다.\n >" + vo.cmpError); // 다음 라인에서 허용하지 않는 라이브러리가 사용되었습니다.
+	  				                }else if(message.vo.exitValue == "FI"){
+	  				                	addCompileMsg("파일 입력 메소드가 사용되었습니다. \n> " + message.vo.cmpError+"\n(제출 코드에는 표준 입출력만 사용해야 합니다.)",message.compileTime,"E");
+	  			                    	//$('#output').val("파일 입력 메소드가 사용되었습니다. \n> " + vo.cmpError+"\n(제출 코드에는 표준 입출력만 사용해야 합니다.)");
+	  													// 다음 라인에서 파일 입력 메소드가 사용되었습니다.  (제출 코드에는 표준 입출력만 사용해야 합니다.)
+	  			                    }else if(message.vo.exitValue == "SC"){
+	  			                    	addCompileMsg("System call 함수는 사용할 수 없습니다. \n> " + message.vo.cmpError,message.compileTime,"E");
+	  			  	                	//$('#output').val("System call 함수는 사용할 수 없습니다. \n> " + vo.cmpError);
+	  		                    	}else if(message.vo.exitValue == "UP"){
+	  			                    	addCompileMsg("다음 라인에서 package가 선언되었습니다. \n> " + message.vo.cmpError +"\n(제출 코드에는 package 예약어를 사용하면 안됩니다.)",message.compileTime,"E");
+	  			  	                	//$('#output').val("System call 함수는 사용할 수 없습니다. \n> " + vo.cmpError);
+	  		                    	}else{
+	  		                    		addCompileMsg("컴파일 오류 : \n오류 메세지 : \n" + message.vo.cmpError,message.compileTime,"E");
+	  				                	//$('#output').val("컴파일 오류 : \n오류 메세지 : \n" + vo.cmpError);
+	  				                					// 컴파일 오류 :
+	  				                					// 오류 메세지 :
+	  				                }
+	  				                
+	  				                hideLoading();
+	  				                return false;
+	  				            }
+	  			        	} else {
+	  			        		hideLoading();
+	  			        		//$("#btnarea").attr("disabled",false);
+	  			        		//addCompileMsg("Server Error",message.compileTime,"E");
+	  			        		addCompileMsg("서버 에러가 발생하였습니다. 잠시 후 다시 시도해 주십시오.",message.compileTime,"E");
+	  			        		//$('#output').val("Server Error");
+	  			        	}
+	  						
+	  						
+	  						
+	  							},
+	  				error : function(request, err, ex){
+	  					//addCompileMsg("Server Error",err,"E");
+	  					addCompileMsg("네트워크 에러가 발생하였습니다. 잠시 후 다시 시도해 주십시오.",null,"E");
+	  				}
+	  							
+	  			 });
+	  	 	   
+	  	 	  	//showLoading(false, contextPath + "/images/common/loading5.gif", 90, 84);
+	  	 	  	
+	  	 	  	//var jsonStr = JSON.stringify(params);
+	  	 	  	//ws.send(jsonStr);	
+	  	  		return false;
+	}
+
+// text 크기 체크
+function calculate_msglen(msg)
+{
+    var nbytes = 0;
+    
+    for (var i=0; i<msg.length; i++) {
+     	
+    	var ch = msg.charAt(i);
+    	
+     	if(escape(ch).length > 4) {
+        	nbytes += 2;
+     	} else if (ch == '\n') {
+      		if (msg.charAt(i-1) != '\r') {
+       			nbytes += 1;
+     		}
+     	} else {
+     		nbytes += 1;
+     	}
+    }
+    return nbytes;
+}
+	
+	// input text 초기화
+	// output text 초기화
+	function onTestReset(){
+		$('#scs_input').val('');
+		$('#scs_output').html('');
+	} 	 	 	
+	
+	function toggleTest(){
+		var lang = "";
+// 	var langObj = document.getElementsByName("lang").options;
+    var langObj = $("#sel_lang");
+    for(var i = 0; i < langObj.length; i++)
+    {
+        if(langObj[i].selected == true)
+        {
+            lang = langObj[i].value;
+        }
+    }
+    
+    if(lang == "A")
+    	return ;
+		
+		if($('#count_open2').css('display')=='none'){
+			Closebot();
+		}else{
+			Openbot();
+		}
+	}
+	
+	Date.prototype.format = function(f) {
+	    var d = this;
+	    var hh = d.getHours().zf(2);
+	    var mm = d.getMinutes().zf(2);
+	    var ss = d.getSeconds().zf(2);
+	     
+	    return hh + ":" + mm + ":" + ss;
+	};
+	 
+	String.prototype.string = function(len){var s = '', i = 0; while (i++ < len) { s += this; } return s;};
+	String.prototype.zf = function(len){return "0".string(len - this.length) + this;};
+	Number.prototype.zf = function(len){return this.toString().zf(len);};
+	
+function addCompileMsg(msg,compileTime,type){
+	msg = msg == null ? "Output is empty." : msg;
+	msg = msg.replace(/\n/g, "<br/>");
+	var html="";
+	if(type=="S"){
+		var html = "<li class=\"message\"><span class=\"message_ico\">";						
+	}else if(type=="E"){
+		var html = "<li class=\"error_msg\"><span class=\"error_ico\">";
+	}else if(type=="W"){
+		var html = "<li class=\"warning_msg\"><span class=\"warning_ico\">";
+	}else if(type=="P"){
+		var html = "<li class=\"print_msg\"><span class=\"print_ico\">";
+	}
+	
+	
+	if(compileTime!=null){
+		var time = new Date(compileTime);
+		
+		time.setSeconds(time.getSeconds(), null);
+		html+=time.format();
+	}else{
+		html+=new Date().format();
+	}
+	
+	html+="</span>&nbsp;<span class=\"text\">"+msg+"</span></li>";
+	$('#scs_output').prepend(html);
+	$('#scs_output').scrollTop(0);
+}
+	
+function pop_code(contestProbId, contestHistoryId, submitIndex)
+{
+	var url = "/main/solvingProblem/submitCodePopup.do?contestProbId=" + contestProbId + "&contestHistoryId=" + contestHistoryId+"&submitIndex="+submitIndex;
+	window.open(url,'pop_code','top=100,left=350,width=900, height=545,scrollbars=yes,status=0,resizable=yes,menubar=0,toolbar=0,location=0,titlebar=0,directories=0,addressbar:0');
+}
+
+</script>
+<style type="text/css">
+.CodeMirror {
+  height: 400px;
+}
+</style>
+<form action="https://swexpertacademy.com/main/solvingProblem/solvingProblem.do" autocomplete="off" id="mainForm" method="post" name="mainForm">
+<input id="contestProbId" name="contestProbId" type="hidden" value="AZq-gSmq_RfHBISS"/>
+<input name="isPostMethod" type="hidden" value="Y"/>
+<input name="do_url" type="hidden" value="/main/solvingProblem/solvingProblem.do"/>
+<input name="categoryId" type="hidden" value="AaCJF07qQGDHBISr"/>
+<input name="categoryType" type="hidden" value="BOX"/>
+</form>
+<form action="https://swexpertacademy.com/main/scs/satti/contestSourceLoad.do" autocomplete="off" enctype="multipart/form-data" method="post" name="contestForm">
+<div class="problem_wrap">
+<header class="header">
+<h1 class=""><img alt="SW Expert Academy" src="./raw_solver_files/problem_logo.png"/><span>모의 테스트</span></h1>
+<!-- club_name -->
+<div class="club_name">
+<img alt="user photo" src="./raw_solver_files/no_photo_34_33.png"/>
+<span class="name">DUMMY_USER</span>
+</div>
+<!-- //club_name -->
+</header>
+<!-- problem_left -->
+<div class="problem_left" id="problem_left">
+<div class="panel-heading-left paging2" id="headingLeft">
+<a class="more-less-left pre_page button" id="more-less-left" role="button" style="float:right; margin-right: -20px; background-color: white"></a>
+</div>
+<h2 class="title_submit" id="title_submit">제출결과</h2>
+<!-- submit_num -->
+<div class="submit_num" id="submit_num">
+<span>제출횟수</span>
+<span class="paging_num">
+<span class="active">1</span>
+<span>/</span>
+<span>99</span>
+</span>
+</div>
+<!-- //submit_num -->
+<div style="width:100%; height:90%; overflow:auto">
+<table class="table_type3">
+<caption class="blind">제출결과 정보</caption>
+<colgroup>
+<col style="width:87px;"/>
+<col style="width:114px;"/>
+<col/>
+</colgroup>
+<thead>
+<tr>
+<th scope="col">제출회차</th>
+<th scope="col">제출시간</th>
+<th scope="col">결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1차</td>
+<td id="submitTime0">2026-09-11<br/>08:44:14</td>
+<td>
+<span class="fail">Fail (제한시간 초과)</span>
+<a .="" class="btn_line btn xs" href="javascript:;" onclick="pop_code('AZq-gSmq_RfHBISS', 'AaCNtSia8lTHBIPI', '1'); return false;">코드보기</a>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- //problem_left -->
+<!-- problem_right -->
+<div class="problem_right" id="problem_right">
+<div class="problem_box">
+<h3 class="problem_title">25730. [07] 항아리 게임</h3>
+</div>
+<!-- panel-group -->
+<div aria-multiselectable="true" class="panel-group" id="accordion" role="tablist">
+<div class="panel panel-default">
+<div class="panel-heading" id="headingOne" role="tab">
+<div class="title-attak-input blue">
+<a aria-controls="collapseOne" aria-expanded="true" data-parent="#accordion" data-toggle="collapse" href="https://swexpertacademy.com/main/solvingProblem/solvingProblem.do#collapseOne" role="button">
+<i class="more-less icon_arr_down"></i>문제 내용</a>
+</div>
+</div>
+<div aria-labelledby="headingOne" class="panel-collapse collapse show" id="collapseOne" role="tabpanel">
+<!-- panel-body -->
+<div class="panel-body">
+<!-- box3 -->
+<div class="box3">
+<ul class="list_type2 ico">
+<li>
+<span>시간</span>
+<span>: 30개 테스트케이스를 합쳐서 
+									
+									<em>C의 경우 1초 </em> 
+									
+									
+									/ <em>C++의 경우 1초 </em>
+									
+									
+									
+									/ <em>Python의 경우 1초</em>
+</span>
+</li>
+<li>
+<span>메모리</span>
+<span>: 힙, 정적 메모리 합쳐서 <em>256MB</em> 이내, 스택 메모리 <em>1MB</em> 이내</span>
+</li>
+</ul>
+</div>
+<!-- //box3 -->
+<!-- box4 -->
+<div class="box4">
+<p class="txt">
+</p><p google="" sans="" style="padding-top: 0px; padding-bottom: 0px; font-family: " text="">플레이어는 1번 구역에서 출발하여 N번 구역(도착점)까지 가야 하는 플랫포머 게임을 하고 있다.</p>
+<p google="" sans="" style="padding-top: 0px; padding-bottom: 0px; font-family: " text="">1번 구역은 튜토리얼이라 쉽게 2번 구역으로 넘어갈 수 있다.</p>
+<p google="" sans="" style="padding-top: 0px; padding-bottom: 0px; font-family: " text="">하지만 2번 구역부터 N-1번 구역까지는 '미끄러운 발판'이 있다.<br/>
+<br/>
+플레이어가 <b google="" sans="" style="font-family: " text=""><span class="math-inline" data-math="i" google="" sans="" style="font-family: " text="">i</span>번 돌을 밟는 횟수가 홀수 번째(1번째, 3번째, 5번째...)라면</b>, 미끄러져서 뒤쪽인 P[i]번 발판으로 되돌아가게 된다. (<span class="math-inline" data-math="P[i] &lt; i" google="" sans="" style="font-family: " text="">P[i] &lt; i</span>)<br/>
+<br/>
+다행히 <b google="" sans="" style="font-family: " text=""><span class="math-inline" data-math="i" google="" sans="" style="font-family: " text="">i</span>번 돌을 짝수 번째(2번째, 4번째...) 밟게 되면</b>, 요령이 생겨 미끄러지지 않고 다음 발판(<span class="math-inline" data-math="i+1" google="" sans="" style="font-family: " text="">i+1</span>)으로 건너갈 수 있다.</p>
+<p google="" sans="" style="padding-top: 0px; padding-bottom: 0px; font-family: " text="">1번 구역에서 시작하여 N번 구역에 도착할 때까지 플레이어가 구역을 이동한 횟수의 합을 구하시오.<br/>
+<br/>
+ </p>
+<p data-path-to-node="16" google="" sans="" style="font-family: " text=""><b google="" sans="" style="font-family: " text="">[입력]</b></p>
+<ul data-path-to-node="17" google="" sans="" style="padding-inline-start: 32px; font-family: " text="">
+<li google="" sans="" style="font-family: " text="">
+<p data-path-to-node="17,0,0" google="" sans="" style="font-family: " text="">첫 줄에 테스트 케이스의 수 <span class="math-inline" data-math="T" google="" sans="" style="font-family: " text="">T</span>가 주어진다.</p>
+</li>
+<li google="" sans="" style="font-family: " text="">
+<p data-path-to-node="17,1,0" google="" sans="" style="font-family: " text="">각 테스트 케이스의 첫 줄에는 <span class="math-inline" data-math="N" google="" sans="" style="font-family: " text="">N</span> (<span class="math-inline" data-math="4 \le N \le 500" google="" sans="" style="font-family: " text="">4 &lt;= N &lt;= 20</span>)이 주어진다.</p>
+</li>
+<li google="" sans="" style="font-family: " text="">
+<p data-path-to-node="17,2,0" google="" sans="" style="font-family: " text="">다음 줄에는 각 층(또는 줄/구역)에서 되돌아가는 위치 P[i]의 값들이 공백으로 구분되어 주어진다. (P[1]과 <span class="math-inline" data-math="P[N]" google="" sans="" style="font-family: " text="">P[N]</span> 데이터는 입력에는 포함되지만 계산에는 쓰이지 않음에 주의)</p>
+</li>
+</ul>
+<p data-path-to-node="18" google="" sans="" style="font-family: " text=""><b google="" sans="" style="font-family: " text="">[출력]</b></p>
+<ul data-path-to-node="19" google="" sans="" style="padding-inline-start: 32px; font-family: " text="">
+<li google="" sans="" style="font-family: " text="">
+<p data-path-to-node="19,0,0" google="" sans="" style="font-family: " text="">각 줄은 <code google="" sans="" style="font-family: " text="">#x</code> (테스트 케이스 번호)로 시작하고, 공백을 두고 총 이동 횟수를 출력한다.</p>
+</li>
+</ul>
+<p></p>
+</div>
+<!-- //box4 -->
+<!-- box_type1 -->
+<div class="box_type1">
+<div class="left">
+<div class="box5 height">
+<span class="title1">입력<button class="test-button input" type="button">Copy Input</button></span>
+									3<br/>
+4<br/>
+0 1 2 0<br/>
+4<br/>
+0 1 1 0<br/>
+5<br/>
+0 1 2 3 0
+									<!-- down_area -->
+<div class="down_area">
+<a href="https://swexpertacademy.com/main/common/contestProb/contestProbDown.do?downType=in&amp;contestProbId=AZq-gSmq_RfHBISS">
+<span>input7_sample.txt</span>
+<i class="icon_file_download"><span class="hide">다운로드</span></i>
+</a>
+</div>
+<!-- //down_area -->
+</div>
+</div>
+<div class="right">
+<div class="box5 height">
+<span class="title1">출력<button class="test-button output" type="button">Copy Output</button></span>
+									#1 9<br/>
+#2 10<br/>
+#3 16
+									<!-- down_area -->
+<div class="down_area">
+<a href="https://swexpertacademy.com/main/common/contestProb/contestProbDown.do?downType=out&amp;contestProbId=AZq-gSmq_RfHBISS">
+<span>output7_sample.txt</span>
+<i class="icon_file_download"><span class="hide">다운로드</span></i>
+</a>
+</div>
+<!-- //down_area -->
+</div>
+</div>
+</div>
+<!-- //box_type1 -->
+</div>
+<!-- //panel-body -->
+</div>
+</div>
+<div class="panel panel-default">
+<div class="panel-heading" id="headingTwo" role="tab">
+<div class="title-attak-input blue">
+<a aria-controls="collapseTwo" aria-expanded="false" class="collapsed" data-parent="#accordion" data-toggle="collapse" href="https://swexpertacademy.com/main/solvingProblem/solvingProblem.do#collapseTwo" role="button">
+<i class="more-less icon_arr_down"></i>문제 풀이</a>
+</div>
+</div>
+<div aria-labelledby="headingTwo" class="panel-collapse collapse show" id="collapseTwo" role="tabpanel">
+<!-- panel-body -->
+<div class="panel-body">
+<!-- problem_code_top -->
+<div class="problem_code_top">
+<div class="fl_left">
+<label for="sel_lang">Language</label>
+<div class="styled-select lang">
+<select id="sel_lang" name="lang" onchange="codeLangOnChange(this.value)">
+<option value="C">C (gcc-10.5)</option>
+<option value="P">C++14 (gcc-10.5)</option>
+<option selected="selected" value="Y">Python 3.7 (PyPy 7.3.9)</option>
+</select>
+</div>
+</div>
+<div class="btn_right" id="kataCategoryButton" style="display: none;">
+<a class="btn btn_grey sm" href="https://swexpertacademy.com/main/solvingProblem/solvingProblem.do#" onclick="loadPreStepCode(); return false;">이전 단계 코드 가져오기</a>
+<a class="btn btn_grey sm" href="https://swexpertacademy.com/main/solvingProblem/solvingProblem.do#" onclick="loadInitCodeLang(); return false;">소스코드 초기화</a>
+</div>
+</div>
+<!-- //problem_code_top -->
+<!-- main code -->
+<!-- //main code -->
+<!-- code_wrap2 -->
+<div class="code_wrap2" style="overflow: hidden;">
+<div class="code_in">
+<!-- code 영역 -->
+<textarea class="text_area" id="textSource" name="textSource" style="display: none;"># DUMMY_SOURCE
+</textarea><div class="CodeMirror cm-s-eclipse">DUMMY_EDITOR</div>
+</div>
+</div>
+<div class="btn_right" id="defaultCategoryButton">
+<a class="btn btn_line sm" href="https://swexpertacademy.com/main/solvingProblem/solvingProblem.do#" onclick="loadInitCodeLang(); return false;">소스 코드 초기화</a>
+</div>
+<!-- //code_wrap2 -->
+<div class="test_top_area">
+<span class="tit">TEST</span>
+<a class="btn_up" href="https://swexpertacademy.com/main/solvingProblem/solvingProblem.do#none"><span class="hide">열고닫기</span></a>
+</div>
+<!-- test_wrap -->
+<div class="border_top">
+<div class="test_wrap">
+<p class="ico_infotxt"><i></i>Input 을 입력하고 Run을 선택하면 Output 결과를 확인할 수 있습니다. Input 값을 넣지 않으면 기본 Input값이 적용되어 실행됩니다. Test는 채점을 하는 것이 아니며 정답 여부를 알려주지 않습니다.</p>
+<div class="test_in">
+<div class="left">
+<span class="tit">Input</span>
+<textarea class="text_area" id="scs_input" name="inputText" placeholder="Input값을 입력해 주세요."></textarea>
+</div>
+<div class="right">
+<span class="tit">Output</span>
+<div class="text_area" id="scs_output">
+</div>
+</div>
+</div>
+<div class="btn_right">
+<a class="btn btn_line sm" href="https://swexpertacademy.com/main/solvingProblem/solvingProblem.do#none" onclick="return onRun(); return false;">Run</a>
+<a class="btn btn_line sm" href="https://swexpertacademy.com/main/solvingProblem/solvingProblem.do#none" onclick="onTestReset(); return false;">Clear</a>
+</div>
+</div>
+<!-- //test_wrap -->
+</div>
+<!-- //panel-body -->
+</div>
+</div>
+</div>
+<script type="text/javascript">
+			function toggleIcon(e) {
+				$(e.target)
+						.prev('.panel-heading')
+						.find(".more-less")
+						.toggleClass('icon_arr_down icon_arr_up');
+			}
+			$('.panel-group').on('hidden.bs.collapse', toggleIcon);
+			$('.panel-group').on('shown.bs.collapse', toggleIcon);
+		</script>
+</div>
+<!-- // panel-group -->
+<!-- btn_center -->
+<div class="btn_center">
+<a class="btn_line btn lg" href="https://swexpertacademy.com/main/solvingProblem/solvingProblem.do#none" onclick="return onEditSave();">임시저장</a>
+<a class="btn_line btn lg" href="https://swexpertacademy.com/main/solvingProblem/solvingProblem.do#none" id="btnf_compile" onclick="return onEditCompile();" style="visibility: visible;">컴파일</a>
+<a class="btn_blue btn lg" href="https://swexpertacademy.com/main/solvingProblem/solvingProblem.do#none" id="btnf_proposal" onclick="return onEditSubmit();">제출</a>
+</div>
+<!-- //btn_center -->
+</div>
+<!-- //problem_right -->
+</div>
+</form>
+</body></html>

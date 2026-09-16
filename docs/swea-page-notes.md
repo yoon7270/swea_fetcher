@@ -1,7 +1,7 @@
 # SWEA 페이지 구조 조사 노트 (M0 spike)
 
 조사일: 2026-09-16. 기준 호스트 `https://swexpertacademy.com`.
-비로그인 관찰은 `requests` 로 직접 확인함. 로그인 후 페이지는 사용자가 브라우저에서 저장해 준 HTML(Solving Club 문제 페이지 1건)로 확인함. 남은 `TODO` 는 일반 `problemDetail.do` 페이지 확인 건.
+비로그인 관찰은 `requests` 로 직접 확인함. 로그인 후 페이지는 사용자가 브라우저에서 저장해 준 HTML(Solving Club 문제 페이지, 문제 풀기 편집 화면)로 확인함. 남은 `TODO` 는 일반 `problemDetail.do` 페이지와 첨부 없는 문제 확인 건.
 
 ## 로그인
 
@@ -30,12 +30,14 @@
 
 ## 문제 페이지
 
-SWEA 에는 문제 페이지가 **두 종류** 있고, 사용자의 실제 사용 경로는 (B) Solving Club 이다.
+SWEA 에는 문제 관련 페이지가 **세 종류** 있고, 사용자의 실제 사용 경로는 (B) → "문제 풀기" → (C) 이다. **문제 번호는 (C) 에만 있다.**
 
-| | (A) 일반 문제 | (B) Solving Club 문제 (SSAFY 모의고사 등) |
-|---|---|---|
-| URL | `GET /main/code/problem/problemDetail.do?contestProbId={id}` | `POST /main/talk/solvingClub/problemView.do` (hidden form `solveclubId`, `probBoxId`, `contestProbId`) — 주소창에는 파라미터가 안 보임 |
-| 확인 상태 | 비로그인 302 만 확인. 로그인 후 구조 **TODO** | 픽스처 확보 (`problem_with_attachments.html`) |
+| | (A) 일반 문제 상세 | (B) Solving Club 문제 상세 (SSAFY 모의고사 등) | (C) 문제 풀기(코드 편집) 화면 |
+|---|---|---|---|
+| URL | `GET /main/code/problem/problemDetail.do?contestProbId={id}` | `POST /main/talk/solvingClub/problemView.do` (hidden `solveclubId`, `probBoxId`, `contestProbId`) | `POST /main/solvingProblem/solvingProblem.do` (hidden `contestProbId`, `categoryId`, `categoryType=BOX`, `isPostMethod=Y`, `do_url`) — **GET 으로 열면 오류 페이지** |
+| 번호 | (미확인) | 없음 | **있음** `h3.problem_title` |
+| 첨부 링크 | (미확인) | `div.down_area` | `div.down_area` (동일) |
+| 확인 상태 | 비로그인 302 만 확인. **TODO** | 픽스처 `problem_with_attachments.html` | 픽스처 `problem_solver_page.html` |
 
 - `contestProbId` 는 `AZq-gSmq_RfHBISS` 같은 16자 영숫자(`-`,`_` 포함). 문제 번호와 무관
 - 비로그인 접근: **302 → `/main/identity/anonymous/loginPage.do`** (본문 0 byte). `login_redirect.html` 픽스처는 따로 없음
@@ -63,6 +65,22 @@ SWEA 에는 문제 페이지가 **두 종류** 있고, 사용자의 실제 사�
 - 첨부 없는 경우 특징: **TODO** (첨부 없는 문제 페이지 미확보). 예상: `div.down_area` 자체가 없음 → 파서는 `down_area` 0개를 "첨부 없음"으로 처리
 - 본문: `div.tabcon > div.box4` (문제 설명), 제한사항 `div.box3 ul.list_type2`
 
+### (C) 문제 풀기 화면 구조 (확인됨) — **`parse` 의 1차 대상**
+- 새 창(팝업)으로 열림. `form#mainForm[action=/main/solvingProblem/solvingProblem.do]` 안에 전체 내용
+- **번호·제목 선택자: `h3.problem_title`** (부모 `div.problem_box`, 그 위 `div#problem_right.problem_right > div.problem_wrap`)
+  - 텍스트: `"25730. [07] 항아리 게임"` → 정규식 `^(\d+)\.\s*(?:\[\d+\]\s*)?(.+)$` 로 번호 `25730`, 제목 `항아리 게임` 추출 (`[07]` 은 모의고사 순번, 일반 문제에선 없을 수 있으므로 선택 그룹)
+- **첨부 링크: `div.down_area a[href*="contestProbDown.do"]`** 2개 — (B) 와 같은 구조. href 는 `.../contestProbDown.do?downType=in&contestProbId=AZq-gSmq_RfHBISS` (여기선 `_menuId` 없음)
+- 문제 ID: `#mainForm input[name=contestProbId]`, 상자 ID: `input[name=categoryId]` (= (B) 의 `probBoxId`)
+- 사용자 개인 정보가 들어 있는 곳: 헤더 `span.name` (실명+회원번호), `textarea#textSource` (제출 코드), `div.CodeMirror` (에디터 렌더링) → 픽스처에서 `DUMMY_USER` / `# DUMMY_SOURCE` / `DUMMY_EDITOR` 로 치환
+- 픽스처는 Chrome "웹페이지, 전체" 로 저장한 것이라 CSS/JS/이미지 경로가 `./raw_solver_files/...` 로 바뀌어 있음 (선택자·href 파싱엔 영향 없음). "HTML만" 저장은 GET 재요청이라 오류 페이지가 저장됨
+- **M1 에서 실측할 것**: requests 로 `POST solvingProblem.do` 에 `contestProbId`(+`categoryId`, `categoryType=BOX`) 를 보내면 같은 HTML 이 오는지. `categoryId` 없이도 되는지
+
+### 도구 입력 방식 후보 (M1 착수 시 결정)
+(C) 화면은 POST 라 주소창 URL 을 붙여넣을 수 없다. 사용자가 쉽게 복사할 수 있는 값은:
+1. (B)/(C) 화면에서 `input7_sample.txt` 우클릭 → "링크 주소 복사" → `contestProbDown.do?downType=in&contestProbId=...` — `contestProbId` 가 들어 있음. `categoryId` 는 없음
+2. `contestProbId` 문자열 직접 입력
+→ `cli` 는 URL 이든 ID 든 받아 `contestProbId` 를 뽑고, `fetch` 가 (C) 를 POST 로 가져오는 구조가 유력
+
 ### (A) 일반 문제 페이지 (TODO)
 - 공개 목록 페이지 `/main/code/problem/problemList.do` 는 비로그인 200 이며 각 문제가
   ```html
@@ -88,8 +106,8 @@ SWEA 에는 문제 페이지가 **두 종류** 있고, 사용자의 실제 사�
 ## 확정된 가정
 
 - A1-1: **확정(조건부)** — ID/PW 를 평문 form-urlencoded 로 `login.do` 에 POST 하면 JSON 으로 결과가 온다. 캡차·CSRF·JS 암호화 없음. 예외는 계정 단위 MFA(`message == "mfa"`) — 사용자 계정으로 1회 확인 필요. → `auth` 는 requests 만으로 구현, Playwright 불필요
-- A2: **부분 확정 → 수정 필요** — 첨부는 `div.down_area a[href*=contestProbDown.do]` 로 존재하고 `downType=in|out` 으로 입·출력이 구분된다. 단 **파일명은 `sample_input.txt` 고정이 아니라 `input7_sample.txt` 처럼 가변** → 파서는 파일명이 아니라 `downType` 으로 판별. 첨부 없는 문제의 형태는 미확인
-- A3: **불성립 (Solving Club 페이지)** — 제목은 `p.problem_title` 의 `"[07] 항아리 게임"` 이며 `[07]` 은 상자 내 순번. SWEA 문제 번호는 페이지에 없음. → 번호는 (1) 일반 `problemDetail.do` 페이지에서 얻거나 (2) `--num` 옵션으로 사용자가 지정해야 함. 일반 페이지의 번호 노출 여부는 TODO
+- A2: **부분 확정 → 수정 필요** — 첨부는 (B)/(C) 모두 `div.down_area a[href*=contestProbDown.do]` 로 존재하고 `downType=in|out` 으로 입·출력이 구분된다. 단 **파일명은 `sample_input.txt` 고정이 아니라 `input7_sample.txt` 처럼 가변** → 파서는 파일명이 아니라 `downType` 으로 판별. 첨부 없는 문제의 형태는 미확인
+- A3: **확정 (단, 페이지 한정)** — 번호는 (C) 문제 풀기 화면의 `h3.problem_title` 에 `"25730. [07] 항아리 게임"` 형태로만 노출됨. (B) Solving Club 상세 페이지의 `p.problem_title` 은 `"[07] 항아리 게임"` 으로 번호가 없음. → `parse` 는 (C) 를 대상으로 하고, `--num` 은 예비 수단으로 유지
 
 ## 픽스처
 
@@ -99,5 +117,6 @@ SWEA 에는 문제 페이지가 **두 종류** 있고, 사용자의 실제 사�
 | `tests/fixtures/login_redirect.html` | 해당 없음 | 302 응답이며 본문이 비어 있음 (위 설명) |
 | `tests/fixtures/problem_with_attachments.html` | 저장됨 | Solving Club 문제 페이지 (`problemView.do`). 닉네임·사용자 키 치환 완료 |
 | `tests/fixtures/problem_without_attachments.html` | TODO | 사용자가 로그인 후 저장 (있으면) |
+| `tests/fixtures/problem_solver_page.html` | 저장됨 | (C) 문제 풀기 화면 (`solvingProblem.do`, "웹페이지, 전체" 저장). 실명·회원번호·제출 코드 치환 완료 |
 | `tests/fixtures/error_page.html` | 저장됨 | 잘못된 `contestProbId` 로 `problemDetail.do` 접근 시 시스템 오류 페이지. 계정 정보 없음 (관리자 메일 `swexpert@samsung.com` 만 있음, 공개 정보) |
 | `tests/fixtures/problem_detail_regular.html` | TODO | 일반 `problemDetail.do` 페이지 (번호 노출 확인용) — 일반 문제(예: 목록의 `27008`)로 열어야 함 |
