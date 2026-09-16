@@ -121,8 +121,15 @@ SWEA 에는 문제 관련 페이지가 **세 종류** 있고, 사용자의 실�
 | `tests/fixtures/error_page.html` | 저장됨 | 잘못된 `contestProbId` 로 `problemDetail.do` 접근 시 시스템 오류 페이지. 계정 정보 없음 (관리자 메일 `swexpert@samsung.com` 만 있음, 공개 정보) |
 | `tests/fixtures/problem_detail_regular.html` | TODO | 일반 `problemDetail.do` 페이지 (번호 노출 확인용) — 일반 문제(예: 목록의 `27008`)로 열어야 함 |
 
-## M1 실측 과제 (미완 — M2 E2E 로 이월)
+## M1 실측 과제 → M2 E2E 에서 확정 (2026-09-16, 실제 세션)
 
-- `POST /main/solvingProblem/solvingProblem.do` 에 `categoryId` 없이 `{contestProbId, categoryType=BOX, isPostMethod=Y}` 만 보내도 (C) 페이지가 오는지 — **미실측**. M1 시점에 `~/.swea-fetch/.env` 가 없어 실제 세션으로 확인하지 못함. `client.fetch_problem_page` 는 우선 이 형태로 POST 하고, 실패하면 `problemDetail.do` 로 폴백하도록 구현됨. M2 E2E 에서 안 되면 `parse.extract_contest_prob_id` 를 확장해 `categoryId`(=`probBoxId`) 도 받도록 할 것
-- `contestProbDown.do` 다운로드에 `Referer` 외 추가 헤더가 필요한지 — 미실측 (현재 `Referer: .../solvingProblem.do` 만 붙임)
-- 일반 (A) `problemDetail.do` 페이지의 번호·제목 선택자 — `span.week_num`/`span.week_text` 로 구현했으나 **미검증**
+E2E: `swea-fetch -v <첨부 링크 URL> _e2e_test` (문제 `AZq-gSmq_RfHBISS`, 25730). 결과 폴더는 확인 후 삭제.
+
+| 과제 | 결과 |
+|---|---|
+| `POST solvingProblem.do` 에 `categoryId` 없이 `{contestProbId, categoryType=BOX, isPostMethod=Y}` 만 보내도 되는가 | **된다.** HTTP 200, `h3.problem_title` 포함 81 KB solver 페이지 → `page_kind == "solver"`, 번호 25730 추출. `categoryId`/`probBoxId` 불필요 → §5 대응 절차 불필요, 도구 입력은 `contestProbId` 만으로 충분 |
+| `contestProbDown.do` 다운로드에 추가 헤더가 필요한가 | **불필요.** 세션 쿠키 + `Referer: .../solvingProblem.do` 만으로 200, 본문은 텍스트(`3
+4
+0 1 2 0...`). 사용자가 브라우저로 받아 둔 `input7_sample.txt` 와 바이트 단위 동일 (출력은 끝 줄바꿈만 도구가 추가) |
+| 세션 캐시 재사용 | `session.json` 복원 후 `GET userInformation.do` 200 → 재로그인 없이 진행됨 |
+| 일반 (A) `problemDetail.do` 페이지 선택자 | **여전히 미검증** (solver 경로가 먼저 성공하므로 폴백이 실행되지 않음). `span.week_num`/`span.week_text` 구현은 유지 |

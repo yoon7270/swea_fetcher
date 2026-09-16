@@ -139,7 +139,7 @@ def _fmt_size(path: Path) -> str:
         n = path.stat().st_size
     except OSError:
         return "?"
-    return f"{n / 1024:.1f} KB"
+    return f"{n} B" if n < 1024 else f"{n / 1024:.1f} KB"
 
 
 def _print_result(info: ProblemInfo, result: SaveResult, settings: config.Settings) -> None:
