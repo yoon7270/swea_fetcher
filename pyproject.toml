@@ -12,6 +12,7 @@ dependencies = [
     "beautifulsoup4",
     "lxml",
     "python-dotenv",
+    "keyring",
 ]
 
 [project.optional-dependencies]

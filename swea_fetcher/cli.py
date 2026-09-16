@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
 
     lo = sub.add_parser("logout", help="저장된 세션 삭제")
-    lo.add_argument("--all", action="store_true", help=".env(계정 정보)까지 삭제 — 자리 반납용")
+    lo.add_argument("--all", action="store_true", help=".env 와 자격 증명 관리자의 비밀번호까지 삭제 — 자리 반납용")
     lo.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
     return p
 
@@ -191,11 +191,17 @@ def _confirm(prompt: str) -> bool:
     return input(f"{prompt} [y/N]: ").strip().lower() in ("y", "yes")
 
 
-def run_init(no_check: bool = False, config_dir: Path | None = None) -> int:
-    """.env 를 대화식으로 작성한다. 비밀번호는 getpass 로 받고 어디에도 출력하지 않는다."""
+def run_init(no_check: bool = False, config_dir: Path | None = None, migrate: bool = False) -> int:
+    """.env 를 대화식으로 작성한다. 비밀번호는 getpass 로 받아 자격 증명 관리자(keyring)에만 저장한다.
+
+    migrate=True 면 프롬프트 없이 .env 의 SWEA_PW 를 keyring 으로 옮기고 .env 에서 제거한다.
+    """
     config_dir = Path(config_dir) if config_dir is not None else config.CONFIG_DIR
     config_dir.mkdir(parents=True, exist_ok=True)
     env_file = config_dir / config.ENV_FILE_NAME
+
+    if migrate:
+        return _run_migrate(config_dir)
 
     if env_file.exists() and not _confirm(f"{env_file} 가 이미 있습니다. 덮어쓸까요?"):
         print("변경하지 않았습니다.")
@@ -217,23 +223,49 @@ def run_init(no_check: bool = False, config_dir: Path | None = None) -> int:
             break
         print("비밀번호가 비어 있거나 일치하지 않습니다. 다시 입력하세요.")
 
+    config.save_password(user_id, pw1)  # keyring 실패 시 ConfigMissing → .env 는 쓰지 않음
+    del pw1, pw2
+
+    had_plain = bool(config.read_env_file(config_dir).get(config.PASSWORD_KEY))
     lines = [
         f"SWEA_ROOT={_quote_env(str(root))}",
         f"SWEA_ID={_quote_env(user_id)}",
-        f"SWEA_PW={_quote_env(pw1)}",
         "SWEA_INPUT_NAME=input.txt",
         "SWEA_OUTPUT_NAME=output.txt",
     ]
     env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"[OK] 설정 저장: {env_file}")
+    print(f"[OK] 설정 저장: {env_file} (비밀번호는 Windows 자격 증명 관리자 '{config.KEYRING_SERVICE}' 에 저장)")
+    if had_plain:
+        print("[OK] .env 의 평문 비밀번호를 자격 증명 관리자로 옮겼습니다")
 
     if no_check:
         return 0
+    return _check_login(config_dir)
 
+
+def _check_login(config_dir: Path) -> int:
     print("로그인 확인 중...")
     settings = config.load_settings(config_dir)
-    auth.get_session(settings)  # 실패 시 예외 → main 이 메시지 출력, .env 는 유지
+    auth.get_session(settings)  # 실패 시 예외 → main 이 메시지 출력, 설정은 유지
     print("[OK] 로그인 확인 완료. 세션 저장됨")
+    return 0
+
+
+def _run_migrate(config_dir: Path) -> int:
+    """.env 의 SWEA_PW → keyring. 값은 어디에도 출력하지 않는다."""
+    values = config.read_env_file(config_dir)
+    user_id = (values.get("SWEA_ID") or "").strip()
+    plain = values.get(config.PASSWORD_KEY) or ""
+    if not user_id:
+        raise ConfigMissing(".env 에 SWEA_ID 가 없어 옮길 수 없습니다. `swea-fetch init` 을 실행하세요")
+    if not plain:
+        already = bool(config.get_password(user_id))
+        print("[OK] .env 에 평문 비밀번호가 없습니다." + (" 자격 증명 관리자에 이미 저장돼 있습니다." if already else " 옮길 것이 없습니다."))
+        return 0
+    config.save_password(user_id, plain)
+    del plain
+    config.strip_password_from_env_file(config_dir)
+    print(f"[OK] .env 의 평문 비밀번호를 자격 증명 관리자('{config.KEYRING_SERVICE}' / {user_id})로 옮기고 .env 에서 제거했습니다")
     return 0
 
 
@@ -245,9 +277,16 @@ def run_logout(all_: bool = False, config_dir: Path | None = None) -> int:
     config_dir = Path(config_dir) if config_dir is not None else config.CONFIG_DIR
     targets = [config_dir / config.SESSION_FILE_NAME, config_dir / config.LOGIN_STATE_FILE_NAME]
     if all_:
-        if not _confirm("계정 정보(.env)가 삭제됩니다. 계속할까요?"):
+        if not _confirm("계정 정보(.env 와 자격 증명 관리자의 비밀번호)가 삭제됩니다. 계속할까요?"):
             print("취소했습니다.")
             return 0
+        user_id = (config.read_env_file(config_dir).get("SWEA_ID") or "").strip()
+        if user_id:
+            try:
+                if config.delete_password(user_id):
+                    print(f"[OK] 자격 증명 관리자에서 '{user_id}' 비밀번호 삭제")
+            except ConfigMissing as e:
+                print(f"[경고] 자격 증명 관리자 접근 실패: {e}", file=sys.stderr)
         targets.append(config_dir / config.ENV_FILE_NAME)
 
     removed = []
@@ -313,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "init":
-            return run_init(no_check=args.no_check)
+            return run_init(no_check=args.no_check, migrate=args.migrate)
         if args.command == "logout":
             return run_logout(all_=args.all)
         return run_fetch(args.target, args.topic, args.num, args.force, verbose)
