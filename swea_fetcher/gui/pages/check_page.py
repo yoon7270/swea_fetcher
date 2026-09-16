@@ -101,6 +101,9 @@ class CheckPage(QWidget):
         grid.addWidget(self.num, 0, 3)
         grid.addWidget(self.run_btn, 0, 4)
         grid.setColumnStretch(5, 1)
+        # 입력창이 드롭을 가로채 파일 경로를 텍스트로 넣지 않도록 — 드롭은 페이지(dropEvent)가 처리한다
+        for w in (self.topic, self.topic.lineEdit(), self.num, self.run_btn):
+            w.setAcceptDrops(False)
         self.hint = QLabel(f"또는 .py 파일을 이 창에 끌어다 놓으세요 · 타임아웃 {self.timeout():.0f}초 (설정에서 변경)")
         set_class(self.hint, "muted")
         grid.addWidget(self.hint, 1, 1, 1, 5)
@@ -170,11 +173,14 @@ class CheckPage(QWidget):
         set_class(self.form_card, "card", "")
         for url in e.mimeData().urls():
             p = Path(url.toLocalFile())
-            if p.suffix == ".py" and p.parent.name.isdigit():
-                self.set_target(p.parent.parent.name, int(p.parent.name))
-                self.status_message.emit(f"{p.parent.parent.name}/{p.parent.name} 을 선택했습니다 — [실행]을 누르세요")
+            folder = p if p.is_dir() else p.parent
+            if folder.name.isdigit() and folder.parent.name:
+                self.set_target(folder.parent.name, int(folder.name))
+                self.banner.hide()
+                self.status_message.emit(f"{folder.parent.name}/{folder.name} 을 선택했습니다 — [실행]을 누르세요")
                 return
-        self.banner.show_message("warning", ".py 파일을 {주제}\\{번호}\\ 폴더 안에서 끌어다 놓으세요")
+        names = ", ".join(Path(u.toLocalFile()).name for u in e.mimeData().urls())
+        self.banner.show_message("warning", "{주제}\\{번호}\\ 폴더 안의 .py 파일(또는 폴더)을 끌어다 놓으세요", f"놓은 항목: {names}")
 
     # --- 실행 -----------------------------------------------------------------------
     def _set_busy(self, busy: bool) -> None:
