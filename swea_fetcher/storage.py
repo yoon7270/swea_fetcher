@@ -126,6 +126,40 @@ def save_problem(
     return SaveResult(problem_dir=problem_dir, written=written, skipped=skipped)
 
 
+def save_skeleton(root: Path, topic: str, info: ProblemInfo, settings: Settings) -> SaveResult:
+    """첨부 없이 폴더 + {num}.py + 빈 input.txt 만 만든다 (--skeleton-only).
+
+    output.txt 는 만들지 않는다. input.txt / {num}.py 가 이미 있으면 건드리지 않고 skipped.
+    """
+    if info.num is None:
+        raise ValueError("문제 번호(num)가 없어 저장 폴더를 정할 수 없습니다")
+    problem_dir = resolve_problem_dir(root, topic, info.num)
+    input_path = problem_dir / settings.input_name
+    py_path = problem_dir / f"{info.num}.py"
+
+    created_dir = not problem_dir.exists()
+    written: list[Path] = []
+    skipped: list[Path] = []
+    try:
+        problem_dir.mkdir(parents=True, exist_ok=True)
+        if input_path.exists():
+            skipped.append(input_path)
+        else:
+            _write(input_path, "")
+            written.append(input_path)
+        if py_path.exists():
+            skipped.append(py_path)
+        else:
+            _write(py_path, render_skeleton(info, settings.input_name))
+            written.append(py_path)
+    except Exception:
+        _rollback(problem_dir, created_dir, written, {})
+        raise
+
+    log.info("뼈대 저장: %s (%d files)", problem_dir, len(written))
+    return SaveResult(problem_dir=problem_dir, written=written, skipped=skipped)
+
+
 def _rollback(problem_dir: Path, created_dir: bool, written: list[Path], backups: dict[Path, bytes]) -> None:
     """새 폴더면 통째로 삭제, 기존 폴더면 이번에 쓴 파일만 삭제 (force 로 덮은 원본은 복원)."""
     try:
