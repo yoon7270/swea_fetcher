@@ -1,0 +1,3197 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	<!--HTTP 1.1-->
+	<meta charset="UTF-8" />
+	<meta http-equiv='X-UA-Compatible' content='IE=edge' />
+	<meta http-equiv="pragma" content="no-cache" />
+	<meta http-equiv="cache-control" content="no-store, no-cache, must-revalidate, pre-check=0, post-check=0, max-age=0" />
+	<meta http-equiv="expires" content="-1" />
+	
+	<meta property="og:type" content="website">
+
+
+
+	<meta property="og:title" content="SW Expert Academy">
+	<meta property="og:url" content="https://swexpertacademy.com">
+	<meta property="og:description" content="SW 프로그래밍 역량 강화에 도움이 되는 다양한 학습 컨텐츠를 확인하세요!">
+	<meta property="og:image" content="https://swexpertacademy.com/main/preview_img.png">
+	<meta property="og:image:secure_url" content="https://swexpertacademy.com/main/preview_img.png">
+	<meta property="og:image:width" content="600">
+	<meta property="og:image:height" content="315">
+
+
+
+
+<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<title>SW Expert Academy</title>
+	<link rel="shortcut icon" type="image/x-icon" href="/main/favicon.ico">
+
+
+
+	<link type="text/css" rel="stylesheet" href="/main/css/highlighter/shCore.css">
+	<link type="text/css" rel="stylesheet" href="/main/css/highlighter/shThemeDefault.css">
+	<link href="/main/css/sw_common.css" rel="stylesheet">
+
+	<!-- main -->
+	<link href="/main/css/sw_main.css" rel="stylesheet">
+	<link href="/main/css/sw_responsive.css" rel="stylesheet">
+
+	<!-- sub main -->
+	<link href="/main/css/sub_main.css" rel="stylesheet">
+	<link href="/main/css/sub_learn.css" rel="stylesheet">
+	<link href="/main/css/sub_code.css" rel="stylesheet">
+	<link href="/main/css/sub_responsive.css" rel="stylesheet">
+
+	<!--공통 JS-->
+	<script src="/main/js/numberFormat.js" type="text/javascript"></script>
+	<script src="/main/js/commonUser.js"></script>
+	<script src="/main/js/highlighter/shCore.js"></script>
+	<script src="/main/js/highlighter/shBrushCpp.js"></script>
+	<script src="/main/js/highlighter/shBrushJava.js"></script>
+	<script src="/main/js/jquery-3.5.0.min.js"></script>
+	<script src="/main/js/tether.js"></script>
+	<script src="/main/js/bootstrap.min.js"></script>
+	<script src="/main/js/sw_common.js"></script>
+	<script src="/main/js/common.js"></script>
+	<script src="/main/js/portalCommon.js"></script>
+	
+	<script src="/main/js/hkcommonbox.js"></script>
+	
+	<!-- IE10 viewport hack for Surface/desktop Windows 8 bug -->
+	<script src="/main/js/ie10-viewport-bug-workaround.js"></script>
+	
+	<script src="/main/js/ie-emulation-modes-warning.js"></script>
+    <!--Code highlights  -->
+    
+	<!-- get the required files from 3rd party sources -->
+	<!-- [hide] <link href='https://fonts.googleapis.com/css?family=Roboto' rel='stylesheet' type='text/css'> -->
+	<link href='/main/font/roboto/roboto.css' rel='stylesheet' type='text/css'>
+	<link rel="stylesheet" href="/main/css/print.css" media="print">
+
+<script>
+var TAB_LAYOUT;
+var contextPath="/main";
+var CURRENT_MENU_AUTHORIZATION = [];
+
+var USED_KEYBOARD_FOR_1_MIN = false;
+
+
+	
+		CURRENT_MENU_AUTHORIZATION.push("READ");
+	
+		CURRENT_MENU_AUTHORIZATION.push("UPDATE");
+	
+		CURRENT_MENU_AUTHORIZATION.push("EXECUTE");
+	
+		CURRENT_MENU_AUTHORIZATION.push("DOWNLOAD");
+	
+
+
+function goSearch(url,val){
+	var doc1 = document.topForm;
+	doc1.totSchText.value = val;
+	doc1.action = url;
+	doc1.submit();
+}
+
+function onKeyDown() {
+	USED_KEYBOARD_FOR_1_MIN = true;
+}
+
+function refreshSessionTimer() {
+	if(USED_KEYBOARD_FOR_1_MIN) {
+		var url = contextPath + "/identity/anonymous/sessionExtension.do";
+		var params = {};
+		$.ajax({ 
+		      type: "POST", 
+		      url: url,
+		      data: params, 
+		      success: function(ret){
+		    	  USED_KEYBOARD_FOR_1_MIN = false;
+		      },
+		      error:function (request, err, ex) {
+		    	  USED_KEYBOARD_FOR_1_MIN = false;
+		      }
+		});
+	}
+}
+
+	
+
+$(document).ready(function() {
+	setInterval("refreshSessionTimer()", 60000);  
+
+})
+</script>
+</head>
+
+<body class="sub_body" onkeydown="onKeyDown()" oncontextmenu="return false">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script type="text/javascript">
+	$(document).ready(function() {
+		$("#onClickUserViCo").click(function() {
+			alert("서비스 준비 중입니다.");
+		});	
+		checkSysNotice();
+	});
+	
+	function logout(){
+		top.location.replace("/main/identity/logout.do");
+	 }
+	 
+	 function login(){
+			top.location.replace("/main/identity/anonymous/loginPage.do");
+	 }
+	 
+	 function fn_move_myPage()
+	 {
+		top.location.replace("/main/userpage/userInformation.do");
+	 }
+	 function fn_move_adminHome()
+	 {						
+		 top.location.replace("/main/admin/main.do");
+	 }
+	 ///identity/user/registration.do
+		 
+	 function goRegistration(){
+			top.location.replace("/main/identity/anonymous/registrationPolicy.do");
+	 }	 
+	
+	 
+	 function endImpersonate(){
+		top.location.replace("/main/identity/endImpersonate.do");
+	 }
+
+	function setSysNoticeBlock(){ 
+	    var endDate = new Date(''); 
+	    document.cookie = "SYS_NOTICE_BLOCKED=" + '' + "; path=/; expires=" + endDate.toGMTString() + ";"; 
+	} 
+	function clearSysNoticeBlock(){ 
+	    document.cookie = "SYS_NOTICE_BLOCKED=; path=/; expires=-1;"; 
+	}
+	function checkSysNotice(){
+        
+        return;
+        
+		
+		var name = "SYS_NOTICE_BLOCKED=";
+		var blockId = '';
+		var ca = document.cookie.split(';');
+		for (var i = 0; i < ca.length; i++) {
+			var c = ca[i];
+			while (c.charAt(0) == ' ')
+				c = c.substring(1, c.length);
+			if (c.indexOf(name) == 0){
+				blockId = c.substring(name.length, c.length);
+				break;
+			}
+		}
+		
+		if(blockId == null || blockId == ''){
+			$('.gnb_notice').show();
+		}
+		else if('' != blockId){
+			clearSysNoticeBlock();	
+			$('.gnb_notice').show();
+		}
+	} 
+	
+////////////통합검색 //////////////////
+	 $(function(){
+	 	$(".input-icon").on("click", function(){
+	 	
+	 		$('.search_layer').show();
+	 		$('.dim').show();
+
+	 		if($('.search_layer').is(':visible'))
+	 		{
+	 			$('body').css('overflow', 'hidden');
+	 		}
+	 		else
+	 		{
+	 			$('body').css('overflow', 'auto');
+	 		}
+	 	});
+
+	 	$(".btn_close_search").on("click", function(){
+	 		$('.search_layer').hide();
+	 		$('.dim').hide();
+	 		$('body').css('overflow', 'auto');
+
+	 	});
+	 	
+	 	$(".navbar-nav").on("click", function(){
+	 		$('.search_layer').hide();
+	 		$('.dim').hide();
+	 		$('body').css('overflow', 'auto');
+
+	 	});
+	 	
+	 	$('.dim').click(function(){
+	 		$('.search_layer').hide();
+	 		$('.dim').hide();
+	 		$('body').css('overflow', 'auto');
+
+	 	});
+	 	
+		$('.gnb_notice > .row > .content').on('click', 'a.btn_notice_close', function(){
+			if( $(':checkbox[id="sysNoticeBlocked"]').is(":checked")){
+				setSysNoticeBlock();
+			}
+	 		$('.gnb_notice').hide();
+		});		
+		
+	 });
+////////////////////////////////////
+</script>
+
+
+<!-- <nav class="navbar-sw navbar-toggleable-sm navbar-light fixed-top bg-faded"> -->
+<nav class="navbar-sw navbar-toggleable-sm fixed-top">
+
+	<!--.gnb_notice -->
+	
+	<!--// .gnb_notice -->
+
+	<!--.gnb_top -->
+	<div class="gnb_top hidden-sm-down">
+		<div class="container">
+			<div class="row">
+				<ul class="top_menu small">
+					<li><a href="/main/levelTest/testHome.do"><i class="icon-top-check"></i><strong>학습 추천을 위한 레벨 테스트</strong></a></li>
+					<li><a href="/main/capacityTest/main.do"><i class="icon-top-test"></i><strong>SW 역량테스트란?</strong></a></li>
+					
+                    
+                </ul>
+            </div>
+        </div>
+    </div>
+    <!--// .gnb_top -->
+
+    <!-- container gnb_main -->
+    <div class="gnb_main">
+        <div class="gnb-common-inner">
+
+            <button class="nav-toggle hidden-md-up">
+                <span class="navbar-toggler-icon-default"></span>
+            </button>
+
+            <a class="navbar-brand" href="/main/main.do">
+                <img src="/main/images/sw_img/main_logo.png"/>
+            </a>
+            <!-- navbar-collapse -->
+            <div class="collapse navbar-collapse">
+                <ul class="navbar-nav">
+                <li class="nav-item dropdown"><!--sw-open-->
+                        <a id="dropdown04" role="button" data-toggle="sw-dropdown" href="#none" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle" >About</a>
+
+                        <!-- dropdown-menu -->
+                        <div class="dropdown-menu">
+                            <div class="gnb-common-inner">
+
+                                <!-- dropdown-title -->
+                                <div class="dropdown-title">
+                                    <!-- <div class="row_line">
+                                        <div class="col-txt">
+                                            <h3>Code</h3>
+                                        </div>
+                                        <div class="col-img">
+                                            <i class="icon-dropdown-title-code"></i>
+                                        </div>
+                                    </div>
+                                    <h5 class="col-12">매주 제공되는 난이도별 SW 연습문제에<br/>도전하세요.  실질적인 SW 문제해결<br/>역량을 키울 수 있습니다.</h5> -->
+                                    <div class = "showDecriptCode">
+                                        <div class="row_line">
+                                            <div class="col-txt">
+                                                <h3>Code</h3>
+                                                <h4>Problem Solving</h4>
+                                            </div>
+                                            <div class="col-img">
+                                                <i class="icon-dropdown-title-code"></i>
+                                            </div>
+                                        </div>
+                                        <h5 class="col-12">매주 제공되는 난이도별 SW 연습문제에<br/>도전하세요.  실질적인 SW 문제해결<br/>역량을 키울 수 있습니다.</h5>
+                                    </div>
+                                    <div class = "showDecriptLearn">
+                                        <div class="row_line">
+                                            <div class="col-txt">
+                                                <h3>Learn</h3>
+                                                <h4>Intensive Study</h4>
+                                            </div>
+                                            <div class="col-img">
+                                                <i class="icon-dropdown-title-learn"></i>
+                                            </div>
+                                        </div>
+                                        <h5 class="col-12">프로그래밍 역량강화를 위한<br/>필수 이론 및 지식을 개인 역량에 따라<br/> 스스로 학습할 수 있도록 다양한 유형의<br/>학습 컨텐츠를 제공합니다.</h5>
+                                    </div>
+                                    <div class = "showDecriptTalk">
+                                        <div class="row_line">
+                                            <div class="col-txt">
+                                                <h3>Talk</h3>
+                                                <h4>Social Learning</h4>
+                                            </div>
+                                            <div class="col-img">
+                                                <i class="icon-dropdown-title-talk"></i>
+                                            </div>
+                                        </div>
+                                        <h5 class="col-12">함께 코드를 리뷰하고 토론하세요.<br/>서로 소통하며 협업하는 가운데<br/>모두의 실력이 향상됩니다.</h5>
+                                    </div>
+                                </div>
+                                <!-- // dropdown-title -->
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" href="/main/help/clause/aboutSWEA.do">SWEA란</a>
+                                    <a class="sw-dropdown-item" href="/main/help/clause/pointAndRanking.do">포인트와 랭킹</a>
+                                    <a class="sw-dropdown-item" href="/main/help/clause/learningGuide.do">학습 가이드</a>
+                                </div>
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/problem/problemList.do">Problem</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/contestProblem/contestProblemList.do">Contest Problem</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/userProblem/userProblemList.do">User Problem</a>
+                                    
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/codeBattle/battleMain.do">Code Battle</a>
+                                </div>
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('LEARN')" onmouseout="clearCoor('LEARN')" href="/main/learn/course/courseList.do">Course</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('LEARN')" onmouseout="clearCoor('LEARN')" href="/main/learn/referenceCode/referenceCodeList.do">Reference Code</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('LEARN')" onmouseout="clearCoor('LEARN')" href="/main/visualcode/main.do#/home/mainlayout">Visual Ref. Code</a>
+                                </div>
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('TALK')" onmouseout="clearCoor('TALK')" href="/main/talk/solvingTalk/boardCommuList.do">Solving Talk</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('TALK')" onmouseout="clearCoor('TALK')" href="/main/talk/solvingClub/clubMain.do">Solving Club</a>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- // dropdown-menu -->
+                    </li>
+                    <li class="nav-item dropdown"><!--sw-open-->
+                        <a id="dropdown01" role="button" data-toggle="sw-dropdown" href="#none" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle" >CODE</a>
+
+                        <!-- dropdown-menu -->
+                        <div class="dropdown-menu">
+                            <div class="gnb-common-inner">
+
+                                <!-- dropdown-title -->
+                                <div class="dropdown-title">
+                                    <div class = "showDecriptCode">
+                                        <div class="row_line">
+                                            <div class="col-txt">
+                                                <h3>Code</h3>
+                                                <h4>Problem Solving</h4>
+                                            </div>
+                                            <div class="col-img">
+                                                <i class="icon-dropdown-title-code"></i>
+                                            </div>
+                                        </div>
+                                        <h5 class="col-12">매주 제공되는 난이도별 SW 연습문제에<br/>도전하세요.  실질적인 SW 문제해결<br/>역량을 키울 수 있습니다.</h5>
+                                    </div>
+                                    <div class = "showDecriptLearn">
+                                        <div class="row_line">
+                                            <div class="col-txt">
+                                                <h3>Learn</h3>
+                                                <h4>Intensive Study</h4>
+                                            </div>
+                                            <div class="col-img">
+                                                <i class="icon-dropdown-title-learn"></i>
+                                            </div>
+                                        </div>
+                                        <h5 class="col-12">프로그래밍 역량강화를 위한<br/>필수 이론 및 지식을 개인 역량에 따라<br/> 스스로 학습할 수 있도록 다양한 유형의<br/>학습 컨텐츠를 제공합니다.</h5>
+                                    </div>
+                                    <div class = "showDecriptTalk">
+                                        <div class="row_line">
+                                            <div class="col-txt">
+                                                <h3>Talk</h3>
+                                                <h4>Social Learning</h4>
+                                            </div>
+                                            <div class="col-img">
+                                                <i class="icon-dropdown-title-talk"></i>
+                                            </div>
+                                        </div>
+                                        <h5 class="col-12">함께 코드를 리뷰하고 토론하세요.<br/>서로 소통하며 협업하는 가운데<br/>모두의 실력이 향상됩니다.</h5>
+                                    </div>
+                                </div>
+                                <!-- // dropdown-title -->
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" href="/main/help/clause/aboutSWEA.do">SWEA란</a>
+                                    <a class="sw-dropdown-item" href="/main/help/clause/pointAndRanking.do">포인트와 랭킹</a>
+                                    <a class="sw-dropdown-item" href="/main/help/clause/learningGuide.do">학습 가이드</a>
+                                </div>
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/problem/problemList.do">Problem</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/contestProblem/contestProblemList.do">Contest Problem</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/userProblem/userProblemList.do">User Problem</a>
+                                    
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/codeBattle/battleMain.do">Code Battle</a>
+                                </div>
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('LEARN')" onmouseout="clearCoor('LEARN')" href="/main/learn/course/courseList.do">Course</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('LEARN')" onmouseout="clearCoor('LEARN')" href="/main/learn/referenceCode/referenceCodeList.do">Reference Code</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('LEARN')" onmouseout="clearCoor('LEARN')" href="/main/visualcode/main.do#/home/mainlayout">Visual Ref. Code</a>
+                                </div>
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('TALK')" onmouseout="clearCoor('TALK')" href="/main/talk/solvingTalk/boardCommuList.do">Solving Talk</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('TALK')" onmouseout="clearCoor('TALK')" href="/main/talk/solvingClub/clubMain.do">Solving Club</a>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- // dropdown-menu -->
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a id="dropdown02" style="margin-left: 10px; " role="button" data-toggle="sw-dropdown" href="#none" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">LEARN</a>
+
+                        <!-- dropdown-menu -->
+                        <div class="dropdown-menu">
+                            <div class="gnb-common-inner">
+                                <!-- dropdown-title -->
+                                <div class="dropdown-title">
+                                    <div class = "showDecriptLearn">
+                                        <div class="row_line">
+                                            <div class="col-txt">
+                                                <h3>Learn</h3>
+                                                <h4>Intensive Study</h4>
+                                            </div>
+                                            <div class="col-img">
+                                                <i class="icon-dropdown-title-learn"></i>
+                                            </div>
+                                        </div>
+                                        <h5 class="col-12">프로그래밍 역량강화를 위한<br/>필수 이론 및 지식을 개인 역량에 따라<br/> 스스로 학습할 수 있도록 다양한 유형의<br/>학습 컨텐츠를 제공합니다.</h5>
+                                    </div>
+
+                                    <div class = "showDecriptCode">
+                                        <div class="row_line">
+                                            <div class="col-txt">
+                                                <h3>Code</h3>
+                                                <h4>Problem Solving</h4>
+                                            </div>
+                                            <div class="col-img">
+                                                <i class="icon-dropdown-title-code"></i>
+                                            </div>
+                                        </div>
+                                        <h5 class="col-12">매주 제공되는 난이도별 SW 연습문제에<br/>도전하세요.  실질적인 SW 문제해결<br/>역량을 키울 수 있습니다.</h5>
+                                    </div>
+                                    <div class = "showDecriptTalk">
+                                        <div class="row_line">
+                                            <div class="col-txt">
+                                                <h3>Talk</h3>
+                                                <h4>Social Learning</h4>
+                                            </div>
+                                            <div class="col-img">
+                                                <i class="icon-dropdown-title-talk"></i>
+                                            </div>
+                                        </div>
+                                        <h5 class="col-12">함께 코드를 리뷰하고 토론하세요.<br/>서로 소통하며 협업하는 가운데<br/>모두의 실력이 향상됩니다.</h5>
+                                    </div>
+                                </div>
+                                <!-- // dropdown-title -->
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" href="/main/help/clause/aboutSWEA.do">SWEA란</a>
+                                    <a class="sw-dropdown-item" href="/main/help/clause/pointAndRanking.do">포인트와 랭킹</a>
+                                    <a class="sw-dropdown-item" href="/main/help/clause/learningGuide.do">학습 가이드</a>
+                                </div>
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/problem/problemList.do">Problem</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/contestProblem/contestProblemList.do">Contest Problem</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/userProblem/userProblemList.do">User Problem</a>
+                                    
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/codeBattle/battleMain.do">Code Battle</a>
+                                </div>
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('LEARN')" onmouseout="clearCoor('LEARN')" href="/main/learn/course/courseList.do">Course</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('LEARN')" onmouseout="clearCoor('LEARN')" href="/main/learn/referenceCode/referenceCodeList.do">Reference Code</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('LEARN')" onmouseout="clearCoor('LEARN')" href="/main/visualcode/main.do#/home/mainlayout">Visual Ref. Code</a>
+                                </div>
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('TALK')" onmouseout="clearCoor('TALK')" href="/main/talk/solvingTalk/boardCommuList.do">Solving Talk</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('TALK')" onmouseout="clearCoor('TALK')" href="/main/talk/solvingClub/clubMain.do">Solving Club</a>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- // dropdown-menu -->
+
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a id="dropdown03" style="margin-left: 10px; " role="button" data-toggle="sw-dropdown" href="#none" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">TALK</a>
+
+                        <!-- dropdown-menu -->
+                        <div class="dropdown-menu">
+                            <div class="gnb-common-inner">
+                                <!-- dropdown-title -->
+                                <div class="dropdown-title">
+                                    <div class = "showDecriptCode">
+                                        <div class="row_line">
+                                            <div class="col-txt">
+                                                <h3>Code</h3>
+                                                <h4>Problem Solving</h4>
+                                            </div>
+                                            <div class="col-img">
+                                                <i class="icon-dropdown-title-code"></i>
+                                            </div>
+                                        </div>
+                                        <h5 class="col-12">매주 제공되는 난이도별 SW 연습문제에<br/>도전하세요.  실질적인 SW 문제해결<br/>역량을 키울 수 있습니다.</h5>
+                                    </div>
+                                    <div class = "showDecriptLearn">
+                                        <div class="row_line">
+                                            <div class="col-txt">
+                                                <h3>Learn</h3>
+                                                <h4>Intensive Study</h4>
+                                            </div>
+                                            <div class="col-img">
+                                                <i class="icon-dropdown-title-learn"></i>
+                                            </div>
+                                        </div>
+                                        <h5 class="col-12">프로그래밍 역량강화를 위한<br/>필수 이론 및 지식을 개인 역량에 따라<br/> 스스로 학습할 수 있도록 다양한 유형의<br/>학습 컨텐츠를 제공합니다.</h5>
+                                    </div>
+                                    <div class = "showDecriptTalk">
+                                        <div class="row_line">
+                                            <div class="col-txt">
+                                                <h3>Talk</h3>
+                                                <h4>Social Learning</h4>
+                                            </div>
+                                            <div class="col-img">
+                                                <i class="icon-dropdown-title-talk"></i>
+                                            </div>
+                                        </div>
+                                        <h5 class="col-12">함께 코드를 리뷰하고 토론하세요.<br/>서로 소통하며 협업하는 가운데<br/>모두의 실력이 향상됩니다.</h5>
+                                    </div>
+
+                                </div>
+                                <!-- // dropdown-title -->
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" href="/main/help/clause/aboutSWEA.do">SWEA란</a>
+                                    <a class="sw-dropdown-item" href="/main/help/clause/pointAndRanking.do">포인트와 랭킹</a>
+                                    <a class="sw-dropdown-item" href="/main/help/clause/learningGuide.do">학습 가이드</a>
+                                </div>
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/problem/problemList.do">Problem</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/contestProblem/contestProblemList.do">Contest Problem</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/userProblem/userProblemList.do">User Problem</a>
+                                    
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('CODE')" onmouseout="clearCoor('CODE')" href="/main/code/codeBattle/battleMain.do">Code Battle</a>
+                                </div>
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('LEARN')" onmouseout="clearCoor('LEARN')" href="/main/learn/course/courseList.do">Course</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('LEARN')" onmouseout="clearCoor('LEARN')" href="/main/learn/referenceCode/referenceCodeList.do">Reference Code</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('LEARN')" onmouseout="clearCoor('LEARN')" href="/main/visualcode/main.do#/home/mainlayout">Visual Ref. Code</a>
+                                </div>
+                                <div class="item-group">
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('TALK')" onmouseout="clearCoor('TALK')" href="/main/talk/solvingTalk/boardCommuList.do">Solving Talk</a>
+                                    <a class="sw-dropdown-item" onmousemove="myFunctionMoveMouse('TALK')" onmouseout="clearCoor('TALK')" href="/main/talk/solvingClub/clubMain.do">Solving Club</a>
+                            
+								</div>
+							</div>
+						</div>
+						<!-- // dropdown-menu -->
+
+					</li>
+					
+								
+				</ul>
+			</div>
+			<!-- // navbar-collapse -->
+			
+			
+				
+           	 
+           	 
+           	 
+				
+			<!-- navbar-right : 로그인 후 화면  -->
+			<div class="navbar-right login-after" style="display: block">
+				<a href="#none" class="input-icon">
+					<span class="icon_nav_search"></span>
+				</a>
+				<!-- 로그인 후-->
+				<a href="#none" class="my-login">
+					
+					
+						
+						
+							<img src="/main/images/sw_sub/no_photo_34_33.png" alt />
+						
+					
+					<span class="name hidden-sm-down" id='Beginner'>DUMMY_USER</span>
+					
+				</a>
+				<!-- // 로그인 후-->
+				<!-- msg_pop -->
+				<div class="msg_pop up-arrow">
+					<ul class="popover-btns">
+						<li><a href="#" onclick="javascript:fn_move_myPage();">마이 페이지</a></li>						
+						  
+						<li><a onclick="javascript:logout();">로그아웃</a></li>
+					</ul>
+				</div>
+				<!-- msg_pop -->
+			</div>
+			<!-- // navbar-right 로그인 후 화면 -->
+				
+				
+				
+			
+		</div>
+
+	</div>
+	<!-- //container gnb_main -->
+</nav>
+
+<!-- mobile gnb_top : 메인 Only -->
+<div class="mobile_top_menu d-block">
+	<ul class="gnb_top_bt">
+		<li style="flex:1;">
+			<a href="/main/levelTest/testHome.do"><strong>학습 추천을 위한<br/>레벨 테스트 </strong></a>
+		</li>
+		<li style="flex:1;">
+			<a href="/main/capacityTest/main.do"><strong>SW<br/>역량테스트란?</strong></a>
+		</li>
+		
+        
+    </ul>
+</div>
+<!--// mobile gnb_top : 메인 Only-->
+
+
+    <!--// mobile gnb_top-->
+<!-- 2017-07-04 add s 모바일 공통 시작 -->
+<!--
+<div class="container main">
+    <p style="height: 1600px;"></p>
+</div>
+ -->
+<!-- 네비게이션 모바일 공통 -->
+<div class="nav-overlay"></div>
+<!-- nav-menu -->
+<aside class="hidden-md-up nav-menu">
+    <div class="sidemenu">
+        <ul class="navbar-nav-m" id="sidemenu-nav">
+            <li class="nav-item-m">
+                <a class="a-link" href="#none">
+                    ABOUT
+                    <span class="icon_mobile_menu"></span>
+                </a>
+                <ul class="item-group ">
+                    <li class="sw-dropdown-item"><a href="/main/help/clause/aboutSWEA.do">SWEA란</a></li>
+                    <li class="sw-dropdown-item"><a href="/main/help/clause/pointAndRanking.do">포인트와 랭킹</a></li>
+                    <li class="sw-dropdown-item"><a href="/main/help/clause/learningGuide.do">학습 가이드</a></li>
+                </ul>
+            </li>
+            <li class="nav-item-m">
+                <a class="a-link" href="#none">
+                    CODE
+                    <span class="icon_mobile_menu"></span>
+                </a>
+                <ul class="item-group ">
+                    <li class="sw-dropdown-item"><a href="/main/code/problem/problemList.do">Problem</a></li>
+                    <li class="sw-dropdown-item"><a href="/main/code/contestProblem/contestProblemList.do">Contest Problem</a></li>
+                    <li class="sw-dropdown-item"><a href="/main/code/userProblem/userProblemList.do">User Problem</a></li>
+                    
+                    <li class="sw-dropdown-item"><a href="/main/code/codeBattle/battleMain.do">Code Battle</a></li>
+                </ul>
+            </li>
+            <li class="nav-item-m">
+                <a class="a-link" href="#none">
+                    LEARN
+                    <span class="icon_mobile_menu"></span>
+                </a>
+                <ul class="item-group ">
+                    <li class="sw-dropdown-item"><a href="/main/learn/course/courseList.do">Course</a></li>
+                    <li class="sw-dropdown-item"><a href="/main/learn/referenceCode/referenceCodeList.do">Reference Code</a></li>
+                    <li class="sw-dropdown-item"><a href="/main/visualcode/main.do#/home/mainlayout">Visual Ref. Code</a></li>
+                </ul>
+            </li>
+            <li class="nav-item-m">
+                <a class="a-link" href="#none" >
+                    TALK
+                    <span class="icon_mobile_menu"></span>
+                </a>
+                <ul class="item-group">
+                    <li class="sw-dropdown-item"><a href="/main/talk/solvingTalk/boardCommuList.do">Solving Talk</a></li>
+                    <li class="sw-dropdown-item"><a href="/main/talk/solvingClub/clubMain.do">Solving Club</a></li>
+                    
+				</ul>
+			</li>
+			<li class="nav-item-m">
+				
+					
+			</li>
+		</ul>
+
+		<ul class="top_menu mobile">
+			<li><a href="/main/levelTest/testHome.do"><i class="icon-top-check"></i><strong>학습 추천을 위한 레벨 테스트</strong></a></li>
+			<li><a href="/main/capacityTest/main.do"><i class="icon-top-test"></i><strong>SW 역량테스트란?</strong></a></li>
+			
+            
+		</ul>
+
+	</div>
+</aside>
+<!-- // nav-menu -->
+<!-- // 네비게이션 모바일 공통 -->
+
+
+
+<!-- go_top -->
+<a href="#" class="top" title="위로가기"><div class="go_top"><span class="icon_go_top"></span></div></a>
+<!--// go_top -->
+
+<!-- gnb 공통 스크립트 -->
+<script type="text/javascript">
+
+	var widthS = window.innerWidth;
+	$(".showDecriptCode").hide();
+	$(".showDecriptLearn").hide();
+	$(".showDecriptTalk").hide();
+	
+	if(widthS >= 692 && widthS <= 1190){
+		$(".dropdown-title").hide();
+	}else{
+		$(".dropdown-title").show();
+	}
+	
+	var prevWidth = window.screen.availWidth;
+	window.addEventListener('resize', function() {
+	    if (window.innerWidth >= 692 && window.innerWidth <= 1190 ) {
+			$(".dropdown-title").hide();
+		}else{
+			$(".dropdown-title").css("display", "table-cell");
+		}
+	    if ( window.innerWidth > 1190 ){
+	    	$(".dropdown-title").css("display", "table-cell");
+		}
+	});
+	
+	function myFunctionMoveMouse(type) {
+		if(type == 'CODE'){
+			$(".showDecriptCode").show();
+		}else if(type == 'LEARN'){
+			$(".showDecriptLearn").show();
+		}else if(type == 'TALK'){
+			$(".showDecriptTalk").show();
+		}
+		
+	}
+	
+	function clearCoor(type) {
+		if(type == 'CODE'){
+			$(".showDecriptCode").hide();
+		}else if(type == 'LEARN'){
+			$(".showDecriptLearn").hide();
+		}else if(type == 'TALK'){
+			$(".showDecriptTalk").hide();
+		}
+		
+	}
+	$(".sw-dropdown-item").click(function(event){
+		  event.target.style.color = '#368bcc'; 
+		  event.stopPropagation();
+		}); 
+	
+	/*##############################################################################*/
+	/* sw-dropdown */
+	/*##############################################################################*/
+	+function ($) {
+		'use strict';
+
+		// DROPDOWN Menu 클래스 정의
+		// =========================
+		var selector   = '[data-toggle="sw-dropdown"]';
+
+		function detectParent($this) {
+			var selector = $this.attr('data-target');
+
+			if (!selector) {
+				selector = $this.attr('href');
+				selector = selector && /#[A-Za-z]/.test(selector) && selector.replace(/.*(?=#[^\s]*$)/, ''); // strip for ie7
+			}
+
+			var $parent = selector && $(selector);
+
+			return $parent && $parent.length ? $parent : $this.parent()
+		}
+
+		function checkMenus(e) {
+			$(selector).each(function () {
+				var $this         = $(this);
+				var $parent       = detectParent($this);
+				var relatedTarget = { relatedTarget: this };
+
+				if (!$parent.hasClass('sw-open')) return;
+
+				if (e && e.type == 'click' && /input|textarea/i.test(e.target.tagName) && $.contains($parent[0], e.target)) return;
+
+				$parent.trigger(e = $.Event('hide.dropmenu', relatedTarget));
+
+				if (e.isDefaultPrevented()) return;
+
+				$this.attr('aria-expanded', 'false');
+				$parent.removeClass('sw-open').trigger($.Event('hidden.dropmenu', relatedTarget))
+			})
+		}
+
+		function toggle (e) {
+			var $this = $(this);
+			var $parent  = detectParent($this);
+			var isActive = $parent.hasClass('sw-open');
+
+			checkMenus();
+
+			if (!isActive) {
+
+				var relatedTarget = { relatedTarget: this };
+				$parent.trigger(e = $.Event('sw-open.dropmenu', relatedTarget));
+
+				if (e.isDefaultPrevented()) return;
+
+				$this
+						.trigger('focus')
+						.attr('aria-expanded', 'true');
+
+				$parent
+						.toggleClass('sw-open')
+						.trigger($.Event('shown.dropmenu', relatedTarget))
+			}
+
+			return false
+		}
+
+		function dropKeydown(e) {
+			if (!/(38|40|27|32)/.test(e.which) || /input|textarea/i.test(e.target.tagName)) return;
+
+			var $this = $(this);
+
+			e.preventDefault();
+			e.stopPropagation();
+
+			var $parent  = detectParent($this);
+			var isActive = $parent.hasClass('sw-open');
+
+			if (!isActive && e.which != 27 || isActive && e.which == 27) {
+				if (e.which == 27) $parent.find(selector).trigger('focus');
+				return $this.trigger('click')
+			}
+
+			var desc = ' li a';
+			var $items = $parent.find('.dropdown-menu' + desc);
+
+			if (!$items.length) return;
+
+			var index = $items.index(e.target);
+
+			if (e.which == 38 && index > 0) index--; // up
+			if (e.which == 40 && index < $items.length - 1) index++; // down
+			if (!~index) index = 0;
+
+			$items.eq(index).trigger('focus')
+		}
+
+		// 드롭메뉴 요소에 적용하기
+		// ==================
+
+		$(document)
+				.on('click.dropmenu.ck', checkMenus)
+				.on('click.dropmenu.ck', selector, toggle)
+				.on('keydown.dropmenu.key', selector, dropKeydown)
+				.on('keydown.dropmenu.key', '.dropdown-menu', dropKeydown)
+
+	}(jQuery);
+
+	/*##############################################################################*/
+	/* mobil -  nav-toggle */
+	/*##############################################################################*/
+	(function($){
+		$('.nav-toggle').click(function(e){
+			window.scrollTo(0,0);
+			e.preventDefault();
+			$('.nav-toggle').toggleClass('active');
+			$('.nav-menu').toggleClass('active');
+			$('.nav-overlay').toggleClass('active');
+
+			if($('.nav-menu').is(':visible'))
+			{
+				$('body').css('overflow', 'hidden');
+			}
+			else
+			{
+				$('body').css('overflow', 'auto');
+			}
+
+		});
+		$('.nav-overlay').click(function(e){
+			e.preventDefault();
+			$('.nav-toggle').toggleClass('active');
+			$('.nav-menu').toggleClass('active');
+			$('.nav-overlay').toggleClass('active');
+			$('body').css('overflow', 'auto');
+		})
+
+	})(jQuery);
+
+
+	/*##############################################################################*/
+	/* msg_pop */
+	/*##############################################################################*/
+
+	function deselect(e) {
+		$('.msg_pop').slideFadeToggle(function() {
+			e.removeClass('selected');
+		});
+	}
+
+	$(function() {
+		$('.my-login').on('click', function() {
+			if($(this).hasClass('selected')) {
+				deselect($(this));
+			} else {
+				$(this).addClass('selected');
+				$('.msg_pop').slideFadeToggle();
+			}
+			return false;
+		});
+	});
+
+	$.fn.slideFadeToggle = function(easing, callback) {
+		return this.animate({ opacity: 'toggle', height: 'toggle' }, 'fast', easing, callback);
+	};
+
+	$(document).ready(function () {
+		/*##############################################################################*/
+		/* mobil - sidemenu-nav accordion  */
+		/*##############################################################################*/
+
+		$('#sidemenu-nav > li > a').on('click', function () {
+
+			if ($(this).hasClass('active')) {
+				slideUp();
+			} else {
+				slideUp();
+				$(this).addClass('active').next().slideDown();
+			}
+			function slideUp() {
+				$('#sidemenu-nav > li > a').removeClass('active').next().slideUp();
+			}
+		});
+
+	});
+</script>
+<!-- // gnb 공통 스크립트 -->
+<!-- 2017-07-04 add s 모바일 공통 끝 -->
+	
+	
+	
+<script type="text/javascript">
+// 메뉴 클릭시 이벤트
+  var dropdown = $('ul.navbar-nav li').find('a');
+  dropdown.click(function() {
+     // console.log(this.text);
+      // alert(this.text);
+      // 진척율 업데이트 호출로직 필요
+      if (typeof fn_progress_proc == 'function') {
+          fn_progress_proc();
+      }
+  });
+</script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<link href="/main/css/sw_responsive.css" rel="stylesheet">
+
+<script type="text/javascript">
+
+$(document).ready(function () {
+	var $ipt = $('#ibx_integratedSearchKeyword'),
+	$clearIpt = $('#btn_delIntegratedSearchKeyword');
+
+	$ipt.keyup(function(){
+		$("#btn_delIntegratedSearchKeyword").toggle(Boolean($(this).val()));
+	});
+
+	$clearIpt.toggle(Boolean($ipt.val()));
+	$clearIpt.click(function(){
+		$("#ibx_integratedSearchKeyword").val('').focus();
+		$(this).hide();
+	});
+});
+
+function fn_main_integratedSearch(){
+	
+	var	keyword = $('#ibx_integratedSearchKeyword').val();
+	if(keyword.length<2)
+	{
+		alert("두글자 이상 입력해주세요.");
+		return;
+	}
+	var url= "/main/searchAll/search.do"; 
+	var args = {
+	    actionUri : url,
+	    formData : {"keyword" : replaceSpecialSpring(keyword)}
+	};
+	
+	fn_open_page_get( args ); 
+}
+
+function checkKeyMainIntegratedSearch(e){
+    if(e.keyCode == 13){
+    	fn_main_integratedSearch();
+    	if (e.preventDefault) {
+    		e.preventDefault();
+    		e.stopPropagation();
+   		} else {
+	   		e.keyCode = 0;
+	   		e.returnValue = false;
+   		}
+    	return false;	
+	}
+}
+
+
+</script>
+
+<!-- layer_alert -->
+<div id="layerSearch">
+		<!-- search_layer -->
+	<div class="search_layer">
+		<!-- search_in -->
+		<div class="search_in">
+			<!-- search_area -->
+			<div class="search_area">
+				<label for="integrated_search2" class="integrated_search">통합검색</label>
+				<input type="text" class="text_search" id="ibx_integratedSearchKeyword" placeholder="두글자 이상 입력해주세요." onkeypress="checkKeyMainIntegratedSearch(event);">
+				<a href="#none" class="btn_del" id="btn_delIntegratedSearchKeyword"><span class="hide">삭제</span></a>
+				<button type="button" title="검색" class="sch_smit" onclick="fn_main_integratedSearch();">
+					<span class="blind">검색</span>
+				</button>
+			</div>
+			<!-- //search_area -->
+		<a href="#none" class="btn_close_search"><span class="hide">통합검색 닫기</span></a>
+		</div>
+		<!-- //search_in -->
+	</div>
+	<div class="dim"></div>
+</div>
+<!-- //layer_alert -->
+
+
+
+<!-- <form  method="post" name="integratedSearchlayerpop" id="integratedSearchlayerpop">
+<input type='hidden' name="integratedSearchKeyword" id="integratedSearchKeyword" >
+</form> -->
+
+
+<!-- //공통 -->
+<div class="container">
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script src="/main/js/common-problem.js" type="text/javascript"></script>
+
+
+<script type="text/javascript">
+function fnClickTab(category, path){
+	var url = "/main/"+category+"/"+path+".do";
+	var args = {
+		actionUri : url,
+		formData : {            	
+        }
+    };
+
+ 	fn_open_page_get( args );	
+}
+
+</script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+		
+			
+			
+			
+					<h2 class="hide">talk</h2>
+					<!-- sub_header -->
+					<div class="sub_header">
+			
+		
+		
+			<div class="row code-menu tab_type2">
+				<div class="col col-md-6">
+					<div class="inner"><a href="javascript:;" onclick="fnClickTab('talk', 'solvingTalk/boardCommuList');" >Solving Talk</a></div>
+				</div>
+				<div class="col col-md-6">
+					<div class="inner"><a href="javascript:;" onclick="fnClickTab('talk', 'solvingClub/clubMain');" class="active">Solving Club</a></div>
+				</div>
+				
+			</div>
+			
+		
+			
+			
+				
+			
+		
+
+	
+			<!-- location -->
+			<div class="location">
+				<span>HOME</span>
+				
+					
+					<span>Talk</span>
+					
+					
+				
+					
+					
+					<span class="on">Solving Club</span>
+					
+				
+			</div>
+			<!-- //location -->
+			
+		
+			
+			
+				</div>
+				<!-- //sub_header -->
+			
+		
+
+
+	<div class="container sub">
+		<div class="content_sub">
+			
+			
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- Tag Editor Start -->
+<script src="/main/js/tag/fm.tagator.jquery.js" type="text/javascript"></script>
+<link href="/main/js/tag/fm.tagator.jquery.css" rel="stylesheet" type="text/css">
+	
+<script src="/main/js/common-tag.js"></script>
+
+
+<script type="text/javascript">
+
+	$(document).ready(function(){
+		//tag 초기화  tag 되기는 하는 건가요? 확인 용망 
+		getTagList("tagList", "P", "AZq-gSmq_RfHBISS");
+		
+		//문제 풀이 공통 호출 
+		checkIsFirstOpen($('#contestProbId').val(), $('#probBoxId').val(), "BOX");
+	});
+
+
+function moveModi() {
+	var url = "";
+
+	if('USER' == 'USER'){
+		url = "/main/code/userProblem/userProblemModify.do";
+	}else{
+		url = "/main/admin/contestProb/contestProbDetail.do";
+	}
+	
+	var args = {
+            actionUri : url,
+            formData : {     
+            	"contestProbId" : $('#contestProbId').val() 
+            }
+        };
+
+ 	fn_open_page( args );		
+}
+
+function delProblem() {
+	// problembox list에서 삭제 함 
+	message =  '해당 문제를 problem box 에서 삭제 하시겠습니까?';
+	doConfirm(message, function(res) { if(res){ 
+		// 뭐 탈퇴 기술은 나중에 해도 되겠지
+
+		var params = fq_form_to_json("solvingForm");
+		var getUrl = '/main/talk/solvingClub/problemPutOutBox.do';
+			
+		$.ajax({ 
+				type : 'POST',
+				contentType : 'application/json;charset=UTF-8',
+			 	url: getUrl,
+			 	cache       : false,
+			 	data : JSON.stringify(params),
+			 	traditional : true,
+			 	async		: false,
+			 	dataType:'json',
+			    success: function(ret){
+	
+			        doAlert('삭제 되었습니다 ');
+			        goDetail();
+			     },
+			     error:function (request, err, ex) {
+			       alert(err + " ===> " + ex);
+			      return true;
+			     }  
+			  });	//ajax END
+	}   }) ;
+}
+
+function goDetail(){
+	
+	var url = '/main/talk/solvingClub/problemBoxDetail.do';
+	var args = {
+            actionUri : url,
+            formData : {     
+            	"solveclubId" : $('#solveclubId').val() ,
+            	"probBoxId" : $('#probBoxId').val()
+            }
+        };
+
+ fn_open_page_get( args );	
+ 
+}
+////////////////// problem script start //////////////////
+
+function goreference(id){
+	
+	var url = '/main/learn/referenceCode/referenceCodeDetail.do';
+	var args = {
+            actionUri : url,
+            formData : {     
+            	"referenceId" : id
+            }
+        };
+
+ fn_open_page_get( args );	
+ 
+}
+
+////////////////// problem script end //////////////////
+
+//]]>
+</script>
+<form  method="post" name="solvingForm" id="solvingForm" >
+<input type="hidden" id="solveclubId" name="solveclubId" value="DUMMY_CLUB_ID000">
+
+<input type="hidden" id="probBoxId" name="probBoxId" value="AaCJF07qQGDHBISr">
+<input type="hidden" id="contestProbId" name="contestProbId" value="AZq-gSmq_RfHBISS">
+
+<input type="hidden" id="problemBoxTitle" name="problemBoxTitle" value="09.10 모의">
+
+</form>
+
+		<div class="content_sub">
+			<h2 class="hide">Solving Club</h2>
+			
+ 
+			<!-- club_wrap -->
+			<div class="club_wrap">
+			
+			
+<!-- -------------------------------------------- -->			
+			
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<style type="text/css">
+/* tab */
+.tabs{width:100%;border-bottom:1px solid #3798f0;}
+.tabs:after{content:'';display:block;clear:both}
+.tabs li{float:left;margin-right:1px;}
+.tabs li a{background:#f8f8f8;border-width:1px 1px 0 1px; border-style:solid; border-color:#e6e7e9;display:block;height:31px;line-height:31px;padding:0 15px;border-radius:2px 2px 0 0;font-size:14px;font-weight:bold;white-space:nowrap}
+.tabs li a:hover{color:#3798f0;}
+.tabs li.on a{background:#3798f0;border-color:#3798f0;color:#fff;cursor:default;}
+
+#custom-templates .empty-message {
+  padding: 5px 10px;
+ text-align: center;
+}
+</style>
+
+<script type="text/javascript">
+
+
+//<![CDATA[
+$(document).ready(function(){
+	
+	
+	$('#hideDiv').hide();
+	 $('#solvingProblemForm [name=pageIndex]').val('');
+	
+	
+	searchSolvingClubProblemBoxList();
+	
+	
+	
+	$('#layerClubJoinRquestBtn').on("click", function(){
+		
+			
+		
+		
+		
+		
+		var $href = $(this).attr('href');
+		layer_popup($href);
+		
+	});
+	
+	
+	$('#layerClubJoinCompletionBtn').on("click", function(){
+		var $href = $(this).attr('href');
+		layer_popup($href);
+		
+	});
+	
+	
+	$('#layerClubJoinCompletionBtn').on("click", function(){
+		var $href = $(this).attr('href');
+		layer_popup($href);
+		
+	});
+	
+	
+	$('#layerClubJoinManagerCallBtn').on("click", function(){
+		var $href = $(this).attr('href');
+		layer_popup($href);
+		
+	});
+	
+	
+	$('#layerClubJoinRquestingBtn').on("click", function(){
+		var $href = $(this).attr('href');
+		layer_popup($href);
+		
+	});
+	
+	
+	$('#layerClubNoMemberBtn').on("click", function(){
+		var $href = $(this).attr('href');
+		layer_popup($href);
+		
+	});
+	
+		
+	$('#layerClubRejectedBtn').on("click", function(){
+		var $href = $(this).attr('href');
+		layer_popup($href);
+		
+	});
+	
+	$("#pre_page_button").click(function(){
+		 prePage();
+	});
+	
+	$("#next_page_button").click(function(){
+		 nextPage();
+	});	
+});// end ready
+
+
+function leftMenuSet(){
+
+	for(i=0;i<$('[name=checkProblemId]').length;i++){
+		if( $('[name=checkProblemId]').eq(i).val() == $('#probBoxId').val() ){
+			problemBoxActive(i);
+		}
+	}
+}
+
+function problemBoxActive(val){
+
+	for(i=0;i<$('[name=firstLi]').length;i++){
+		if( i  == val ){
+			
+			if( $('[name=firstLi]').eq(i).hasClass('active') ){
+				$('[name=firstLi]').eq(i).removeClass('active');
+			}else{
+				$('[name=firstLi]').eq(i).removeClass('active');
+				$('[name=firstLi]').eq(i).addClass('active');
+			}
+		}else{
+			$('[name=firstLi]').eq(i).removeClass('active');
+		}		
+	}
+	
+	if('' == 'problemBoxSubmitStatusList'){
+		setSubMitStatusActive();
+	}
+}
+
+function setSubMitStatusActive(){
+
+	for(i=0;i<$('[name=checkProblemId]').length;i++){
+
+		if( $('[name=checkProblemId]').eq(i).val() == $('#probBoxId').val() ){
+	
+			$('[name=firstLi]').eq(i).find('ul li').eq(0).removeClass('active');
+			$('[name=firstLi]').eq(i).find('ul li').eq(1).addClass('active');
+	
+		}
+	}
+}
+
+function prePage(){
+	var prePage = Number(  $('#solvingProblemForm [name=pageIndex]').val())  - 1;
+	$('#solvingProblemForm [name=pageIndex]').val(prePage);
+	searchSolvingClubProblemBoxList();
+}
+
+function nextPage(){
+	var nextPage = Number( $('#solvingProblemForm [name=pageIndex]').val())  + 1;
+	$('#solvingProblemForm [name=pageIndex]').val(nextPage);
+
+	searchSolvingClubProblemBoxList();
+}
+
+function searchSolvingClubProblemBoxList(){
+	var params = fq_form_to_json("solvingProblemForm");
+	
+	var getUrl = '/main/talk/solvingClub/problemBoxList.do';
+	
+	$('.nav_problembox ul li').remove();
+	
+	$.ajax({ 
+		type : 'POST',
+		contentType : 'application/json;charset=UTF-8',
+	 	url: getUrl,
+	 	cache       : false,
+	 	data : JSON.stringify(params),
+	 	traditional : true,
+	 	async		: false,
+	 	dataType:'json',
+	    success: function(ret){
+
+	          if(ret.success==true){	   
+
+	        	  var html = '';
+	          
+	        	  for(i=0;i<ret.data.problemBoxList.length;i++){	  
+	        		  
+
+	        		  html += '<li id="firstLi" name="firstLi" onclick="javascript:problemBoxActive('+i+')">';
+	        		   
+	        		  html += '<a href="#none">'+ret.data.problemBoxList[i].title+ '(' + ret.data.problemBoxList[i].problCnt+')</a>';
+	        		  html += '<ul>';
+	        		  html += '<li class="active"><a href="#none"  onclick="javascript:checkProblem(&quot;'+ret.data.problemBoxList[i].probBoxId+'&quot;);" >Problem</a></li>';
+	        		  html += '<li><a href="#none"  onclick="javascript:checkProblemBoxSubmitList(&quot;'+ret.data.problemBoxList[i].probBoxId+'&quot;);"   >제출현황</a></li>';
+	        		  html += '<input type="hidden" name="checkProblemId" id="checkProblemId" value="'+ret.data.problemBoxList[i].probBoxId+'">';
+	        		  html += '</ul>';
+	        		  html += '</li>';	        		  	        		  						        	  
+	        	  }
+	        	  
+	        	  $('.nav_problembox ul').append(html);
+	        	  
+	        	  $('#solvingProblemForm [name=pageIndex]').val(ret.data.currentPage);
+	        	  
+	        	  $('#currentPage').text(ret.data.currentPage);
+	        	  $('#endPage').text(ret.data.endPage);
+	        	  
+	        	  if(ret.data.endPage == 1){
+	        		  $('.paging_num').hide();
+	        	  }else{
+	        		  $('.paging_num').show();
+	        	  }
+	        	  if(ret.data.currentPage == 1 ){
+	        		  $('#pre_page_button').hide();
+	        	  }else{
+	        		  $('#pre_page_button').show();
+	        	  }
+	        	  
+	        	  if(ret.data.currentPage == ret.data.endPage){
+	        		  $('#next_page_button').hide(); 
+	        	  }else{
+	        		  $('#next_page_button').show(); 
+	        	  }
+	        	  
+	        	  if(ret.data.problemBoxList.length > 0){
+	        		//  problemBoxActive(0);
+	        	  }
+	        	  
+	        	  leftMenuSet();
+	        	  
+	        	
+	        	//  fnChangeActive();
+	        	  
+	          }else{
+	            alert(ret.message);
+	          }
+	     },
+	     error:function (request, err, ex) {
+	       alert(err + " ===> " + ex);
+	      return true;
+	     }  
+	  });// end ajax
+}
+
+function checkLoginJoin(){
+
+	
+	
+		
+		
+		
+	
+	
+		
+	
+		
+	
+	
+	
+	
+	
+		
+	
+	
+	return true;
+    
+
+    	
+    
+    
+	return false;
+}
+
+function checkProblem(id){
+
+	if(!checkLoginJoin()){
+		return;
+	}
+
+	
+	var url = "/main/talk/solvingClub/problemBoxDetail.do";
+    var args = {
+            actionUri : url,
+            formData : {
+            	
+            	"solveclubId" :  $('#solveclubId').val(),
+            	"probBoxId" : id,
+            	"leftPage" : $('#solvingProblemForm [name=pageIndex]').val()
+            }
+        };
+
+        fn_open_page_get( args );
+
+
+
+}
+
+function checkProblemBoxSubmitList(id){
+
+
+	if(!checkLoginJoin()){
+		return;
+	}
+
+	var url = "/main/talk/solvingClub/problemBoxSubmitStatusList.do";		
+
+    var args = {
+            actionUri : url,
+            formData : {
+            	
+            	"solveclubId" :  $('#solveclubId').val(),
+            	"probBoxId" : id,
+            	"leftPage" : $('#solvingProblemForm [name=pageIndex]').val()
+            }
+        };
+
+        fn_open_page_get( args );
+}
+
+	
+
+function goProblemBoxManager(){
+	
+	if('NORMAL' == 'MANAGER' || 'NORMAL' == 'SUB_MANAGER'){
+		
+		url = '/main/talk/solvingClub/manager/problemBoxMng.do';
+		
+	    var args = {
+	            actionUri : url,
+	            formData : {
+	            	
+	            	"solveclubId" : $('#solveclubId').val()
+	            }
+	        };
+	
+	        fn_open_page_get( args );
+	}else{
+		//alert('not manager');
+	}
+	
+}
+
+function goMember(){
+	if(!checkLoginJoin()){
+		return;
+	}
+
+        var url= "/main/talk/solvingClub/memberList.do"; 
+    	
+        var args = {
+            actionUri : url,
+            formData : {"solveclubId" : $('#solveclubId').val()}
+        };
+
+        fn_open_page_get( args );  
+}
+
+function cancelClub(){
+
+	message = 'Club 가입 신청을 취소하시겠습니까?';
+			
+		doConfirm(message, function(res) { if(res){ 		
+			
+			var params = fq_form_to_json("solvingProblemForm");
+			var getUrl = '/main/talk/solvingClub/cancelMemberSubscribeRequest.do';
+				
+			$.ajax({ 
+					type : 'POST',
+					contentType : 'application/json;charset=UTF-8',
+				 	url: getUrl,
+				 	cache       : false,
+				 	data : JSON.stringify(params),
+				 	traditional : true,
+				 	async		: false,
+				 	dataType:'json',
+				    success: function(ret){				    
+				    		doAlert(ret.data, function(){
+				    			goUrl('cancel');
+				    		});				    					        		     
+				     },
+				     error:function (request, err, ex) {
+				       doAlert(err + " ===> " + ex);
+				      return true;
+				     }  
+				  });	//ajax END
+				  			
+		}   });
+				
+}
+
+function quitClub(){
+	
+	//if(!checkLoginJoin()){
+	//	return;
+	//}
+	// 먼저 멤버 수 를 체크 하고 마지막 남은 관리자면 탈퇴를 막는ㄴ다 
+	//
+	if('NORMAL' =="MANAGER" ){
+		var managerCnt = 0;
+			var getUrls = '/main/talk/solvingClub/manager/getManagerCnt.do';
+			var param = fq_form_to_json("solvingProblemForm");
+			console.log(param);
+			$.ajax({ 
+				type : 'POST',
+				contentType : 'application/json;charset=UTF-8',
+			 	url: getUrls,
+			 	cache       : false,
+			 	data : JSON.stringify(param),
+			 	traditional : true,
+			 	async		: false,
+			 	dataType:'json',
+			    success: function(ret){
+	
+			    	managerCnt = ret.data;
+			     },
+			     error:function (request, err, ex) {
+			       alert(err + " ===> " + ex);
+			      return true;
+			     }  
+			  });	//ajax END
+	
+		if( managerCnt < 2){
+			doAlert('Club Manager는 Club을 탈퇴할 수 없습니다');
+			return;
+		}
+	}
+	message =  'Club을 탈퇴하겠습니까? Club 활동 중 작성된 게시글과 문제들은 모두 유지가 됩니다';//
+	
+
+	doConfirm(message, function(res) { if(res){ 
+		// 뭐 탈퇴 기술은 나중에 해도 되겠지 
+
+		
+		var params = fq_form_to_json("solvingProblemForm");
+		var getUrl = '/main/talk/solvingClub/memberUnSubscribe.do';
+			
+		$.ajax({ 
+				type : 'POST',
+				contentType : 'application/json;charset=UTF-8',
+			 	url: getUrl,
+			 	cache       : false,
+			 	data : JSON.stringify(params),
+			 	traditional : true,
+			 	async		: false,
+			 	dataType:'json',
+			    success: function(ret){
+	
+			        doAlert('탈퇴 되었습니다 ');
+			        goUrl('quit');
+			     },
+			     error:function (request, err, ex) {
+			       doAlert(err + " ===> " + ex);
+			      return true;
+			     }  
+			  });	//ajax END
+			  
+		
+	}   });
+}
+
+function solvingClubManager(){
+
+	if('NORMAL' == 'MANAGER' || 'NORMAL' == 'SUB_MANAGER'){
+		var url = "/main/talk/solvingClub/manager/main.do";	
+	    var args = {
+	            actionUri : url,
+	            formData : {
+	            	
+	            	"solveclubId" : $('#solveclubId').val()
+	            }
+	        };
+
+	        fn_open_page_get( args );
+		
+	}
+
+}
+
+function goSolvingClubBbs(searchClsftn, searchClsName) {
+	
+	if(!checkLoginJoin()){
+		return;
+	}
+
+	url = '/main/talk/solvingClub/boardCommuList.do';
+
+	var args = {
+		actionUri : url,
+		formData : {
+			"solveclubId" : $('#solveclubId').val(),
+			"searchClsftn" : searchClsftn,
+			"schClsName" : searchClsName
+		}
+	};
+	
+	fn_open_page_get( args );
+}
+
+
+// 사용안함 
+//function checkMemberShip(){
+//	message =  'CLUB 가입이 필요합니다';//
+//	doConfirm(message, function(res) { if(res){ 		
+//			//alert('CLUB 가입 화면으로 이동 ');		
+//	}   });
+//}
+
+/////////////////////////////////////////////////
+
+
+function checkSubscribe(){
+	//message =  'Club에 가입 하시겠습니까?';//
+	//doConfirm(message, function(res) { if(res){ 
+		if($('#memberComment').val().length > 50){
+			doAlert('50자 이상은 입력이 안됩니다.');
+			return;
+		}
+		
+		if(checkEmojiString($("#memberComment").val()) == false){
+	    	return;
+	    }
+		
+$('#layerClubJoinRquest').hide();
+
+		var params = fq_form_to_json("solvingProblemForm");
+		var getUrl = '/main/talk/solvingClub/checkMemberSubscribe.do';
+			
+		$.ajax({ 
+				type : 'POST',
+				contentType : 'application/json;charset=UTF-8',
+			 	url: getUrl,
+			 	cache       : false,
+			 	data : JSON.stringify(params),
+			 	traditional : true,
+			 	async		: false,
+			 	dataType:'json',
+			    success: function(ret){
+			   
+			    	$('#solvingMemberForm  [name=subscribedStatus]').val(ret.data.subscribedStatus);
+			    	$('#solvingMemberForm  [name=publicYn]').val(ret.data.publicYn);
+			    	$('#solvingMemberForm  [name=mCnt]').val(ret.data.mCnt);
+			    	
+			    	
+			    	//memberSubscribe();
+			    	if(ret.data.clubRole == 'BLOCKED'){
+			    		$('#layerClubRejectedBtn').click();
+			    		return;
+			    	}
+			    	if(ret.data.subscribedStatus == 'S'){
+			    		$('#layerClubJoinCompletionBtn').click();
+			    		return;
+			    	}else if(ret.data.subscribedStatus == 'W'){
+			    		if('N' == 'Y'){
+			    			$('#layerClubJoinCompletionBtn').click();
+			    		}else if('N' == 'N'){
+			    			$('#layerClubJoinManagerCallBtn').click();
+			    		}
+			    	
+			    		return;
+			    	}else{
+			    		memberSubscribe();
+			    		
+			    	}
+			     },
+			     error:function (request, err, ex) {
+			       alert(err + " ===> " + ex);
+			      return true;
+			     }  
+			  });	//ajax END
+			  
+		
+//	}   });
+}
+
+function memberSubscribe(){
+	
+		var params = fq_form_to_json("solvingMemberForm");
+		var getUrl = '/main/talk/solvingClub/memberSubscribe.do';
+			
+		$.ajax({ 
+				type : 'POST',
+				contentType : 'application/json;charset=UTF-8',
+			 	url: getUrl,
+			 	cache       : false,
+			 	data : JSON.stringify(params),
+			 	traditional : true,
+			 	async		: false,
+			 	dataType:'json',
+			    success: function(ret){
+	//alert('N' );
+			    	if('N' == 'Y'){
+			    		//alert(1);
+		    			$('#layerClubJoinCompletionBtn').click();
+		    		}else if('N' == 'N'){
+		    			//alert(2);
+		    			$('#layerClubJoinManagerCallBtn').click();
+		    		}
+			        //goUrl('join');
+			        
+			     },
+			     error:function (request, err, ex) {
+			       alert(err + " ===> " + ex);
+			      return true;
+			     }  
+			  });	//ajax END
+
+}
+
+function goUrl(type){
+	var url = "";	
+	if(type == 'quit'){
+		url = "/main/talk/solvingClub/clubMain.do";	
+	}else if(type == 'join' || type == 'cancel'){
+	url = "/main/talk/solvingClub/clubView.do";	
+	}
+	
+    var args = {
+            actionUri : url,
+            formData : {
+            	
+            	"solveclubId" : 'DUMMY_CLUB_ID000' 
+            }
+        };
+
+        fn_open_page_get( args );
+}
+
+function goSolvingClubHome(){
+	url = "/main/talk/solvingClub/clubView.do";	
+    var args = {
+            actionUri : url,
+            formData : {
+            	
+            	"solveclubId" : $('#solveclubId').val()
+            }
+        };
+
+        fn_open_page_get( args );
+}
+
+/////////////////////////////////////////////////
+
+	$('.btn_popup').click(function(){
+		var $href = $(this).attr('href');
+
+		layer_popup($href);
+	});
+	function layer_popup(el){
+	
+		var $el = $(el);        //레이어의 id를 $el 변수에 저장
+	
+		 $el.fadeIn();
+		var $elWidth = ~~($el.outerWidth()),
+				$elHeight = ~~($el.outerHeight()),
+				docWidth = $(document).width(),
+				docHeight = $(document).height();
+		// 화면의 중앙에 레이어를 띄운다.
+		if ($elHeight < docHeight || $elWidth < docWidth) {
+			$el.css({
+				marginTop: -$elHeight /2,
+				marginLeft: -$elWidth/2
+			})
+		} else {
+			$el.css({top: 0, left: 0});
+		}
+		$el.find('.btn_close').click(function(){
+			$el.fadeOut(); // 닫기 버튼을 클릭하면 레이어가 닫힌다.
+			return false;
+		});
+	}
+
+	// 게시판 New 체크
+	function fnLastestCommuYn(bbsId, clsftn, type) {
+		
+		$.ajax({ 
+			 type: 'POST',
+			 url:'/main/board/boardCommuLastest.do',
+			 data : { 'bbsId' : bbsId, 'searchClsftn' : clsftn }, 
+			 dataType:'json',
+		     success: function(ret){
+		    	if(ret.message == 'Y') {
+		    		$('#'+type).html('<i class=\"icon_new\"><span class=\"hide\">New</span></i>');
+		    	}
+		     },
+		     error:function (request, err, ex) {
+		    	 doAlert(err+">>"+ex, function(result){});
+		     }  
+		  });
+	}
+
+	function getSolvingClubMemberWaitingCnt(){
+		if('NORMAL' == 'MANAGER' || 'NORMAL' == 'SUB_MANAGER'){
+			var url = '/main/talk/solvingClub/manager/getMemberWaitingCnt.do';
+			var param = fq_form_to_json("solvingProblemForm");
+			console.log(param);
+			var memberCnt = 0;
+			$.ajax({
+				type : 'POST',
+				contentType : 'application/json;charset=UTF-8',
+			 	url: url,
+			 	cache       : false,
+			 	data : JSON.stringify(param),
+			 	traditional : true,
+			 	async		: false,
+			 	dataType:'json',
+			    success: function(ret){
+			    	console.log(ret);
+			    	memberCnt = ret.data;
+			    	if(memberCnt > 0){
+			    		$('#manage_btn').html('<i class=\"icon_new\" style="margin-left:20px"><span class=\"hide\">New</span></i>');
+			    	}
+			     },
+			     error:function (request, err, ex) {
+			       alert(err + " ===> " + ex);
+			      return true;
+			     }  
+			  }); 
+		}
+	}	
+
+//]]>
+</script>
+<form  method="post" name="solvingProblemForm" id="solvingProblemForm" >
+<input type="hidden" id="solveclubId" name="solveclubId" value="DUMMY_CLUB_ID000">
+<input type="hidden" id="pageIndex" name="pageIndex" value="1">
+</form>
+
+
+				<!-- left_con -->
+				<div class="left_con">
+					<!-- solvingclub_info -->
+					<div class="solvingclub_info">
+						<h3 class="solvingclub_title"  onclick="javascript:goSolvingClubHome();" >SSAFY_16기_서울_22반  </h3>
+						<div class="manager_info">
+							<div class="club_name">
+								<span class="name">
+								
+								<span class='p'><img src='/main/images/sw_sub/talk_no_photo.png' alt=''></span><a href='javascript:;' onclick="userInformationPopup('DUMMY_USER_KEY')"> <span class='name' id='Beginner'>DUMMY_USER</span></a>
+								
+								 </span>
+								<!-- <i class="icon_name3"></i>  -->
+								<span class="icon_line">Manager</span>
+							</div>
+						</div>
+						<ul class="member_info">
+							<li>
+								<i class="num"></i>
+								<span>Club 지수 508</span>
+							</li>
+							<li>
+								<i class="member_num"></i>
+								<span>19<a href="#" onclick="javascript:goMember();" class="btn_info"><span class="hide">정보</span></a></span>
+							</li>
+						</ul>
+						<div class="setup_info">
+							<span class="date">개설일 : <span>
+																	
+							<!-- 2026-07-16 19:58 -->
+							2026-07-16 10:58
+							
+							</span>							
+													
+							</span>						
+							
+							
+							
+							<span class="icon_line position">비공개 </span>
+							
+														
+						</div>
+					</div>
+					<!-- //solvingclub_info -->
+
+
+	
+	
+							
+
+					<!-- nav_notice -->
+					<div class="nav_notice">
+						<ul>
+							<li >
+								<a href="javascript:goSolvingClubBbs('','전체보기');">전체보기<span id="totalView"></span></a>
+							</li>	
+							
+								 
+							
+								 
+							
+								
+									<li  
+									
+									>
+										<a href="javascript:goSolvingClubBbs('AZ9opbJaUHzHBITH','Notice');">Notice<span id="Notice"></span></a>
+									</li>
+								 
+							
+							
+								
+									<li  
+									
+									>
+										<a href="javascript:goSolvingClubBbs('AZ9opbJaUH3HBITH','QnA');">Q&A<span id="QnA"></span></a>
+									</li>
+								 
+							
+								 
+							
+								 
+							
+							
+								 
+							
+								
+									<li  
+									
+									>
+										<a href="javascript:goSolvingClubBbs('AZ9opbJaUH7HBITH','Free');">Free<span id="Free"></span></a>
+									</li>
+								 
+							
+								 
+							
+							
+								 
+							
+								 
+							
+								 
+							
+							
+								 
+							
+								 
+							
+								 
+							
+							
+								 
+							
+								 
+							
+								 
+							
+							
+								 
+							
+								 
+							
+								 
+							
+						</ul>
+					</div>
+					<!-- //nav_notice -->
+					
+					<script>
+					
+						fnLastestCommuYn('CLUB_DUMMY_CLUB_ID000', 'AZ9opbJaUH3HBITH', 'QnA');
+					
+						fnLastestCommuYn('CLUB_DUMMY_CLUB_ID000', 'AZ9opbJaUH7HBITH', 'Free');
+					
+						fnLastestCommuYn('CLUB_DUMMY_CLUB_ID000', 'AZ9opbJaUHzHBITH', 'Notice');
+					
+					getSolvingClubMemberWaitingCnt();
+					</script>
+						
+					<!-- mypbox_titlearea -->
+					<div class="mypbox_titlearea">
+						<span class="problembox_title">Problem Box</span>
+						
+						
+							
+							
+							
+													
+						
+						
+						
+						<div class="paging2 pagination_type3">
+							<span class="paging_num">
+								<span class="active"  id="currentPage">1</span>
+								<span>/</span>
+								<span id="endPage" >10</span>
+							</span>
+							<a href="#none" id="pre_page_button"  class="pre_page button"><span class="hide">이전페이지</span></a>
+							<a href="#none" id="next_page_button" class="next_page button"><span class="hide">다음페이지</span></a>
+						</div>
+					</div>
+					<!-- //mypbox_titlearea -->
+					<!-- nav_problembox -->
+					<div class="nav_problembox">
+						<ul>
+							
+						</ul>
+					</div>
+					<!-- //nav_problembox -->
+					
+					<a href="#none" onclick="javascript:quitClub();"  class="btn_leaveclub"><i></i>클럽 탈퇴 </a>
+					
+				</div>								
+				
+				<!-- //left_con -->
+				
+<div id="hideDiv"  >
+
+<a href="#layerClubJoinCompletion" id="layerClubJoinCompletionBtn"   class="blind"><i></i></a>
+
+<a href="#layerClubJoinManagerCall" id="layerClubJoinManagerCallBtn"   class="blind"><i></i></a>
+
+<a href="#layerClubJoinRquesting" id="layerClubJoinRquestingBtn"   class="blind"><i></i></a>
+
+<a href="#layerClubNoMember" id="layerClubNoMemberBtn"   class="blind"><i></i> </a>
+
+<a href="#layerClubRejected" id="layerClubRejectedBtn"   class="blind"><i></i> </a>
+
+</div>
+
+	
+<!-- -------------------------------------------- -->			
+
+<form  method="post" name="solvingMemberForm" id="solvingMemberForm" >
+<input type="hidden" id="solveclubId" name="solveclubId" value="DUMMY_CLUB_ID000">
+<input type="hidden" id="subscribedStatus" name="subscribedStatus" >
+<input type="hidden" id="publicYn" name="publicYn" >
+<input type="hidden" id="mCnt" name="mCnt" >
+
+			
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- -------------------------------------------- -->	
+
+<script type="text/javascript">		
+function checkCommentSize(textareaObj) {
+
+	var commentDetailStr = textareaObj.value;
+	if(commentDetailStr.length > 1000) {
+		commentDetailStr = commentDetailStr.substring(0,1000);
+		textareaObj.value = commentDetailStr;
+	}
+	
+	var sizeMsg = commentDetailStr.length;
+	
+	if(sizeMsg >= 50){
+		$('#memberComment').attr('style','color:red');
+	}else{
+		$('#memberComment').attr('style','color:black');
+	}
+	
+	$(textareaObj).parent().parent().find('span.write_total em').html(sizeMsg);
+	
+	
+
+}
+</script>
+<!-- layer_alert2 -->
+
+<div id="layerClubJoinRquest" class="popup_layer">
+	<div class="layer_alert2 club_join" style="width: 480px;">
+		<!-- layer_header -->
+		<div class="layer_header">
+			<span>Club 가입하기</span>
+		</div>
+		<!-- //layer_header -->
+		<!-- layer_con -->
+		<div class="layer_con">
+			<span class="club_join_title">SSAFY_16기_서울_22반</span>
+			
+			<div class="textarea_mj">
+				<textarea  id="memberComment" name="memberComment" placeholder="Club 가입 사유를 입력해 주세요." title="클럽가입 사유"  onkeyup="checkCommentSize(this)"></textarea>
+				<span class="write_total"><em>0</em> / 50자</span>
+			</div>
+			
+			
+			
+			<span class="help-inline">※ 비공개 Club은 가입 시 Manager의 승인이 필요합니다.</span>
+			
+			
+		</div>
+		<!-- //layer_con -->
+		<div class="btn_center">
+			<a href="#" class="btn_blue sm btn" onclick="javascript:checkSubscribe();" >Club 가입하기</a>
+			<!-- <a href="#" class="btn_blue sm btn">Club 가입 신청하기</a> -->
+		</div>
+		<a href="#none"  class="btn_close"><span class="hide">닫기</span></a>
+	</div>
+</div>
+
+
+<!-- layer_alert -->
+<div id="layerClubJoinCompletion" class="popup_layer">
+<div class="layer_alert md" style="width: 430px;">
+			<p class="txt">
+				Club에 가입이 되었습니다.
+			</p>
+			<div class="btn_center">
+				<a href="#" class="btn_blue md btn" onclick="javascript:goSolvingClubHome();$('#layerClubJoinCompletion').fadeOut();" >확인</a>
+			</div>
+			<a href="#none" class="btn_close"><span class="hide" onclick="javascript:goSolvingClubHome();$('#layerClubJoinCompletion').fadeOut();">닫기</span></a>
+		</div>
+		<!-- //layer_alert -->
+		
+
+<!-- //layer_alert2 -->
+</div>
+
+
+
+		
+<!-- layer_alert -->
+
+<div id="layerClubJoinManagerCall" class="popup_layer">
+		<div class="layer_alert md" style="width: 430px;">
+			<p class="txt">
+				Club manager에게 가입 요청이 되었습니다.
+			</p>
+			<div class="btn_center">
+				<a href="#" class="btn_blue md btn" onclick="javascript:goSolvingClubHome();$('#layerClubJoinManagerCall').fadeOut();" >확인</a>
+			</div>
+			<a href="#none" class="btn_close"><span class="hide">닫기</span></a>
+		</div>
+</div>		
+		<!-- //layer_alert -->
+		
+		
+<div id="layerClubJoinRquesting" class="popup_layer">		
+		<!-- layer_alert -->
+		<div class="layer_alert md" style="width: 430px;">
+			<p class="txt">
+				가입 신청 중입니다.
+			</p>
+			<div class="btn_center">
+				<a href="#" class="btn_blue md btn" onclick="javascript:$('#layerClubJoinRquesting').fadeOut();" >확인</a>
+			</div>
+			<a href="#none" class="btn_close"><span class="hide">닫기</span></a>
+		</div>
+</div>		
+		<!-- //layer_alert -->		
+		
+		
+		
+		
+		<!-- layer_alert -->
+				
+<div id="layerClubNoMember" class="popup_layer">		
+		<div class="layer_alert md" style="width: 430px;">
+			<p class="txt">
+				게시물을 보려면 Club 가입이 필요합니다.
+			</p>
+			<div class="btn_center">
+				<a href="#" class="btn_blue md btn" onclick="javascript:$('#layerClubNoMember').fadeOut();" >확인</a>
+			</div>
+			<a href="#none" class="btn_close"><span class="hide">닫기</span></a>
+		</div>
+</div>		
+		<!-- //layer_alert -->
+		
+		<!-- layer_alert -->
+			
+<div id="layerClubRejected" class="popup_layer">		
+		<div class="layer_alert md" style="width: 430px;">
+			<p class="txt">
+				차단 멤버로 Club 이용이 제한 되었습니다
+			</p>
+			<div class="btn_center">
+				<a href="#" class="btn_blue md btn" onclick="javascript:$('#layerClubRejected').fadeOut();"  >확인</a>
+			</div>
+			<a href="#none" class="btn_close"><span class="hide">닫기</span></a>
+		</div>
+</div>		
+			
+</form>			
+<!-- -------------------------------------------- -->				
+<!-- -------------------------------------------- -->				
+				<!-- //left_con -->
+				<!-- right_con -->
+				<div class="right_con">
+					<!-- problembox_list -->
+					
+					<!-- //problembox_list -->
+
+<!-- -------------------------problem detail start---------------------- -->
+						
+
+<form  method="post" name="problemForm" id="problemForm">
+<input type="hidden" id="contestProbId" name="contestProbId" value="AZq-gSmq_RfHBISS">
+</form>	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script type="text/javascript">
+//<![CDATA[
+$(document).ready( function() {
+	
+	if("N" == 'Y'){
+		changeTopTabActivec('contest');
+	}
+	
+
+	
+	$('#recommText').text('0');
+	 $('#recommTextDown').text('0');	 
+
+	 getRecommender();
+
+});// ready end 
+
+
+
+function changeTopTabActivec(value){
+	if(value == 'contest'){
+		$('#topProblemBtn').removeClass('active');
+		$('#topContestProblemBtn').addClass('active');
+		
+		$('#topProblemTxt').text('Contest Problem');
+	}
+}
+
+// 사용안함 
+//function goProblemList(){
+//	alert('goProblemList');
+//	var url = "/main/code/problem/problemList.do";
+//	
+//	if("N" == 'Y'){
+//		url = "/main/code/contestProblem/contestProblemList.do";
+//	}
+//		
+//       var args = {
+//            actionUri : url ,
+//           formData : {
+//         //   	"contestProbId" : $('#contestProbId').val()
+//            }
+//        };
+//
+//        fn_open_page( args );		
+//}
+	
+function setRecommender(){
+
+	//code/problem/problemRecommend.do
+	var params = fq_form_to_json("problemForm");
+	
+	var getUrl = '/main/code/problem/problemRecommend.do';
+
+	$.ajax({ 
+		type : 'POST',
+		contentType : 'application/json;charset=UTF-8',
+	 	url: getUrl,
+	 	cache       : false,
+	 	data : JSON.stringify(params),
+	 	traditional : true,
+	 	async		: false,
+	 	dataType:'json',
+	    success: function(ret){
+	    	
+	          if(ret.success==true){	    
+	        	//  alert(ret.data);// 출력될 추천 수 
+
+	        	  $('#recommText').text(ret.data);
+	        	  $('#recommTextDown').text(ret.data);
+	        	  getRecommender();
+	          }else{
+	            alert(ret.message);
+	          }
+	     },
+	     error:function (request, err, ex) {
+	       alert(err + " ===> " + ex);
+	      return true;
+	     }  
+	 });	//ajax END
+	// 처은 조회시 Recommender수 가지고 오고 
+	// ajax 호출 후 반환시 Recommender수 가지고 와서 값 세팅 으로 한번에 하자 .
+}
+
+
+	
+function getRecommender(){
+	//code/problem/problemRecommend.do
+	var params = fq_form_to_json("problemForm");
+	
+	var getUrl = '/main/code/problem/getProblemRecommend.do';
+
+	$.ajax({ 
+		type : 'POST',
+		contentType : 'application/json;charset=UTF-8',
+	 	url: getUrl,
+	 	cache       : false,
+	 	data : JSON.stringify(params),
+	 	traditional : true,
+	 	async		: false,
+	 	dataType:'json',
+	    success: function(ret){
+	    	data = ret;
+	          if(ret.success==true){
+	        		 if(!!ret.data && !!ret.data.useYn && ret.data.useYn == 'Y'){
+	        			 
+	        			 if(!$('#btn_recomm').hasClass('active')){
+	        					$('#btn_recomm').addClass('active');
+	        			 }	
+        			 	if(!$('#btn_recommDown').hasClass('active')){
+     						$('#btn_recommDown').addClass('active');
+     			 		}	
+	        		 }else{
+	        			 if($('#btn_recomm').hasClass('active')){
+        					$('#btn_recomm').removeClass('active');
+        				}
+		        		 if($('#btn_recommDown').hasClass('active')){
+	     					$('#btn_recommDown').removeClass('active');
+	     				}
+	        		 }
+	          }else{
+	            alert(ret.message);
+	          }
+	     },
+	     error:function (request, err, ex) {
+	       alert(err + " ===> " + ex);
+	      return true;
+	     }  
+	 });	//ajax END
+	// 처은 조회시 Recommender수 가지고 오고 
+	// ajax 호출 후 반환시 Recommender수 가지고 와서 값 세팅 으로 한번에 하자 .
+}
+
+	
+function problemPutInBox(){
+	openProblemBox();	
+}	
+
+function goProblem(){
+	// 물제 풀이 공통 함수 호출 
+	
+	var contestProbId = $('#problemForm [name=contestProbId]').val();
+	var categoryId = $('#probBoxId').val();
+	fnGoProblemTest(contestProbId, categoryId, "BOX");
+
+
+}
+
+
+
+function goCourse(courseId, subjectId){
+
+
+    var args = {
+            actionUri : "/main/learn/course/subjectDetail.do",
+            formData : {
+            	"courseId" : courseId
+            	,"subjectId" : subjectId
+            }
+        };
+
+        fn_open_page_get( args );
+       
+}
+
+function goProblemView(contestProbId,type){
+
+	
+	var url = "";
+	if(type == 'USER'){
+		url = "/main/code/userProblem/userProblemDetail.do";		
+	}else if(type == 'CONTEST'){
+		url = "/main/code/problem/problemDetail.do";
+	}else if(type == 'PROBLEM'){
+		url = "/main/code/problem/problemDetail.do";
+	}
+	
+    var args = {
+            actionUri : url,
+            formData : {
+            	"contestProbId" : contestProbId
+            }
+        };
+
+        fn_open_page_get( args );		
+}
+
+function goTab(val){
+	
+	var url = "";
+	
+	if(val == 1){
+		url = '/main/talk/solvingClub/problemView.do';//solving club problem detail 
+	}else if(val == 2){
+		url = '/main/talk/solvingClub/problemSubmitHistory.do';//solving club problem 제출이력
+	}else if(val == 3){
+		url = '/main/talk/solvingClub/problemPassedUser.do'; //solving club problem 정답자
+	}else if(val == 4){
+		url = '/main/talk/solvingClub/problemAttackHistory.do';//solving club problem Code Attack
+	}
+	
+	
+	 var args = {
+	            actionUri : url,
+	            formData : {
+	            	"contestProbId"   : $('#contestProbId').val(),
+	            	"solveclubId"     : $('#solveclubId').val(),
+	            	"problemBoxTitle" : '09.10 모의',
+	            	"problemBoxCnt"   : '5',
+	            	"probBoxId"       : $('#probBoxId').val()
+	            }
+	        };
+
+	 fn_open_page_get( args );	
+
+}
+
+function goProblemList(){
+	var url = '/main/talk/solvingClub/problemBoxDetail.do';
+	var args = {
+            actionUri : url,
+            formData : {        
+            	"solveclubId" : $('#solveclubId').val(),
+            	"probBoxId" : $('#probBoxId').val()
+            }
+        };
+
+ fn_open_page_get( args );	
+}
+
+function problemMove(){
+	var url = '/main/code/problem/problemList.do';
+	var args = {
+            actionUri : url,
+            formData : {            	
+            }
+        };
+
+ fn_open_page_get( args );	
+}
+
+function userProblemMove(){
+	var url = '/main/code/userProblem/userProblemList.do';
+	var args = {
+            actionUri : url,
+            formData : {            	
+            }
+        };
+
+ fn_open_page( args );		
+}
+
+function referenceCodeMove(){
+	var url = '/main/learn/referenceCode/referenceCodeList.do';
+	                         
+	var args = {
+            actionUri : url,
+            formData : {            	
+            }
+        };
+
+ fn_open_page_get( args );		
+}
+
+function contestProblemMove(){
+	var url = '/main/code/contestProblem/contestProblemList.do';
+	var args = {
+            actionUri : url,
+            formData : {            	
+            }
+        };
+
+ fn_open_page( args );		
+}
+//]]>
+
+</script>
+				<div class="right_con">
+					<h4 class="club_box_tit"> 09.10 모의 (5)</h4>
+					<!-- club_problem_box -->
+					<div class="club_problem_box">
+						<div class="btn_left">
+							<a href="javascript:goProblemList()" class="btn_line md btn"><i class="pre_arr"></i>목록</a>
+						</div>
+						<div class="btn_right">
+							
+							<a href="javascript:goProblem()" class="btn_blue md btn">문제 풀기</a>
+						</div>
+					</div>
+					<!-- //club_problem_box -->
+					<!-- problem_title -->
+					<p class="problem_title">
+						<i></i> [07] 항아리 게임
+						
+						<span class="badge badge-a">D1</span>
+						
+						
+											
+					
+					</p>
+					<!-- //problem_title -->
+					<!-- problem_infobox2 -->
+					<div class="problem_infobox2 type2">
+
+				
+				<div class="info">
+					<ul>
+						<li>
+							<span>11 </span>
+							<span>참여자</span>
+						</li>
+						<li>
+							<span>7</span>
+							<span>제출</span>
+						</li>
+						<li>
+							<span>4</span>
+							<span>정답</span>
+						</li>
+						<li>
+							<span>57.14 </span>
+							<span>정답률</span>
+						</li>
+						<li>
+							<span>50 </span>
+							<span>Point</span>
+						</li>
+					</ul>
+				</div>
+				
+			</div>
+			<!-- //problem_infobox2 -->
+
+			<!-- tab_type1 -->
+			<div class="tab_type1">
+				<ul>
+					<li class="active"><a href="#none">Problem</a></li>
+					<li><a href="javascript:goTab(2);">제출이력</a></li>
+					<li><a href="javascript:goTab(3);">정답</a></li>
+					
+				</ul>
+			</div>
+			<!-- //tab_type1 -->
+			<!-- tabcon_wrap -->
+			<div class="tabcon_wrap">
+				<!-- tabcon Problem -->
+				<div class="tabcon">
+					<!-- box3 -->
+					<div class="box3">
+						<ul class="list_type2 ico">
+							<li>
+								
+									
+									
+									
+									
+									
+									
+								
+								
+								
+									
+									
+									
+									
+									
+									
+								
+								
+								
+									
+									
+									
+									
+									
+									
+								
+								
+								
+									
+									
+									
+									
+									
+									
+								
+								
+									<span>시간</span>
+									<span>: 30개 테스트케이스를 합쳐서 
+									
+									<em>C의 경우 1초 </em> 
+									
+									
+									/ <em>C++의 경우 1초 </em>
+									
+									
+									
+									/ <em>Python의 경우 1초</em>
+									
+									</span>
+							</li>
+							<li>
+								<span>메모리</span>
+								<span>: 힙, 정적 메모리 합쳐서 <em>262144  kbytes</em> 이내, 스택 메모리 <em>1024  kbytes</em> 이내</span>
+							</li>
+						</ul>
+					</div>
+					<!-- //box3 -->
+					<!-- box4 -->
+					<div class="box4">
+					<style type="text/css">
+						.box4 img {max-width:850px;height:auto !important;}
+					</style>
+						<p class="txt">
+						
+						<p google="" sans="" style="padding-top: 0px; padding-bottom: 0px; font-family: " text="">플레이어는 1번 구역에서 출발하여 N번 구역(도착점)까지 가야 하는 플랫포머 게임을 하고 있다.</p>
+
+<p google="" sans="" style="padding-top: 0px; padding-bottom: 0px; font-family: " text="">1번 구역은 튜토리얼이라 쉽게 2번 구역으로 넘어갈 수 있다.</p>
+
+<p google="" sans="" style="padding-top: 0px; padding-bottom: 0px; font-family: " text="">하지만 2번 구역부터 N-1번 구역까지는 &#39;미끄러운 발판&#39;이 있다.<br />
+<br />
+플레이어가 <b google="" sans="" style="font-family: " text=""><span class="math-inline" data-math="i" google="" sans="" style="font-family: " text="">i</span>번 돌을 밟는 횟수가 홀수 번째(1번째, 3번째, 5번째...)라면</b>, 미끄러져서 뒤쪽인 P[i]번 발판으로 되돌아가게 된다. (<span class="math-inline" data-math="P[i] < i" google="" sans="" style="font-family: " text="">P[i] < i</span>)<br />
+<br />
+다행히 <b google="" sans="" style="font-family: " text=""><span class="math-inline" data-math="i" google="" sans="" style="font-family: " text="">i</span>번 돌을 짝수 번째(2번째, 4번째...) 밟게 되면</b>, 요령이 생겨 미끄러지지 않고 다음 발판(<span class="math-inline" data-math="i+1" google="" sans="" style="font-family: " text="">i+1</span>)으로 건너갈 수 있다.</p>
+
+<p google="" sans="" style="padding-top: 0px; padding-bottom: 0px; font-family: " text="">1번 구역에서 시작하여 N번 구역에 도착할 때까지 플레이어가 구역을 이동한 횟수의 합을 구하시오.<br />
+<br />
+&nbsp;</p>
+
+<p data-path-to-node="16" google="" sans="" style="font-family: " text=""><b google="" sans="" style="font-family: " text="">[입력]</b></p>
+
+<ul data-path-to-node="17" google="" sans="" style="padding-inline-start: 32px; font-family: " text="">
+	<li google="" sans="" style="font-family: " text="">
+	<p data-path-to-node="17,0,0" google="" sans="" style="font-family: " text="">첫 줄에 테스트 케이스의 수 <span class="math-inline" data-math="T" google="" sans="" style="font-family: " text="">T</span>가 주어진다.</p>
+	</li>
+	<li google="" sans="" style="font-family: " text="">
+	<p data-path-to-node="17,1,0" google="" sans="" style="font-family: " text="">각 테스트 케이스의 첫 줄에는 <span class="math-inline" data-math="N" google="" sans="" style="font-family: " text="">N</span>&nbsp;(<span class="math-inline" data-math="4 \le N \le 500" google="" sans="" style="font-family: " text="">4 <=&nbsp;N <=&nbsp;20</span>)이 주어진다.</p>
+	</li>
+	<li google="" sans="" style="font-family: " text="">
+	<p data-path-to-node="17,2,0" google="" sans="" style="font-family: " text="">다음 줄에는 각 층(또는 줄/구역)에서 되돌아가는 위치 P[i]의 값들이 공백으로 구분되어 주어진다. (P[1]과 <span class="math-inline" data-math="P[N]" google="" sans="" style="font-family: " text="">P[N]</span>&nbsp;데이터는 입력에는 포함되지만 계산에는 쓰이지 않음에 주의)</p>
+	</li>
+</ul>
+
+<p data-path-to-node="18" google="" sans="" style="font-family: " text=""><b google="" sans="" style="font-family: " text="">[출력]</b></p>
+
+<ul data-path-to-node="19" google="" sans="" style="padding-inline-start: 32px; font-family: " text="">
+	<li google="" sans="" style="font-family: " text="">
+	<p data-path-to-node="19,0,0" google="" sans="" style="font-family: " text="">각 줄은 <code google="" sans="" style="font-family: " text="">#x</code> (테스트 케이스 번호)로 시작하고, 공백을 두고 총 이동 횟수를 출력한다.</p>
+	</li>
+</ul>
+
+							
+						</p>
+					</div>
+					<!-- //box4 -->
+					<!-- box_type1 -->
+
+					<div class="box_type1">
+						<div class="left w430p">
+							<div class="box5 height">
+								<span class="title1">입력</span>
+								3<br />
+4<br />
+0 1 2 0<br />
+4<br />
+0 1 1 0<br />
+5<br />
+0 1 2 3 0							
+								<!-- down_area -->
+								
+								
+								<div class="down_area">
+									<a href="#">
+										<span>																		
+										<a href="/main/common/contestProb/contestProbDown.do?downType=in&amp;contestProbId=AZq-gSmq_RfHBISS&amp;_menuId=AVtnUz06AA3w6KZN&amp;_menuF=true">input7_sample.txt</a>
+										</span>
+										<i><span class="hide">다운로드</span></i>
+									</a>                        
+								</div>
+								
+								<!-- //down_area -->
+							</div>
+							
+							
+							<div class="tag_wrap" id="tagList">							
+							</div>	
+
+						</div>
+						<div class="right w430p">
+							<div class="box5 height">
+								<span class="title1">출력</span>
+								#1 9<br />
+#2 10<br />
+#3 16
+							
+								<!-- down_area -->
+								
+								<div class="down_area">
+									<a href="#">
+										<span>
+									    <a href="/main/common/contestProb/contestProbDown.do?downType=out&amp;contestProbId=AZq-gSmq_RfHBISS&amp;_menuId=AVtnUz06AA3w6KZN&amp;_menuF=true">output7_sample.txt</a>										
+										</span>
+										<i><span class="hide">다운로드</span></i>
+									</a>                        
+								</div>
+								
+								<!-- //down_area -->
+							</div>
+							
+						</div>
+						
+						
+		
+					</div>
+					
+					<!-- //box_type1 -->
+					<div class="btn_right">
+						
+						
+						
+												
+						
+					</div>
+					
+					<!-- recomm_box -->
+					
+					<!-- //recomm_box -->
+					<!-- sns_wrap -->
+
+					<!-- //sns_wrap -->
+					<!-- title_wrap -->
+				
+					<!-- //title_wrap -->
+					<!-- box2 -->
+				
+
+				
+				
+				<!-- //box2 -->
+			
+						<!--//col-md-6-->
+					</div>
+			
+				</div>
+				<!-- //tabcon Problem -->
+
+			</div>
+			<!-- //tabcon_wrap -->						
+<!-- -------------------------problem detail end---------------------- -->						
+					</div>
+					<!-- //box7 -->
+			
+
+				</div>
+				<!-- //right_con -->
+			</div>
+			<!-- //club_wrap -->
+
+
+		</div>
+	</div>
+</div>
+<!--//container main-->
+<footer>
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	
+	<div class="footer-menu ">
+		<div class="container">
+			<div class="row_wrap">
+				<div class="col-3 footer-menu-item">
+					<h3>About </h3>
+					<ul>
+						<li><a href="/main/help/clause/aboutSWEA.do">SW Expert Academy</a></li>
+						<li><a href="/main/help/clause/pointAndRanking.do">포인트와 랭킹</a></li>
+						<li><a href="/main/help/clause/learningGuide.do">학습 가이드</a></li>
+					</ul>
+				</div>
+				<div class="col-3 footer-menu-item">
+					<h3>Support</h3>
+					<ul>
+						<li><a href="/main/help/notice/noticeBoardList.do">공지사항
+							
+						</a></li>
+						<li><a href="/main/help/faq/faqBoardList.do">FAQ</a></li>
+						<li><a href="/main/help/qna/qnaBoardList.do">Q&A</a></li>
+						<li><a href="/main/help/report/reportBoardList.do">사이트 오류 제보</a></li>
+						<li><a href="/main/help/sitemap/siteMapList.do">사이트 맵</a></li>
+					</ul>
+				</div>
+				<!-- 
+				<div class="col-3 footer-menu-item">
+					<h3>News</h3>
+					<ul>
+						<li><a href="/main/help/event/eventBoardList.do">Event</a></li>
+						<li><a href="/main/help/magazine/magazineBoardList.do">Magazine</a></li>
+					</ul>
+				</div>
+				 -->
+				 <!-- 
+				<div class="col-3 footer-menu-item align-text-bottom">
+					<div class="footer_select">
+
+						<div class="styled-select">
+							<select id="language">
+								<option value="0">한국어</option>
+								<option value="1">영어</option>
+							</select>
+						</div>
+
+					</div>
+				</div>
+				 -->
+			</div>
+			<!-- /.row -->
+		</div>
+	</div>
+	<!--//.footer-menu -->
+	<div class="small-print">
+		<div class="container">
+			<div class="row_wrap ">
+				<div class="logo-area">
+					<span class="footer-logo"></span>
+				</div>
+				<div class="copyright">
+
+					<ul class="footer_left">
+						<li><a href="/main/help/clause/legal.do" title="">이용 약관</a></li>
+						<li><a href="/main/help/clause/memberPrivacy.do" title="">개인정보처리방침</a></li>
+						<li><a href="/main/help/clause/memberEmailCollect.do" title="">이메일 무단 수집 거부</a></li>
+					</ul>
+					<p>1366*768 이상 해상도에 최적화되어 있으며 Google Chrome 브라우저를 권장합니다. (Internet Explorer 11 이상 지원)</p>
+					<p>본 사이트의 콘텐츠는 저작권법의 보호를 받는 바 무단 전재, 복사, 배포 등을 금합니다.</p>
+					<p>ⓒ 2017 SAMSUNG. ALL RIGHTS RESERVED</p>
+				</div>
+			</div>
+		</div>
+	</div>
+	<!-- //.small-print-->
+
+</footer>
+</body>
+
+</html>
