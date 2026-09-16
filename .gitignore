@@ -13,3 +13,6 @@ build/
 
 # ide
 .idea/
+
+# claude agent local state
+.claude/
