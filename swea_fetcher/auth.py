@@ -138,7 +138,7 @@ def login(session: requests.Session, settings: Settings) -> None:
             f"{settings.login_state_file} 을 삭제하세요"
         )
     if _login_attempted:
-        raise LoginFailed("이 실행에서 이미 로그인을 시도했습니다")
+        raise LoginFailed("이 실행에서 이미 로그인을 시도했습니다 (계정 잠금 방지). 명령을 다시 실행하세요")
     _login_attempted = True
 
     log.info("로그인 시도 (ID: %s)", settings.user_id)
@@ -185,8 +185,11 @@ def login(session: requests.Session, settings: Settings) -> None:
     code = str(ret.get("message", "") or "unknown")
     failures += 1
     _write_failures(settings.login_state_file, failures)
-    template = _FAIL_MESSAGES.get(code, f"로그인 실패: {code}")
-    raise LoginFailed(template.format(n=failures), code=code)
+    if code in _FAIL_MESSAGES:
+        message = _FAIL_MESSAGES[code].format(n=failures)
+    else:
+        message = f"로그인 실패: {code}"  # 서버 코드에 중괄호가 있어도 format 을 거치지 않음
+    raise LoginFailed(message, code=code)
 
 
 def get_session(settings: Settings) -> requests.Session:

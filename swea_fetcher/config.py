@@ -10,7 +10,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 from .errors import ConfigMissing
 
@@ -54,25 +54,28 @@ def load_settings(config_dir: Path | None = None) -> Settings:
     """
     config_dir = Path(config_dir) if config_dir is not None else CONFIG_DIR
     env_file = config_dir / ENV_FILE_NAME
-    if env_file.is_file():
-        load_dotenv(env_file, override=False)  # 환경변수 우선
+    file_values: dict[str, str | None] = dotenv_values(env_file) if env_file.is_file() else {}
 
-    missing = [k for k in REQUIRED_KEYS if not os.environ.get(k, "").strip()]
+    def get(key: str) -> str:
+        """환경변수 우선, 없으면 .env 값. os.environ 은 건드리지 않는다."""
+        return os.environ.get(key) or (file_values.get(key) or "")
+
+    missing = [k for k in REQUIRED_KEYS if not get(k).strip()]
     if missing:
         raise ConfigMissing(
             f"설정이 없습니다: {', '.join(missing)}. "
             f"{env_file} 파일에 SWEA_ROOT, SWEA_ID, SWEA_PW 를 작성하세요."
         )
 
-    root = Path(os.environ["SWEA_ROOT"].strip()).expanduser()
+    root = Path(get("SWEA_ROOT").strip()).expanduser()
     if not root.is_dir():
         raise ConfigMissing(f"SWEA_ROOT 가 존재하는 폴더가 아닙니다: {root}")
 
     return Settings(
         root=root,
-        user_id=os.environ["SWEA_ID"].strip(),
-        password=os.environ["SWEA_PW"],
-        input_name=os.environ.get("SWEA_INPUT_NAME", "").strip() or "input.txt",
-        output_name=os.environ.get("SWEA_OUTPUT_NAME", "").strip() or "output.txt",
+        user_id=get("SWEA_ID").strip(),
+        password=get("SWEA_PW"),
+        input_name=get("SWEA_INPUT_NAME").strip() or "input.txt",
+        output_name=get("SWEA_OUTPUT_NAME").strip() or "output.txt",
         config_dir=config_dir,
     )

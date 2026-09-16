@@ -103,6 +103,8 @@ def save_problem(
     output_text = normalize_text(output_bytes)
 
     created_dir = not problem_dir.exists()
+    # force 로 덮어쓸 기존 파일은 원본을 메모리에 보관해 실패 시 복원한다
+    backups: dict[Path, bytes] = {p: p.read_bytes() for p in existing}
     written: list[Path] = []
     skipped: list[Path] = []
     try:
@@ -117,20 +119,23 @@ def save_problem(
             _write(py_path, render_skeleton(info, settings.input_name))
             written.append(py_path)
     except Exception:
-        _rollback(problem_dir, created_dir, written)
+        _rollback(problem_dir, created_dir, written, backups)
         raise
 
     log.info("저장 완료: %s (%d files)", problem_dir, len(written))
     return SaveResult(problem_dir=problem_dir, written=written, skipped=skipped)
 
 
-def _rollback(problem_dir: Path, created_dir: bool, written: list[Path]) -> None:
-    """새 폴더면 통째로 삭제, 기존 폴더면 이번에 쓴 파일만 삭제."""
+def _rollback(problem_dir: Path, created_dir: bool, written: list[Path], backups: dict[Path, bytes]) -> None:
+    """새 폴더면 통째로 삭제, 기존 폴더면 이번에 쓴 파일만 삭제 (force 로 덮은 원본은 복원)."""
     try:
         if created_dir:
             shutil.rmtree(problem_dir, ignore_errors=True)
         else:
             for p in written:
+                if p in backups:
+                    p.write_bytes(backups[p])
+                    continue
                 try:
                     p.unlink()
                 except FileNotFoundError:
