@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swea-fetcher"
+version = "0.0.1"
+description = "SWEA 문제 샘플 입출력을 로컬 풀이 저장소 규칙에 맞게 저장하는 CLI"
+requires-python = ">=3.11"
+dependencies = [
+    "requests",
+    "beautifulsoup4",
+    "lxml",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+swea-fetch = "swea_fetcher.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["swea_fetcher*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
