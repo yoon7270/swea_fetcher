@@ -8,6 +8,24 @@ swea-fetch 25730 IM_test        # 문제 번호 + 주제 폴더 → swea\IM_test
 swea-fetch 25730 IM_test --force
 ```
 
+## 창 프로그램 (GUI)
+
+명령줄 대신 창으로 쓰려면:
+
+```powershell
+pip install -e ".[gui]"
+swea-fetch-gui
+```
+
+- **저장**: 문제 번호 + 주제 → Enter. 결과 카드에서 [폴더 열기] / [PyCharm 에서 열기]. Ctrl+Enter 미리보기.
+- **검증**: 주제·번호를 고르거나 `{번호}.py`(또는 그 폴더)를 창에 끌어다 놓고 [실행] → `input.txt` 로 실행해 `output.txt` 와 줄 단위 비교(≠ 다름 / − 누락 / + 초과). 타임아웃은 설정에서.
+- **최근**: 저장한 문제 목록. 더블클릭 → 검증, 우클릭 → 폴더 열기.
+- **설정**: 루트 폴더·ID·비밀번호(자격 증명 관리자에만 저장) / 세션 삭제 / 계정 정보까지 삭제.
+
+CLI 와 같은 설정(`%USERPROFILE%\.swea-fetch\`)을 공유합니다. 명령줄에서도 검증할 수 있습니다: `swea-fetch check IM_test 25730` (실패 시 종료 코드 6).
+
+디자인 스펙: [design/design-spec.md](design/design-spec.md), 화면 캡처: [docs/gui-screenshots/](docs/gui-screenshots/).
+
 ## 설치
 
 PowerShell 에서 (가상환경 권장):
