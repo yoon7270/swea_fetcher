@@ -75,6 +75,11 @@ def extract_contest_prob_id(text: str) -> str:
         return found[0]
     if len(found) > 1:
         raise InvalidInput(f"contestProbId 후보가 여러 개입니다: {', '.join(found)}")
+    if re.search(r"solvingProblem\.do|problemView\.do", s):
+        raise InvalidInput(
+            "이 주소는 문제 화면의 주소창 값이라 문제 ID 가 들어 있지 않습니다 (POST 페이지). "
+            "페이지 아래 첨부파일(input*_sample.txt) 링크를 우클릭 → '링크 주소 복사' 해서 넣으세요"
+        )
     raise InvalidInput(f"contestProbId 를 찾을 수 없습니다: {s[:80]!r}")
 
 
