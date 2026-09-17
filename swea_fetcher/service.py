@@ -2,8 +2,8 @@
 
 fetch_problem : settings → contestProbId → 세션 → 페이지 → 파싱 → (첨부) → 저장/미리보기
 verify_login  : 세션 확보만 (설정 확인용)
-list_topics   : root 의 1단계 폴더
-list_recent   : root 아래 {topic}/{num}/ 를 mtime 순으로
+list_topics   : root 아래 주제 폴더 (중첩 가능, `test/IM_test` 표기)
+list_recent   : root 아래 {topic}/{num}/ 를 mtime 순으로 (중첩 주제 포함)
 write_env     : .env 파일 쓰기 (비밀번호는 절대 쓰지 않음)
 
 네트워크·파일 I/O 가 있으므로 GUI 는 워커 스레드에서 호출한다.
@@ -89,11 +89,13 @@ def resolve_topic(root: Path, topic: str) -> tuple[str, list[str]]:
 
     대소문자만 다른 기존 폴더가 있으면 그 이름을 쓰고, 비슷한 폴더는 알리기만 한다.
     """
-    topic = topic.strip()
-    notices: list[str] = []
     try:
-        dirs = sorted(d.name for d in Path(root).iterdir() if d.is_dir() and not d.name.startswith("."))
-    except OSError:
+        topic = storage.normalize_topic(topic)
+    except ValueError:
+        topic = topic.strip()  # 검증 실패는 저장 단계(resolve_problem_dir)에서 InvalidInput 으로 보고
+    notices: list[str] = []
+    dirs = list_topics(Path(root))  # 전체 상대 경로 문자열 기준으로 비교 (test/im_test vs test/IM_test)
+    if not dirs:
         return topic, notices
     if topic in dirs:
         return topic, notices
@@ -160,6 +162,10 @@ def fetch_problem(
         raise InvalidInput("문제 번호 또는 URL 을 입력하세요")
     if not (topic or "").strip():
         raise InvalidInput("주제 폴더 이름을 입력하세요")
+    try:
+        topic = storage.normalize_topic(topic)
+    except ValueError as e:
+        raise InvalidInput(str(e)) from e
 
     by_number = target.isdigit()
     cid = None if by_number else parser.extract_contest_prob_id(target)
@@ -223,13 +229,41 @@ def is_session_cached(settings: Settings) -> bool:
     return settings.session_file.is_file()
 
 
-def list_topics(settings_or_root: Settings | Path) -> list[str]:
-    """root 의 1단계 폴더 이름 (정렬, 숨김 폴더 제외)."""
-    root = settings_or_root.root if isinstance(settings_or_root, Settings) else Path(settings_or_root)
+_SKIP_DIRS = {".git", ".idea", "__pycache__", ".venv", "venv", "node_modules"}
+
+
+def _is_skipped_dir(d: Path) -> bool:
+    return d.name.startswith(".") or d.name in _SKIP_DIRS
+
+
+def _subdirs(d: Path) -> list[Path]:
     try:
-        return sorted(d.name for d in root.iterdir() if d.is_dir() and not d.name.startswith("."))
+        return sorted(c for c in d.iterdir() if c.is_dir() and not _is_skipped_dir(c))
     except OSError:
         return []
+
+
+def list_topics(settings_or_root: Settings | Path) -> list[str]:
+    """root 아래 주제 폴더를 `/` 구분 상대 경로로 (정렬).
+
+    주제 폴더 = 숫자 이름의 자식 폴더를 하나 이상 가진 폴더, 또는 자식 폴더가 없는 비숫자 폴더.
+    `test/IM_test` 처럼 중첩 가능 (깊이 storage.MAX_TOPIC_DEPTH). 숨김·.git·.idea·__pycache__ 제외.
+    루트 바로 아래의 숫자 폴더는 주제가 아니므로 무시.
+    """
+    root = settings_or_root.root if isinstance(settings_or_root, Settings) else Path(settings_or_root)
+    if not root.is_dir():
+        return []
+    topics: list[str] = []
+    queue: list[tuple[Path, str, int]] = [(c, c.name, 1) for c in _subdirs(root) if not c.name.isdigit()]
+    while queue:  # BFS
+        d, rel, depth = queue.pop(0)
+        children = _subdirs(d)
+        has_problem = any(c.name.isdigit() for c in children)
+        if has_problem or not children:
+            topics.append(rel)
+        if depth < storage.MAX_TOPIC_DEPTH:
+            queue.extend((c, f"{rel}/{c.name}", depth + 1) for c in children if not c.name.isdigit())
+    return sorted(topics)
 
 
 def read_skeleton_title(py_path: Path) -> str | None:
@@ -246,11 +280,11 @@ def read_skeleton_title(py_path: Path) -> str | None:
 
 
 def list_recent(settings_or_root: Settings | Path, limit: int = 20) -> list[RecentItem]:
-    """root 아래 {topic}/{num}/ 폴더를 수정 시각 내림차순으로."""
+    """root 아래 {topic}/{num}/ 폴더를 수정 시각 내림차순으로. topic 은 `test/IM_test` 표기."""
     root = settings_or_root.root if isinstance(settings_or_root, Settings) else Path(settings_or_root)
     items: list[RecentItem] = []
     for topic in list_topics(root):
-        tdir = root / topic
+        tdir = root.joinpath(*topic.split("/"))
         try:
             children = list(tdir.iterdir())
         except OSError:

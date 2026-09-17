@@ -42,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="문제 번호(예: 25730 — 문제 화면 상단에 보이는 숫자) 가 가장 쉽습니다. "
         "그 외 첨부파일 링크 URL, problemDetail.do URL, contestProbId 단독도 가능",
     )
-    f.add_argument("topic", help="주제 폴더 이름 (예: BFS, Queue, IM_test)")
+    f.add_argument("topic", help="주제 폴더 이름 (예: BFS, Queue, IM_test). test/IM_test 처럼 중첩 가능")
     f.add_argument("--num", type=int, default=None, help="페이지에서 번호를 못 찾았을 때 문제 번호를 직접 지정")
     f.add_argument("--force", action="store_true", help="input.txt / output.txt 를 덮어씁니다. {번호}.py 는 어떤 경우에도 덮어쓰지 않습니다")
     f.add_argument("--skeleton-only", action="store_true", help="첨부를 받지 않고 폴더 + {번호}.py + 빈 input.txt 만 만듭니다 (샘플 첨부가 없는 문제용)")
@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     lo.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
 
     c = sub.add_parser("check", help="풀이 실행 후 output.txt 와 비교")
-    c.add_argument("topic", help="주제 폴더 이름")
+    c.add_argument("topic", help="주제 폴더 이름 (test/IM_test 처럼 중첩 가능)")
     c.add_argument("num", type=int, help="문제 번호")
     c.add_argument("--timeout", type=float, default=checker.DEFAULT_TIMEOUT, help="실행 제한 시간(초), 기본 10")
     c.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")

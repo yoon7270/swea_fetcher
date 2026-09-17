@@ -228,7 +228,7 @@ def test_fetch_dry_run_skeleton_only(settings, stubs):
 
 def test_fetch_dry_run_bad_topic_is_invalid_input(settings, stubs):
     with pytest.raises(InvalidInput):
-        service.fetch_problem(settings, ID, "a/b", FetchOptions(dry_run=True))
+        service.fetch_problem(settings, ID, "a:b", FetchOptions(dry_run=True))
 
 
 # =============================================================================

@@ -201,12 +201,24 @@ class CheckPage(QWidget):
             p = Path(url.toLocalFile())
             folder = p if p.is_dir() else p.parent
             if folder.name.isdigit() and folder.parent.name:
-                self.set_target(folder.parent.name, int(folder.name))
+                topic = self._topic_for(folder.parent)
+                self.set_target(topic, int(folder.name))
                 self.banner.hide()
-                self.status_message.emit(f"{folder.parent.name}/{folder.name} 을 선택했습니다 — [실행]을 누르세요")
+                self.status_message.emit(f"{topic}/{folder.name} 을 선택했습니다 — [실행]을 누르세요")
                 return
         names = ", ".join(Path(u.toLocalFile()).name for u in e.mimeData().urls())
         self.banner.show_message("warning", "{주제}\\{번호}\\ 폴더 안의 .py 파일(또는 폴더)을 끌어다 놓으세요", f"놓은 항목: {names}")
+
+    def _topic_for(self, topic_dir: Path) -> str:
+        """드롭한 폴더의 주제: 루트 안이면 루트 기준 상대 경로(`test/IM_test`), 밖이면 폴더 이름만."""
+        if self.settings is not None:
+            try:
+                rel = topic_dir.resolve().relative_to(Path(self.settings.root).resolve())
+                if rel.parts:
+                    return "/".join(rel.parts)
+            except (OSError, ValueError):
+                pass
+        return topic_dir.name
 
     # --- 실행 -----------------------------------------------------------------------
     def _set_busy(self, busy: bool) -> None:

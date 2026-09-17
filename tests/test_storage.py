@@ -28,9 +28,8 @@ def test_resolve_topic_is_stripped(root_dir: Path):
     assert resolve_problem_dir(root_dir, "  dp ", 1) == (root_dir / "dp" / "1").resolve()
 
 
-def test_resolve_nested_topic_is_rejected(root_dir: Path):
-    with pytest.raises(ValueError):
-        resolve_problem_dir(root_dir, "a/b", 1)
+def test_resolve_nested_topic_is_allowed(root_dir: Path):  # M6: 중첩 주제 허용
+    assert resolve_problem_dir(root_dir, "a/b", 1) == (root_dir / "a" / "b" / "1").resolve()
 
 
 @pytest.mark.parametrize("topic", ["", "   ", None])
@@ -39,7 +38,7 @@ def test_resolve_empty_topic(root_dir: Path, topic):
         resolve_problem_dir(root_dir, topic, 1)
 
 
-@pytest.mark.parametrize("topic", ["..", "../x", "a..b", "a\\b", "a:b", "a*b", "a?b", 'a"b', "a<b", "a>b", "a|b"])
+@pytest.mark.parametrize("topic", ["..", "../x", "a..b", "a:b", "a*b", "a?b", 'a"b', "a<b", "a>b", "a|b"])
 def test_resolve_forbidden_topic_chars(root_dir: Path, topic):
     with pytest.raises(ValueError, match="문자"):
         resolve_problem_dir(root_dir, topic, 1)

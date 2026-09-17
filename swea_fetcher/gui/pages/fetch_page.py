@@ -90,9 +90,9 @@ class FetchPage(QWidget):
         self.topic.setEditable(True)
         self.topic.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.topic.setMinimumWidth(240)
-        self.topic.lineEdit().setPlaceholderText("BFS, IM_test …")
+        self.topic.lineEdit().setPlaceholderText("BFS, test/IM_test …")
         self.topic.setAccessibleName("주제 폴더")
-        topic_hint = QLabel("루트 아래 폴더 이름")
+        topic_hint = QLabel("루트 아래 폴더 이름 (test/IM_test 처럼 중첩 가능)")
         set_class(topic_hint, "hint")
         l1, l2 = QLabel("문제 번호"), QLabel("주제")
         for lab, w in ((l1, self.target), (l2, self.topic)):

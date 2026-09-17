@@ -1,6 +1,7 @@
 """폴더 계산, 중복 검사, 파일 쓰기, 실패 시 롤백.
 
 저장 규칙: {root}/{topic}/{num}/ 아래에 input.txt, output.txt, {num}.py
+- topic 은 `test/IM_test` 처럼 `/` 로 중첩 가능 (M6). `\\` 도 `/` 로 취급, 깊이 MAX_TOPIC_DEPTH 까지
 - input/output 이 이미 있으면 force 없이는 아무것도 쓰지 않는다 (AlreadyExists)
 - {num}.py 는 force 여도 절대 덮어쓰지 않는다 (사용자 풀이 보호)
 - 쓰기 도중 실패하면 새로 만든 폴더는 통째로, 기존 폴더면 이번에 쓴 파일만 삭제
@@ -20,19 +21,43 @@ from .template import render_skeleton
 
 log = logging.getLogger("swea_fetcher.storage")
 
-_FORBIDDEN_TOPIC_CHARS = re.compile(r'[/\\:*?"<>|]')
+_FORBIDDEN_TOPIC_CHARS = re.compile(r'[:*?"<>|]')  # 세그먼트 안에서 금지. `/`·`\\` 는 구분자로 취급
+MAX_TOPIC_DEPTH = 4
 
 
 # --- 경로 ------------------------------------------------------------------------
 
 
-def resolve_problem_dir(root: Path, topic: str, num: int) -> Path:
-    """{root}/{topic}/{num} 을 계산한다. topic 이 부적절하거나 root 밖이면 ValueError."""
-    topic = (topic or "").strip()
-    if not topic:
+def normalize_topic(topic: str | None) -> str:
+    """주제 경로 정규화: `\\`→`/`, 앞뒤 `/` 제거, 연속 `/` 하나로, 세그먼트별 검증.
+
+    부적절하면 ValueError: 비어 있음 / `.`·`..` 세그먼트 / 금지 문자 / 순수 숫자 세그먼트 / 깊이 초과.
+    """
+    raw = (topic or "").strip().replace("\\", "/")
+    s = re.sub(r"/+", "/", raw).strip("/")
+    if not s.strip():
         raise ValueError("주제 폴더 이름이 비어 있습니다")
-    if ".." in topic or _FORBIDDEN_TOPIC_CHARS.search(topic):
-        raise ValueError(f"주제 폴더 이름에 쓸 수 없는 문자가 있습니다: {topic!r}")
+    if ".." in s:
+        raise ValueError(f"주제 폴더 이름에 쓸 수 없는 문자가 있습니다: {raw!r}")
+    segs = [seg.strip() for seg in s.split("/")]
+    if len(segs) > MAX_TOPIC_DEPTH:
+        raise ValueError(f"주제 폴더는 {MAX_TOPIC_DEPTH}단계까지만 중첩할 수 있습니다: {raw!r}")
+    for seg in segs:
+        if seg in ("", "."):
+            raise ValueError(f"주제 폴더 이름에 빈 단계가 있습니다: {raw!r}")
+        if _FORBIDDEN_TOPIC_CHARS.search(seg):
+            raise ValueError(f"주제 폴더 이름에 쓸 수 없는 문자가 있습니다: {seg!r}")
+        if seg.isdigit():
+            raise ValueError(f"주제 폴더 이름은 숫자만으로 만들 수 없습니다 (문제 폴더와 구분 불가): {seg!r}")
+    return "/".join(segs)
+
+
+def resolve_problem_dir(root: Path, topic: str, num: int) -> Path:
+    """{root}/{topic}/{num} 을 계산한다. topic 이 부적절하거나 root 밖이면 ValueError.
+
+    topic 은 `test/IM_test` 처럼 중첩 가능 (normalize_topic 참조).
+    """
+    topic = normalize_topic(topic)
     if not isinstance(num, int) or isinstance(num, bool) or num <= 0:
         raise ValueError(f"문제 번호가 올바르지 않습니다: {num!r}")
 
