@@ -4,10 +4,13 @@
 - stdin 도 input.txt 로 연결 (사용자가 sys.stdin= 줄을 지웠을 때 대비)
 - 비교: \\r\\n→\\n, 각 줄 우측 공백 제거, 끝 빈 줄 제거
 - 타임아웃 시 프로세스 kill. stdout/stderr 는 MAX_OUTPUT 바이트에서 잘라 표시
+- 인터프리터: resolve_python() — exe(동결) 안에서는 sys.executable 이 GUI 자신이므로 PATH 의 python 을 찾는다
 """
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -20,6 +23,44 @@ DEFAULT_TIMEOUT = 10.0
 MAX_OUTPUT = 1_000_000  # 1 MB
 
 DiffRow = tuple[str, str | None, str | None]  # ("same"|"changed"|"missing"|"extra", expected_line, actual_line)
+
+
+class PythonNotFound(RuntimeError):
+    """풀이를 실행할 Python 인터프리터를 찾지 못함."""
+
+
+def resolve_python(settings: Settings | None = None) -> str:
+    """풀이 실행용 Python 경로.
+
+    PyInstaller exe 안에서는 sys.executable 이 GUI 자기 자신이라(복제 창이 뜸) 반드시 실제 인터프리터를 찾는다.
+    순서: settings.python(SWEA_PYTHON) → 환경변수 SWEA_PYTHON → (동결 아니면) sys.executable →
+          PATH 의 python / python3 / py → 없으면 PythonNotFound.
+    """
+    candidates: list[str] = []
+    if settings is not None and settings.python:
+        candidates.append(settings.python)
+    if os.environ.get("SWEA_PYTHON"):
+        candidates.append(os.environ["SWEA_PYTHON"])
+    frozen = bool(getattr(sys, "frozen", False))
+    if not frozen:
+        candidates.append(sys.executable)
+    for name in ("python", "python3", "py"):
+        found = shutil.which(name)
+        if found:
+            candidates.append(found)
+    for c in candidates:
+        p = Path(c)
+        if p.is_file() and p.name.lower() != "swea-fetch-gui.exe":
+            return str(p)
+    raise PythonNotFound(
+        "풀이를 실행할 Python 을 찾지 못했습니다. Python 을 설치해 PATH 에 두거나, "
+        "설정 파일(.env)에 SWEA_PYTHON=C:\\...\\python.exe 를 추가하세요"
+    )
+
+
+def _python_cmd(python: str) -> list[str]:
+    """py 런처면 -3 을 붙인다."""
+    return [python, "-3"] if Path(python).stem.lower() == "py" else [python]
 
 
 @dataclass
@@ -97,6 +138,10 @@ def run_and_compare(problem_dir: Path, settings: Settings, timeout: float = DEFA
 
     if solution is None:
         return CheckResult(False, "", "", "", 0.0, False, note=f"풀이 파일이 없습니다 ({problem_dir.name}.py)")
+    try:
+        python = resolve_python(settings)
+    except PythonNotFound as e:
+        return CheckResult(False, "", "", "", 0.0, False, note=str(e))
     if not input_path.is_file():
         return CheckResult(False, "", "", "", 0.0, False, note=f"{settings.input_name} 이 없습니다")
 
@@ -107,12 +152,14 @@ def run_and_compare(problem_dir: Path, settings: Settings, timeout: float = DEFA
     timed_out = False
     returncode: int | None = None
     with open(input_path, "rb") as stdin:
+        creation = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0  # 창 없는 GUI 에서 콘솔 창 깜빡임 방지
         proc = subprocess.Popen(
-            [sys.executable, "-X", "utf8", str(solution)],
+            [*_python_cmd(python), "-X", "utf8", str(solution)],
             cwd=str(problem_dir),
             stdin=stdin,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            creationflags=creation,
         )
         try:
             out_b, err_b = proc.communicate(timeout=timeout)

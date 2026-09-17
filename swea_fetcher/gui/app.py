@@ -44,7 +44,14 @@ def _selftest(out_path: str) -> int:
         st = config.load_settings()
         lines.append(f"settings=ok user_id_set={bool(st.user_id)} root_exists={st.root.is_dir()}")
     except Exception as e:  # noqa: BLE001
+        st = None
         lines.append(f"settings_error={type(e).__name__}: {e}")
+    try:
+        from .. import checker
+
+        lines.append(f"check_python={checker.resolve_python(st)}")
+    except Exception as e:  # noqa: BLE001
+        lines.append(f"check_python_error={type(e).__name__}: {e}")
     from .main_window import MainWindow
 
     win = MainWindow()

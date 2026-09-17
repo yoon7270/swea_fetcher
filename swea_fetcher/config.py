@@ -1,6 +1,6 @@
 """설정 로드. 계정 정보는 프로젝트 밖 `~/.swea-fetch/.env` + Windows 자격 증명 관리자(keyring).
 
-.env 키: SWEA_ROOT (풀이 저장소 경로), SWEA_ID, 선택: SWEA_INPUT_NAME, SWEA_OUTPUT_NAME.
+.env 키: SWEA_ROOT (풀이 저장소 경로), SWEA_ID, 선택: SWEA_INPUT_NAME, SWEA_OUTPUT_NAME, SWEA_PYTHON(검증용 인터프리터).
 비밀번호는 keyring 에 저장한다 (서비스 "swea-fetch", 사용자명 = SWEA_ID).
 결정 순서: 환경변수 SWEA_PW → .env 의 SWEA_PW (경고, 이관 권장) → keyring → 없으면 ConfigMissing.
 """
@@ -37,6 +37,7 @@ class Settings:
     input_name: str = "input.txt"
     output_name: str = "output.txt"
     config_dir: Path = CONFIG_DIR
+    python: str | None = None  # 검증에 쓸 Python 실행 파일 (SWEA_PYTHON). None 이면 자동 탐색
     password_source: str = field(default="keyring", repr=False)  # "env" | "dotenv" | "keyring"
 
     @property
@@ -189,5 +190,6 @@ def load_settings(config_dir: Path | None = None) -> Settings:
         input_name=get("SWEA_INPUT_NAME").strip() or "input.txt",
         output_name=get("SWEA_OUTPUT_NAME").strip() or "output.txt",
         config_dir=config_dir,
+        python=get("SWEA_PYTHON").strip() or None,
         password_source=source,
     )
