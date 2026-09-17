@@ -74,6 +74,7 @@ class CheckResult:
     diff: list[DiffRow] = field(default_factory=list)
     note: str = ""  # 안내 (기대 출력 없음 등)
     returncode: int | None = None
+    cancelled: bool = False  # 사용자가 취소 (GUI [취소])
 
 
 # --- 비교 -------------------------------------------------------------------------
@@ -129,8 +130,17 @@ def find_solution(problem_dir: Path) -> Path | None:
     return pys[0] if len(pys) == 1 else None
 
 
-def run_and_compare(problem_dir: Path, settings: Settings, timeout: float = DEFAULT_TIMEOUT) -> CheckResult:
-    """풀이를 실행해 output.txt 와 비교한다. 파일이 없으면 passed=False + note."""
+def run_and_compare(
+    problem_dir: Path,
+    settings: Settings,
+    timeout: float = DEFAULT_TIMEOUT,
+    on_start=None,
+) -> CheckResult:
+    """풀이를 실행해 output.txt 와 비교한다. 파일이 없으면 passed=False + note.
+
+    on_start(proc): 프로세스가 뜬 직후 호출 — GUI 가 [취소] 로 proc.kill() 할 수 있게 핸들을 넘긴다.
+    취소되면 cancelled=True, passed=False.
+    """
     problem_dir = Path(problem_dir)
     solution = find_solution(problem_dir)
     input_path = problem_dir / settings.input_name
@@ -161,6 +171,8 @@ def run_and_compare(problem_dir: Path, settings: Settings, timeout: float = DEFA
             stderr=subprocess.PIPE,
             creationflags=creation,
         )
+        if on_start is not None:
+            on_start(proc)
         try:
             out_b, err_b = proc.communicate(timeout=timeout)
             returncode = proc.returncode
@@ -169,6 +181,10 @@ def run_and_compare(problem_dir: Path, settings: Settings, timeout: float = DEFA
             out_b, err_b = proc.communicate()
             timed_out = True
     elapsed = time.perf_counter() - start
+    cancelled = bool(getattr(proc, "_swea_cancelled", False))
+    if cancelled:
+        actual, _ = _truncate(out_b)
+        return CheckResult(False, expected, actual, "", elapsed, False, [], note="취소했습니다", returncode=returncode, cancelled=True)
 
     actual, _ = _truncate(out_b)
     stderr, _ = _truncate(err_b)

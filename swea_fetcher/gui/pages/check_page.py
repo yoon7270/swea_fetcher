@@ -90,6 +90,9 @@ class CheckPage(QWidget):
         self.num.setAccessibleName("문제 번호")
         self.run_btn = QPushButton("실행")
         set_class(self.run_btn, "primary")
+        self.cancel_btn = QPushButton("취소")
+        self.cancel_btn.setToolTip("실행 중인 풀이 프로세스를 중단합니다")
+        self.cancel_btn.hide()
         lt, ln = QLabel("주제"), QLabel("번호")
         set_class(lt, "muted")
         set_class(ln, "muted")
@@ -100,7 +103,8 @@ class CheckPage(QWidget):
         grid.addWidget(ln, 0, 2)
         grid.addWidget(self.num, 0, 3)
         grid.addWidget(self.run_btn, 0, 4)
-        grid.setColumnStretch(5, 1)
+        grid.addWidget(self.cancel_btn, 0, 5, 1, 1, Qt.AlignmentFlag.AlignLeft)
+        grid.setColumnStretch(6, 1)
         self._grid = grid
         self._run_on_row2 = False
         # 입력창이 드롭을 가로채 파일 경로를 텍스트로 넣지 않도록 — 드롭은 페이지(dropEvent)가 처리한다
@@ -130,6 +134,7 @@ class CheckPage(QWidget):
         root.addWidget(holder, 1)
 
         self.run_btn.clicked.connect(self.start)
+        self.cancel_btn.clicked.connect(self.cancel)
         self.num.returnPressed.connect(self.start)
         self.topic.lineEdit().returnPressed.connect(self.start)
         self.banner.action_clicked.connect(self._banner_action)
@@ -167,10 +172,13 @@ class CheckPage(QWidget):
         narrow = self.width() < 700
         if narrow != self._run_on_row2:
             self._grid.removeWidget(self.run_btn)
+            self._grid.removeWidget(self.cancel_btn)
             if narrow:
                 self._grid.addWidget(self.run_btn, 1, 1, 1, 1, Qt.AlignmentFlag.AlignLeft)
+                self._grid.addWidget(self.cancel_btn, 1, 2, 1, 2, Qt.AlignmentFlag.AlignLeft)
             else:
                 self._grid.addWidget(self.run_btn, 0, 4)
+                self._grid.addWidget(self.cancel_btn, 0, 5, 1, 1, Qt.AlignmentFlag.AlignLeft)
             self._run_on_row2 = narrow
 
     def _clear_invalid(self) -> None:
@@ -205,6 +213,8 @@ class CheckPage(QWidget):
         for w in (self.topic, self.num):
             w.setEnabled(not busy)
         self.run_btn.setEnabled(not busy)
+        self.cancel_btn.setVisible(busy)
+        self.cancel_btn.setEnabled(busy)
         if busy:
             self.setFocus()
         self.run_btn.setText("실행 중…" if busy else "실행")
@@ -250,11 +260,25 @@ class CheckPage(QWidget):
         self._set_busy(True)
         self._worker.start()
 
+    def cancel(self) -> None:
+        """[취소]: 실행 중인 풀이 프로세스 kill (M5 #3). 저장 쪽엔 취소가 없다."""
+        if self._worker is not None:
+            self.cancel_btn.setEnabled(False)
+            self.status_message.emit("취소 중…")
+            self._worker.cancel()
+
     def _cleanup(self) -> None:
         self._worker = None
         self._set_busy(False)
 
     def _on_done(self, res: checker.CheckResult) -> None:
+        if res.cancelled:
+            self.badge.set_state("취소됨", "idle")
+            self.elapsed.hide()
+            self.mismatch.hide()
+            self.banner.show_message("info", "실행을 취소했습니다", f"{res.elapsed:.1f}초 만에 중단. 다시 [실행]을 누르면 처음부터 실행합니다")
+            self.status_message.emit("취소됨")
+            return
         self.stack.setCurrentIndex(1)
         first_bad = self.diff.set_rows(res.diff)
         bad = sum(1 for k, _, _ in res.diff if k != "same")

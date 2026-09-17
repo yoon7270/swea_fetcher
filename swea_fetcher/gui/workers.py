@@ -72,10 +72,26 @@ class CheckWorker(BaseWorker):
     def __init__(self, problem_dir: Path, settings: Settings, timeout: float, parent=None) -> None:
         super().__init__(parent)
         self.problem_dir, self.settings, self.timeout = Path(problem_dir), settings, timeout
+        self._proc = None
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        """풀이 프로세스를 죽인다 (M5 #3). 아직 안 떴으면 뜨는 즉시 죽인다."""
+        self._cancel_requested = True
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            proc._swea_cancelled = True  # checker 가 결과를 '취소됨' 으로 표시
+            proc.kill()
+
+    def _on_start(self, proc) -> None:
+        self._proc = proc
+        if self._cancel_requested:
+            proc._swea_cancelled = True
+            proc.kill()
 
     def work(self) -> checker.CheckResult:
         self.progress.emit(f"실행 중: {self.problem_dir.name}.py (제한 {self.timeout:.0f}초)")
-        return checker.run_and_compare(self.problem_dir, self.settings, self.timeout)
+        return checker.run_and_compare(self.problem_dir, self.settings, self.timeout, on_start=self._on_start)
 
 
 class FuncWorker(BaseWorker):
