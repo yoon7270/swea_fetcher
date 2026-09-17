@@ -68,10 +68,13 @@ def main() -> int:
     app = create_app()
     if os.environ.get("SWEA_FETCH_SELFTEST"):
         return _selftest(os.environ["SWEA_FETCH_SELFTEST"])
-    from .main_window import MainWindow  # QApplication 이후 import (QSettings 등)
+    from PySide6.QtCore import QTimer
+
+    from .main_window import UPDATE_CHECK_DELAY_MS, MainWindow  # QApplication 이후 import (QSettings 등)
 
     win = MainWindow()
     win.show()
+    QTimer.singleShot(UPDATE_CHECK_DELAY_MS, win.check_update)  # 새 버전 확인 (M6 §4) — 창이 뜬 뒤, 워커에서
     return app.exec()
 
 

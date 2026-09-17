@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "swea-fetcher"
-version = "0.3.4"
+dynamic = ["version"]
 description = "SWEA 문제 샘플 입출력을 로컬 풀이 저장소 규칙에 맞게 저장하는 CLI"
 requires-python = ">=3.11"
 dependencies = [
@@ -22,6 +22,9 @@ gui = ["PySide6"]
 [project.scripts]
 swea-fetch = "swea_fetcher.cli:main"
 swea-fetch-gui = "swea_fetcher.gui.app:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "swea_fetcher.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["swea_fetcher*"]

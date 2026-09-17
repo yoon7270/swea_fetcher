@@ -1,4 +1,4 @@
-"""진입점: `swea-fetch <target> <topic>` / `init` / `logout` / `check`.
+"""진입점: `swea-fetch <target> <topic>` / `init` / `logout` / `check` / `doctor`.
 
 파이프라인 로직은 service.py 에 있고, 여기서는 인자 파싱·출력·종료 코드만 다룬다.
 모든 도메인 예외는 SweaFetchError.exit_code 로 종료 코드에 매핑하고 e.hint 를 조치 문구로 출력한다.
@@ -14,14 +14,14 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import auth, checker, config, service
+from . import auth, checker, config, doctor, service, update
 from .errors import CheckFailed, ConfigMissing, InvalidInput, LoginFailed, SweaFetchError
 from .models import ProblemInfo, SaveResult
 from .service import FetchOptions, FetchOutcome
 
 log = logging.getLogger("swea_fetcher.cli")
 
-SUBCOMMANDS = ("fetch", "init", "logout", "check")
+SUBCOMMANDS = ("fetch", "init", "logout", "check", "doctor")
 EXIT_UNEXPECTED = 10
 
 
@@ -64,6 +64,13 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("num", type=int, help="문제 번호")
     c.add_argument("--timeout", type=float, default=checker.DEFAULT_TIMEOUT, help="실행 제한 시간(초), 기본 10")
     c.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
+
+    d = sub.add_parser("doctor", help="진단 정보 출력 (문의할 때 이 출력을 이슈에 붙여 주세요. 비밀번호·쿠키는 포함되지 않음)")
+    d.add_argument("--offline", action="store_true", help="네트워크 없이 로컬 정보만 (로그인 상태·최신 버전 생략)")
+    d.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
+
+    for sp in (f, i, lo, c, d):
+        sp.add_argument("--no-update-check", action="store_true", help="이번 실행에서 새 버전 확인을 하지 않습니다")
     return p
 
 
@@ -301,6 +308,18 @@ def run_check(topic: str, num: int, timeout: float) -> int:
 # --- main -------------------------------------------------------------------------------
 
 
+def run_doctor(offline: bool) -> int:
+    print(doctor.report(offline=offline))
+    return 0
+
+
+def _print_update_notice() -> None:
+    """명령 끝에 한 줄 (하루 1회 조회, 실패는 무음). doctor 는 자체 항목이 있어 생략."""
+    line = update.notice(config.CONFIG_DIR)
+    if line:
+        print(line, file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = normalize_argv(list(sys.argv[1:] if argv is None else argv))
     ap = build_parser()
@@ -312,12 +331,25 @@ def main(argv: list[str] | None = None) -> int:
     _setup_logging(verbose)
 
     try:
+        return _dispatch(args, verbose)
+    finally:
+        if args.command != "doctor" and not getattr(args, "no_update_check", False):
+            try:
+                _print_update_notice()
+            except Exception:  # noqa: BLE001 — 알림은 본 작업 결과에 영향을 주지 않는다
+                pass
+
+
+def _dispatch(args: argparse.Namespace, verbose: bool) -> int:
+    try:
         if args.command == "init":
             return run_init(no_check=args.no_check, migrate=args.migrate)
         if args.command == "logout":
             return run_logout(all_=args.all)
         if args.command == "check":
             return run_check(args.topic, args.num, args.timeout)
+        if args.command == "doctor":
+            return run_doctor(offline=args.offline)
         return run_fetch(
             args.target, args.topic, args.num, args.force, verbose,
             skeleton_only=args.skeleton_only, dry_run=args.dry_run, refresh_index=args.refresh_index,

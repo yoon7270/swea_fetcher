@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -13,12 +13,13 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from .. import config, service
+from .. import config, service, update
 from ..config import Settings
 from ..errors import ConfigMissing
 from .pages.check_page import CheckPage
@@ -27,9 +28,11 @@ from .pages.history_page import HistoryPage
 from .pages.settings_page import SettingsPage
 from .theme import tokens
 from .widgets import nav_icon, set_class
+from .workers import FuncWorker
 
 PAGES = (("저장", "fetch", "nav-fetch"), ("검증", "check", "nav-check"), ("최근", "history", "nav-history"), ("설정", "settings", "nav-settings"))
 APP_TITLE = "SWEA Fetch"
+UPDATE_CHECK_DELAY_MS = 1500  # 창이 뜬 뒤에 조회 (시작 속도에 영향 없게). app.main() 이 사용
 
 
 class MainWindow(QMainWindow):
@@ -38,12 +41,14 @@ class MainWindow(QMainWindow):
         self.config_dir = Path(config_dir) if config_dir is not None else config.CONFIG_DIR
         self.qs = QSettings("swea-fetch", "gui")
         self.settings: Settings | None = None
+        self._update_worker: FuncWorker | None = None
         self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(*tokens.WINDOW_MIN)
         self.resize(*tokens.WINDOW_DEFAULT)
         self._build()
         self._restore_state()
         self.reload_settings(first_run=True)
+        # 새 버전 확인은 app.main() 이 창을 띄운 뒤 시작한다 (테스트·자가진단에서는 네트워크를 쓰지 않도록)
 
     # --- UI ---------------------------------------------------------------------------
     def _build(self) -> None:
@@ -90,8 +95,15 @@ class MainWindow(QMainWindow):
         self.status_root = QLabel("")  # 상태바 permanent 위젯은 Ignored 정책이 0폭으로 눌리므로 고정폭 elide 사용
         set_class(self.status_root, "hint")
         self.status_root.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.update_badge = QPushButton("")  # 새 버전 배지 (M6 §4): 클릭 → Release 페이지
+        self.update_badge.setObjectName("UpdateBadge")
+        set_class(self.update_badge, "link")
+        self.update_badge.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_badge.hide()
+        self.update_badge.clicked.connect(self._open_release)
         sb = self.statusBar()
         sb.addWidget(self.status_login)
+        sb.addPermanentWidget(self.update_badge)
         sb.addPermanentWidget(self.status_root)
 
         # 연결
@@ -171,6 +183,31 @@ class MainWindow(QMainWindow):
         root = str(self.settings.root)
         self.status_root.setText(self.status_root.fontMetrics().elidedText(root, Qt.TextElideMode.ElideMiddle, 360))
         self.status_root.setToolTip(root)
+
+    # --- 새 버전 확인 (M6 §4) -------------------------------------------------------------
+    def check_update(self) -> None:
+        """워커에서 update.check (하루 1회 조회, 꺼져 있거나 실패면 None). 새 버전이면 상태바 배지."""
+        if self._update_worker is not None:
+            return
+        self._update_worker = FuncWorker(lambda: update.check(self.config_dir), self)
+        self._update_worker.finished_ok.connect(self.show_update)
+        self._update_worker.finished.connect(self._update_cleanup)
+        self._update_worker.start()
+
+    def _update_cleanup(self) -> None:
+        self._update_worker = None
+
+    def show_update(self, info) -> None:
+        if info is None or not info.is_newer:
+            self.update_badge.hide()
+            return
+        self._release_url = info.url
+        self.update_badge.setText(f"새 버전 {info.latest} ↗")
+        self.update_badge.setToolTip(f"클릭하면 Release 페이지를 엽니다\n{info.url}")
+        self.update_badge.show()
+
+    def _open_release(self) -> None:
+        QDesktopServices.openUrl(QUrl(getattr(self, "_release_url", update.RELEASES_URL)))
 
     # --- 창 상태 ------------------------------------------------------------------------
     def _restore_state(self) -> None:

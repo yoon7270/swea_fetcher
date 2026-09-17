@@ -1,10 +1,11 @@
-"""설정 페이지 (스펙 §6.4): 계정(루트·ID·비밀번호) / 검증 타임아웃 / 세션·계정 삭제. QScrollArea 안."""
+"""설정 페이지 (스펙 §6.4): 계정(루트·ID·비밀번호) / 검증 타임아웃 / 진단·업데이트(M6) / 세션·계정 삭제. QScrollArea 안."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QCheckBox,
@@ -22,11 +23,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import config, service
+from ... import config, doctor, service, update
 from ...config import Settings
 from ..theme import tokens
 from ..widgets import Banner, make_busy_bar, set_class, set_invalid
-from ..workers import LoginWorker
+from ..workers import FuncWorker, LoginWorker
 
 
 class SettingsPage(QWidget):
@@ -42,6 +43,7 @@ class SettingsPage(QWidget):
         self.config_dir = Path(config_dir) if config_dir is not None else config.CONFIG_DIR
         self.settings: Settings | None = None
         self._worker: LoginWorker | None = None
+        self._doctor_worker: FuncWorker | None = None
         self._build()
 
     def _build(self) -> None:
@@ -174,6 +176,28 @@ class SettingsPage(QWidget):
         g2.setColumnStretch(3, 1)
         root.addWidget(card2)
 
+        # --- 진단·업데이트 (M6 §3·§4)
+        sec4 = QLabel("진단·업데이트")
+        set_class(sec4, "section")
+        root.addWidget(sec4)
+        card4 = QFrame()
+        set_class(card4, "card")
+        g4 = QGridLayout(card4)
+        g4.setContentsMargins(tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2)
+        g4.setVerticalSpacing(tokens.SPACE)
+        d4 = QLabel("문의할 때 이슈에 붙여넣을 진단 정보 (버전·Python·설정 상태). 비밀번호·쿠키는 포함되지 않습니다")
+        set_class(d4, "muted")
+        d4.setWordWrap(True)
+        self.doctor_btn = QPushButton("진단 정보 복사")
+        self.doctor_btn.setToolTip("swea-fetch doctor 와 같은 내용을 클립보드로 복사합니다")
+        self.update_check = QCheckBox("새 버전 알림 (하루 1회 GitHub Release 확인)")
+        self.update_check.setChecked(not update.is_disabled(self.config_dir))
+        g4.addWidget(d4, 0, 0)
+        g4.addWidget(self.doctor_btn, 0, 1)
+        g4.addWidget(self.update_check, 1, 0, 1, 2)
+        g4.setColumnStretch(0, 1)
+        root.addWidget(card4)
+
         # --- 삭제
         sec3 = QLabel("세션·계정 삭제")
         set_class(sec3, "section")
@@ -203,6 +227,8 @@ class SettingsPage(QWidget):
         self.save_only_btn.clicked.connect(lambda: self.save(check=False))
         self.logout_btn.clicked.connect(lambda: self._logout(False))
         self.logout_all_btn.clicked.connect(lambda: self._logout(True))
+        self.doctor_btn.clicked.connect(self.copy_doctor)
+        self.update_check.toggled.connect(lambda on: update.set_disabled(self.config_dir, not on))
         for w, err in ((self.root_edit, self.root_err), (self.id_edit, self.id_err), (self.pw_edit, self.pw_err)):
             w.textEdited.connect(lambda _t, w=w, err=err: (set_invalid(w, False), err.hide()))
 
@@ -328,6 +354,29 @@ class SettingsPage(QWidget):
         body = "입력한 설정은 저장됐습니다. ID/비밀번호를 고쳐 다시 확인하세요." + (f"\n{hint}" if hint else "")
         self.banner.show_message("error", title, body)
         self.settings_changed.emit()  # .env 는 저장됐으므로 다시 로드
+
+    # --- 진단 (M6 §3) ---------------------------------------------------------------
+    def copy_doctor(self) -> None:
+        """doctor.report 를 워커에서 만들어 클립보드로 (네트워크 항목 포함이라 몇 초 걸릴 수 있음)."""
+        if self._doctor_worker is not None:
+            return
+        self.doctor_btn.setEnabled(False)
+        self.doctor_btn.setText("수집 중…")
+        self._doctor_worker = FuncWorker(lambda: doctor.report(self.config_dir), self)
+        self._doctor_worker.finished_ok.connect(self._on_doctor_done)
+        self._doctor_worker.failed.connect(lambda t, h, d: self.banner.show_message("error", f"진단 정보 수집 실패: {t}", d))
+        self._doctor_worker.finished.connect(self._doctor_cleanup)
+        self._doctor_worker.start()
+
+    def _on_doctor_done(self, text: str) -> None:
+        QGuiApplication.clipboard().setText(text)
+        self.status_message.emit("진단 정보를 클립보드에 복사했습니다")
+        self.banner.show_message("success", "진단 정보를 클립보드에 복사했습니다 — 이슈에 붙여넣으세요", text)
+
+    def _doctor_cleanup(self) -> None:
+        self._doctor_worker = None
+        self.doctor_btn.setEnabled(True)
+        self.doctor_btn.setText("진단 정보 복사")
 
     # --- 삭제 -----------------------------------------------------------------------
     def _logout(self, all_: bool) -> None:
