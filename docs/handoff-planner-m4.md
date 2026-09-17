@@ -44,7 +44,7 @@
 | M4b | 2026-09-16 | 저장·검증 실사용 확인 |
 | M4c | 2026-09-17 | exe 더블클릭 확인. 검증이 exe 안에서 GUI 자신을 파이썬으로 실행하던 버그(v0.3.3 `checker.resolve_python`) 수정 후 1225 검증 통과. 디자인 검토(W6/S8) 반영 v0.3.2, 사용자 승인 v0.3.3 |
 | M5 | 2026-09-17 | 미결 6건 회신 반영: #1 폴백 삭제, #2 README, #3 검증 취소 버튼, #4 보류, #5 GitHub Release(`v0.3.4`, exe 첨부), #6 보류. 지시서의 `v0.3.2` 는 이미 사용된 태그라 `v0.3.4` 로 발행 |
-| M6 | 2026-09-17 | v0.4.0 "배포판": README 개편(exe/소스 두 갈래, troubleshooting·development 분리), 중첩 주제 `test/IM_test`, `doctor`, 새 버전 알림, LICENSE·이슈 템플릿·CHANGELOG, 픽스처 식별자 치환 + 히스토리 정리(filter-repo). public 전환·README 로 신규 설치 검증은 사용자 몫 |
+| M6 | 2026-09-17 | **승인** — v0.4.0 "배포판": README 개편(exe/소스 두 갈래, troubleshooting·development 분리), 중첩 주제 `test/IM_test`, `doctor`, 새 버전 알림, LICENSE·이슈 템플릿·CHANGELOG, 픽스처 식별자 치환 + 히스토리 정리(filter-repo). 사용자가 filter-repo 히스토리 force-push + public 전환 완료(2026-09-17). Release 9개 유지 확인, 새 버전 확인 API 동작 확인 |
 
 ## 5. 참고 위치
 
