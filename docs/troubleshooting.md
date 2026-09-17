@@ -12,7 +12,7 @@ swea-fetch doctor
 출력 예:
 
 ```
-swea-fetch 0.6.3  (exe)
+swea-fetch 0.6.4  (exe)
 Python: 3.12.4  C:\Users\you\AppData\Local\Programs\Python\Python312\python.exe  (출처: PATH)
 OS: Windows 11 10.0.26200
 설정 폴더: C:\Users\you\.swea-fetch  (.env 있음 / session.json 있음 / login_state 실패 0회 / problem_index 12건)
@@ -21,7 +21,7 @@ OS: Windows 11 10.0.26200
 git: 2.45.1 / 저장소: C:\Users\you\Desktop\swea (main → origin/main)
 로그인 상태: 세션 유효
 keyring: 항목 있음
-최신 버전: 0.6.3 (현재와 같음)
+최신 버전: 0.6.4 (현재와 같음)
 ```
 
 ## 자주 나오는 오류
@@ -82,7 +82,7 @@ keyring: 항목 있음
 | `루트 폴더가 git 저장소가 아닙니다` | 루트에서 `git init` 을 한 적 없음 | [README 'GitHub 연동'](../README.md#github-연동) 의 4줄. 도구는 저장소를 만들어 주지 않습니다 |
 | `원격 저장소(origin)가 없습니다` | `git remote add origin …` 을 안 함 | 루트에서 `git remote add origin https://github.com/<계정>/<저장소>.git` → 첫 푸시는 `git push -u origin main` |
 | `GitHub 인증 실패 — 브라우저 로그인 창이 뜨지 않았다면 …` | Git Credential Manager 가 없거나 자격증명이 만료 | 루트에서 직접 `git push` 를 한 번 실행해 로그인 창을 띄우세요. Git for Windows 를 다시 설치하면 GCM 이 포함됩니다 |
-| `원격에 새 커밋이 있습니다. git pull 후 다시 시도` | non-fast-forward (다른 PC 에서 먼저 푸시) | 루트에서 `git pull` (충돌이 나면 해결 후 `git add` + `git commit`) → 다시 [커밋 + 푸시] |
+| `원격에 새 커밋이 있습니다. git pull 후 다시 시도` | non-fast-forward (다른 PC 에서 먼저 푸시). **로컬 커밋은 이미 만들어졌고 푸시만 거부된 상태** | 루트에서 `git pull` (자동 merge, 충돌 나면 해결 후 `git add`+`git commit`) → 다시 [커밋 + 푸시]. force push 는 하지 않음 |
 | `병합(merge)/리베이스(rebase) 진행 중입니다` | 끝내지 않은 merge/rebase | `git status` 로 확인 → 끝내거나 `git merge --abort` / `git rebase --abort` |
 | `브랜치가 아닌 상태(detached HEAD)` | 특정 커밋을 checkout 한 상태 | `git switch main` |
 | `git 사용자 이름/이메일이 없습니다` | 첫 커밋 전 설정 누락 | `git config --global user.name "이름"` / `git config --global user.email "메일"` |

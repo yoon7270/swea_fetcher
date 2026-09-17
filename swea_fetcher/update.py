@@ -134,8 +134,9 @@ def check(
         now = now or datetime.now()
         cache = read_cache(config_dir)
         latest, url = cache.get("latest"), cache.get("url")
+        # 최근 확인했으면(성공이든 실패든) 하루 동안 다시 조회하지 않는다 (W1: latest 유무와 분리).
         fresh = False
-        if latest and cache.get("checked_at"):
+        if cache.get("checked_at"):
             try:
                 fresh = now - datetime.fromisoformat(str(cache["checked_at"])) < CHECK_INTERVAL
             except ValueError:
