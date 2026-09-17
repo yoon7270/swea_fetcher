@@ -68,8 +68,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("submit", help="SWEA 에 제출하고 채점 결과를 받음 (제출 횟수 1회 소모). --push 면 Pass 일 때만 git 커밋 + 푸시")
     s.add_argument("topic", help="주제 폴더 이름 (test/IM_test 처럼 중첩 가능)")
     s.add_argument("num", type=int, help="문제 번호")
-    s.add_argument("--push", action="store_true", help="채점 결과가 Pass 이면 문제 폴더를 git 커밋 + 푸시")
+    s.add_argument("--push", action="store_true", help="채점 결과가 Pass 이면 문제 폴더를 git 커밋 + 푸시 (설정 SWEA_AUTO_PUSH=1 이면 기본 켜짐)")
+    s.add_argument("--no-push", action="store_true", help="설정 SWEA_AUTO_PUSH=1 이어도 이번엔 푸시하지 않음")
     s.add_argument("-m", "--message", default=None, help="--push 때 커밋 메시지 (생략하면 템플릿)")
+    s.add_argument("--refresh-index", action="store_true", help="제출 대상(공개/클럽 상자)을 색인 캐시 무시하고 다시 찾음")
     s.add_argument("-y", "--yes", action="store_true", help="제출 확인 프롬프트 생략")
     s.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
 
@@ -320,17 +322,24 @@ def run_check(topic: str, num: int, timeout: float) -> int:
     return 0
 
 
-def run_submit(topic: str, num: int, push: bool, message: str | None, yes: bool) -> int:
-    """SWEA 제출 (확인 프롬프트) → 결과 출력. 오답이면 SubmitError (exit 8). --push 는 Pass 일 때만."""
+def run_submit(topic: str, num: int, push: bool, no_push: bool, message: str | None, yes: bool, refresh_index: bool = False) -> int:
+    """SWEA 제출 (확인 프롬프트) → 결과 출력. 오답이면 SubmitError (exit 8).
+
+    푸시 결정 (B2): --push 또는 (설정 SWEA_AUTO_PUSH=1 이고 --no-push 아님). CLI·GUI 동일 의미, CLI 는 --no-push 로 1회 해제.
+    """
     settings = config.load_settings()
+    do_push = push or (settings.auto_push_on_pass and not no_push)
+    target = service.resolve_submit_target(settings, num, refresh=refresh_index)
+    label = target[3]
     if not yes:
         if not sys.stdin.isatty():
             raise InvalidInput("제출 확인이 필요합니다 — 터미널이 아니면 -y 를 붙이세요")
-        answer = input(f"{num} 을(를) SWEA 에 제출합니다. 제출 가능 횟수가 1회 감소합니다. 계속할까요? [y/N] ").strip().lower()
+        answer = input(f"{num} 을(를) SWEA 에 제출합니다 (제출 대상: {label}). 제출 가능 횟수가 1회 감소합니다"
+                       + (" · Pass 면 커밋+푸시" if do_push else "") + ". 계속할까요? [y/N] ").strip().lower()
         if answer not in ("y", "yes"):
             print("취소했습니다.")
             return 0
-    outcome = service.submit_problem(settings, topic, num, push=push, message=message)
+    outcome = service.submit_problem(settings, topic, num, push=do_push, message=message, target=target)
     res = outcome.submit
     tag = "PASS" if res.passed else "FAIL"
     extra = f"  (실행 {res.execution_time})" if res.execution_time else ""
@@ -340,7 +349,7 @@ def run_submit(topic: str, num: int, push: bool, message: str | None, yes: bool)
         print(res.run_error)
     if outcome.git is not None:
         print(f"[OK] {outcome.git.note}" + (f"  — {outcome.git.message}" if outcome.git.committed else ""))
-    elif push and not res.passed:
+    elif do_push and not res.passed:
         print("  → Pass 가 아니라 푸시하지 않았습니다")
     if not res.passed:
         raise SubmitError(f"{num} 채점 결과 {res.summary}", hint="")
@@ -399,7 +408,8 @@ def _dispatch(args: argparse.Namespace, verbose: bool) -> int:
         if args.command == "check":
             return run_check(args.topic, args.num, args.timeout)
         if args.command == "submit":
-            return run_submit(args.topic, args.num, push=args.push, message=args.message, yes=args.yes)
+            return run_submit(args.topic, args.num, push=args.push, no_push=args.no_push,
+                              message=args.message, yes=args.yes, refresh_index=args.refresh_index)
         if args.command == "push":
             return run_push(args.topic, args.num, message=args.message, push=not args.no_push)
         if args.command == "doctor":

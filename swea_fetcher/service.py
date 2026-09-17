@@ -421,6 +421,22 @@ class SubmitOutcome:
     git: GitResult | None = None  # Pass + push 요청 시
     notes: list[str] = field(default_factory=list)  # 소스 변환 안내 등
     contest_prob_id: str = ""
+    category_type: str = ""  # 제출 맥락 (CODE/BOX) — 진단 표시용 (B3)
+    category_id: str = ""
+
+
+def cached_submit_label(settings: Settings, num: int) -> str:
+    """확인창 즉시 표시용 제출 대상 라벨 (색인만, 네트워크 없음). 미확인이면 ""."""
+    return lookup.cached_category_label(settings, num)
+
+
+def resolve_submit_target(settings: Settings, num: int, refresh: bool = False) -> tuple[str, str, str, str]:
+    """제출 대상 (contestProbId, categoryType, categoryId, 맥락 라벨). 확인창·프롬프트에 대상을 미리 보여주기 위함 (B1).
+
+    refresh=True 면 box_scanned 를 무시하고 클럽 상자를 다시 훑는다 ([다시 찾기] / --refresh-index).
+    """
+    session = auth.get_session(settings)
+    return client._with_relogin(session, settings, lambda: lookup.find_category(session, settings, num, refresh=refresh))
 
 
 def submit_problem(
@@ -430,6 +446,7 @@ def submit_problem(
     *,
     push: bool = False,
     message: str | None = None,
+    target: tuple[str, str, str, str] | None = None,
     progress: ProgressCb | None = None,
 ) -> SubmitOutcome:
     """{topic}/{num}/{num}.py 를 SWEA 에 제출 → 채점 결과. push=True 이고 Pass 면 push_problem 까지.
@@ -448,7 +465,10 @@ def submit_problem(
     _emit(progress, "로그인 세션 확인")
     session = auth.get_session(settings)
     _emit(progress, f"문제 번호 {num} 로 찾는 중")
-    cid, cat_type, cat_id, context_label = lookup.find_category(session, settings, num)
+    if target is None:
+        cid, cat_type, cat_id, context_label = lookup.find_category(session, settings, num)
+    else:
+        cid, cat_type, cat_id, context_label = target
     _emit(progress, f"제출 대상: {context_label}")
 
     def run() -> SubmitResult:
@@ -461,7 +481,7 @@ def submit_problem(
     result = client._with_relogin(session, settings, run)
     _emit(progress, f"채점 결과: {result.summary} ({context_label})")
     _save_last_submit(settings, num, cid, cat_type, cat_id, result)
-    outcome = SubmitOutcome(result, None, notes, cid)
+    outcome = SubmitOutcome(result, None, notes, cid, cat_type, cat_id)
     if push and result.passed:
         outcome.git = push_problem(settings, topic, num, message=message, push=True, progress=progress)
     return outcome

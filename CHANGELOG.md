@@ -2,6 +2,18 @@
 
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/). 버전은 `swea_fetcher/__init__.py` 의 `__version__` 하나로 관리한다.
 
+## v0.6.3 — 2026-09-17
+
+### 추가·개선
+- 제출 확인창·CLI 프롬프트에 **제출 대상 맥락**("공개 Problem" / "모의/클럽 상자 · Queue(09.09)")을 항상 표시. 확인창 **[다시 찾기]** / `swea-fetch submit --refresh-index` 로 클럽 상자를 다시 훑어 대상 갱신 (B1)
+- `swea-fetch submit`: 설정 `SWEA_AUTO_PUSH=1` 이면 `--push` 없이도 Pass 시 푸시 (CLI·GUI 동일 의미), `--no-push` 로 1회 해제 (B2)
+- GUI "git / 제출 응답" 탭 헤더에 `categoryType/categoryId` 표시 (B3)
+- 제출 응답이 200 인데 파싱 실패하면 "제출은 접수됐을 수 있으니 SWEA 이력을 확인" 안내 (B4)
+- `sys.` 잔존 안내에 "`import sys` 는 한 줄에 단독으로" 추가 (B6)
+
+### 회귀 테스트
+- 제출 경로(submit/find_category/CLI/GUI) 회귀 테스트 고정 (490 → 639)
+
 ## v0.6.2 — 2026-09-17
 
 ### 수정

@@ -44,6 +44,7 @@ class FakeMessageBox:
         AcceptRole = 0
         RejectRole = 1
         DestructiveRole = 2
+        ActionRole = 3
 
     def __init__(self, icon, title, body, parent=None):
         self.title, self.body, self.buttons = title, body, {}
@@ -64,7 +65,10 @@ class FakeMessageBox:
         return 0
 
     def clickedButton(self):  # noqa: N802
-        return self.buttons.get(FakeMessageBox.choose)
+        choose = FakeMessageBox.choose
+        if isinstance(choose, list):  # 여러 번 뜨는 경우 순서대로 (B1 [다시 찾기]→제출)
+            choose = choose[min(len(FakeMessageBox.instances) - 1, len(choose) - 1)]
+        return self.buttons.get(choose)
 
 
 @pytest.fixture(autouse=True)
@@ -136,7 +140,7 @@ def test_confirm_dialog_text_and_cancel(main_window, solved, submit_stub, fake_m
     assert box.title == "SWEA 제출"
     assert "제출 가능 횟수가 1회 감소" in box.body and "sim/1234/1234.py" in box.body
     assert "[커밋 + 푸시] 버튼" in box.body and "확인 없이" not in box.body  # 자동 모드 아님
-    assert set(box.buttons) == {"제출", "취소"}
+    assert set(box.buttons) == {"제출", "다시 찾기", "취소"}  # M10 B1: [다시 찾기] 추가
     assert box.default is box.buttons["제출"] and box.escape is box.buttons["취소"]
     assert submit_stub["calls"] == [] and cp._submit_worker is None
     assert cp.submit_btn.isEnabled() and cp.submit_btn.text() == "SWEA 제출"
@@ -382,3 +386,43 @@ def test_submit_worker_maps_submit_error(qtbot, settings, submit_stub):
         w.start()
     w.wait()
     assert sig.args[0] == "횟수 소진" and sig.args[2] == ""
+
+
+# =============================================================================
+# M10 B1/B3 (builder): 제출 대상 맥락 · [다시 찾기] · 응답탭 category
+# =============================================================================
+
+
+def test_confirm_dialog_shows_cached_target_context(main_window, solved, submit_stub, fake_msgbox, monkeypatch):
+    cp = main_window.check_page
+    monkeypatch.setattr(service, "cached_submit_label", lambda settings, num: "모의/클럽 상자 · Queue(09.09)")
+    fake_msgbox.choose = "취소"
+    cp.set_target("sim", 1234)
+    cp.request_submit()
+    assert "제출 대상: 모의/클럽 상자 · Queue(09.09)" in fake_msgbox.instances[0].body
+    assert "다시 찾기" in fake_msgbox.instances[0].buttons
+
+
+def test_confirm_dialog_refresh_rescans_and_reopens(main_window, solved, submit_stub, fake_msgbox, monkeypatch, qtbot):
+    cp = main_window.check_page
+    seen = {"refresh": []}
+    labels = iter(["확인 필요 — [다시 찾기] 를 누르세요", "모의/클럽 상자 · Queue(09.09)"])
+    monkeypatch.setattr(service, "cached_submit_label", lambda settings, num: next(labels, "모의/클럽 상자 · Queue(09.09)"))
+    monkeypatch.setattr(service, "resolve_submit_target", lambda settings, num, refresh=False: seen["refresh"].append(refresh) or (ID, "BOX", BOX_ID, "모의/클럽 상자 · Queue(09.09)"))
+    fake_msgbox.choose = ["다시 찾기", "취소"]  # 첫 창은 다시 찾기, 재표시된 창은 취소
+    cp.set_target("sim", 1234)
+    cp.request_submit()
+    qtbot.waitUntil(lambda: cp._target_worker is None, timeout=WAIT)
+    assert seen["refresh"] == [True]
+    assert len(fake_msgbox.instances) == 2
+    assert "모의/클럽 상자 · Queue(09.09)" in fake_msgbox.instances[1].body
+    assert submit_stub["calls"] == []
+
+
+def test_response_tab_header_shows_category(main_window, real_service_env, qtbot):
+    cp = main_window.check_page
+    cp.set_target("sim", 1234)
+    cp.request_submit()
+    _wait_submit(qtbot, cp)
+    header = cp.git_log.toPlainText().splitlines()[0]
+    assert f"contestProbId={ID}" in header and "categoryType=BOX" in header and f"categoryId={BOX_ID}" in header

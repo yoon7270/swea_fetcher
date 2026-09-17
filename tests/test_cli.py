@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import dataclasses
 import pytest
 
 from swea_fetcher import auth, checker, cli, config, service
@@ -489,7 +490,7 @@ def submit_stub(cfg, monkeypatch):
     seen: dict = {"calls": []}
     st = {"result": _submit_result(True), "git": None, "raise": None}
 
-    def fake(settings, topic, num, *, push=False, message=None, progress=None):
+    def fake(settings, topic, num, *, push=False, message=None, target=None, progress=None):
         seen["calls"].append({"topic": topic, "num": num, "push": push, "message": message})
         if st["raise"]:
             raise st["raise"]
@@ -497,6 +498,13 @@ def submit_stub(cfg, monkeypatch):
         return SubmitOutcome(st["result"], git, ["`import sys` 줄을 빼고 제출합니다"], CONTEST_PROB_ID)
 
     monkeypatch.setattr(cli.service, "submit_problem", fake)
+    seen["target"] = ("AV14uWl6AF0CFAYD", "BOX", "BOXID000000000", "모의/클럽 상자 · Queue(09.09)")
+
+    def fake_target(settings, num, refresh=False):
+        seen.setdefault("resolves", []).append({"num": num, "refresh": refresh})
+        return seen["target"]
+
+    monkeypatch.setattr(cli.service, "resolve_submit_target", fake_target)
 
     class Tty:
         @staticmethod
@@ -634,3 +642,59 @@ def test_check_push_flag_was_removed(cfg, capsys):
 def test_normalize_argv_keeps_submit_and_push_subcommands():
     assert cli.normalize_argv(["submit", "sim", "1"]) == ["submit", "sim", "1"]
     assert cli.normalize_argv(["push", "sim", "1"]) == ["push", "sim", "1"]
+
+
+# =============================================================================
+# M10 B1/B2 (builder): 제출 대상 맥락 프롬프트, --refresh-index, push 우선순위
+# =============================================================================
+
+
+def test_submit_prompt_shows_target_context(submit_stub, monkeypatch):
+    prompts: list[str] = []
+    _answer(monkeypatch, "n", prompts)
+    assert cli.main(["submit", "sim", "1234"]) == 0
+    assert "제출 대상: 모의/클럽 상자 · Queue(09.09)" in prompts[0]
+
+
+def test_submit_refresh_index_forces_rescan(submit_stub, monkeypatch):
+    _answer(monkeypatch, "y")
+    assert cli.main(["submit", "sim", "1234", "--refresh-index"]) == 0
+    assert submit_stub["seen"]["resolves"] == [{"num": 1234, "refresh": True}]
+
+
+def test_submit_no_refresh_by_default(submit_stub, monkeypatch):
+    _answer(monkeypatch, "y")
+    assert cli.main(["submit", "sim", "1234"]) == 0
+    assert submit_stub["seen"]["resolves"] == [{"num": 1234, "refresh": False}]
+
+
+def _auto_settings(monkeypatch, on: bool):
+    real = config.load_settings
+
+    def patched(config_dir=None):
+        return dataclasses.replace(real(config_dir), auto_push_on_pass=on)
+
+    monkeypatch.setattr(cli.config, "load_settings", patched)
+
+
+def test_submit_auto_push_setting_on_pushes(submit_stub, monkeypatch):
+    submit_stub["git"] = GitResult(True, True, "abc", "m", "", "푸시됨 abc")
+    _auto_settings(monkeypatch, True)
+    _answer(monkeypatch, "y")
+    assert cli.main(["submit", "sim", "1234"]) == 0
+    assert submit_stub["seen"]["calls"][0]["push"] is True
+
+
+def test_submit_auto_push_setting_on_with_no_push_flag(submit_stub, monkeypatch):
+    _auto_settings(monkeypatch, True)
+    _answer(monkeypatch, "y")
+    assert cli.main(["submit", "sim", "1234", "--no-push"]) == 0
+    assert submit_stub["seen"]["calls"][0]["push"] is False
+
+
+def test_submit_auto_push_setting_off_with_push_flag(submit_stub, monkeypatch):
+    submit_stub["git"] = GitResult(True, True, "abc", "m", "", "푸시됨 abc")
+    _auto_settings(monkeypatch, False)
+    _answer(monkeypatch, "y")
+    assert cli.main(["submit", "sim", "1234", "--push"]) == 0
+    assert submit_stub["seen"]["calls"][0]["push"] is True

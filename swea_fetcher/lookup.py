@@ -163,7 +163,7 @@ CATEGORY_CODE = "CODE"  # 공개 Problem / User Problem: categoryId = contestPro
 CATEGORY_BOX = "BOX"  # Solving Club 문제 상자: categoryId = probBoxId (fnGoProblemTest(id, probBoxId, "BOX"))
 
 
-def find_category(session: requests.Session, settings: Settings, num: int) -> tuple[str, str, str, str]:
+def find_category(session: requests.Session, settings: Settings, num: int, refresh: bool = False) -> tuple[str, str, str, str]:
     """제출에 필요한 (contestProbId, categoryType, categoryId, 맥락 라벨).
 
     같은 문제 번호가 '공개 Problem(CODE)' 과 'Solving Club 문제 상자(BOX)' 에 같은 contestProbId 로
@@ -171,20 +171,44 @@ def find_category(session: requests.Session, settings: Settings, num: int) -> tu
     SSAFY 학생은 클럽 상자(모의)에서 채점받으므로, 번호가 내 클럽 상자에 있으면 그쪽(BOX)으로 제출한다.
     클럽에 없을 때만 공개 Problem(CODE).
     """
-    cid = find_by_number(session, settings, num)
+    cid = find_by_number(session, settings, num, refresh=refresh)
     key = str(num)
     entry = load_index(settings).get(key, {})
-    if entry.get("box_id"):
+    if refresh:
+        _clear_box_cache(settings, key)  # box_id·box_scanned 무시하고 다시 훑는다 (B1 [다시 찾기])
+        entry = load_index(settings).get(key, {})
+    elif entry.get("box_id"):
         return entry.get("id", cid), CATEGORY_BOX, entry["box_id"], f"모의/클럽 상자 · {entry.get('box', '')}".rstrip(" ·")
-    if entry.get("box_scanned"):  # 이미 클럽을 다 훑었고 없었음 → 공개 문제
+    elif entry.get("box_scanned"):  # 이미 클럽을 다 훑었고 없었음 → 공개 문제
         return cid, CATEGORY_CODE, cid, "공개 Problem"
-    log.info("문제 %s 가 클럽 상자에 있는지 확인 중 (제출 맥락 결정)", num)
+    log.info("문제 %s 가 클럽 상자에 있는지 확인 중 (제출 맥락 결정%s)", num, ", 재스캔" if refresh else "")
     box_id = _with_relogin(session, settings, lambda: _rescan_box_id(session, settings, num))
     if box_id:
         e = load_index(settings).get(key, {})
         return e.get("id", cid), CATEGORY_BOX, box_id, f"모의/클럽 상자 · {e.get('box', '')}".rstrip(" ·")
     _mark_box_scanned(settings, key, cid)
     return cid, CATEGORY_CODE, cid, "공개 Problem"
+
+
+def cached_category_label(settings: Settings, num: int) -> str:
+    """색인만 보고 제출 대상 라벨 (네트워크 없음). 미확인이면 "" (확인창이 [다시 찾기] 안내)."""
+    e = load_index(settings).get(str(num), {})
+    if e.get("box_id"):
+        return f"모의/클럽 상자 · {e.get('box', '')}".rstrip(" ·")
+    if e.get("box_scanned"):
+        return "공개 Problem"
+    return ""
+
+
+def _clear_box_cache(settings: Settings, key: str) -> None:
+    """[다시 찾기]: 해당 번호의 box_id·box_scanned 를 지워 다음 조회가 클럽을 다시 훑게 한다."""
+    index = load_index(settings)
+    entry = index.get(key)
+    if entry:
+        entry.pop("box_id", None)
+        entry.pop("box_scanned", None)
+        index[key] = entry
+        save_index(settings, index)
 
 
 def _mark_box_scanned(settings: Settings, key: str, cid: str) -> None:

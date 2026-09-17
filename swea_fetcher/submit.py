@@ -79,7 +79,7 @@ def prepare_source(source: str) -> tuple[str, list[str]]:
     if _SYS_USE_RE.search(stripped):
         raise SubmitError(
             "제출 코드에 `sys.` 사용이 남아 있습니다 — SWEA 는 sys 모듈을 허용하지 않습니다",
-            hint="sys.stdin.readline → input(), sys.setrecursionlimit 는 제거하고 다시 시도하세요",
+            hint="sys.stdin.readline → input(), sys.setrecursionlimit 는 제거하고 다시 시도하세요. `import sys` 는 한 줄에 단독으로 두어야 자동 제거됩니다",
         )
     if len(stripped.encode("utf-8")) > MAX_SOURCE_BYTES:
         raise SubmitError("소스코드가 100KB 를 초과합니다")
@@ -140,7 +140,8 @@ def _post_json(session: requests.Session, url: str, params: dict[str, str], what
     try:
         data = r.json()
     except ValueError as e:
-        raise SubmitError(f"{what} 응답이 JSON 이 아닙니다 (로그인이 풀렸거나 사이트 구조 변경)") from e
+        tail = " 제출은 접수됐을 수 있습니다 — SWEA 제출 이력을 확인하세요." if "제출" in what else ""
+        raise SubmitError(f"{what} 응답이 JSON 이 아닙니다 (로그인이 풀렸거나 사이트 구조 변경).{tail}") from e
     if data.get("result") != "success":
         raise SubmitError(f"{what} 서버 오류: result={data.get('result')!r}")
     return data

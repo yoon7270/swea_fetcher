@@ -12,7 +12,7 @@ swea-fetch doctor
 출력 예:
 
 ```
-swea-fetch 0.6.2  (exe)
+swea-fetch 0.6.3  (exe)
 Python: 3.12.4  C:\Users\you\AppData\Local\Programs\Python\Python312\python.exe  (출처: PATH)
 OS: Windows 11 10.0.26200
 설정 폴더: C:\Users\you\.swea-fetch  (.env 있음 / session.json 있음 / login_state 실패 0회 / problem_index 12건)
@@ -21,7 +21,7 @@ OS: Windows 11 10.0.26200
 git: 2.45.1 / 저장소: C:\Users\you\Desktop\swea (main → origin/main)
 로그인 상태: 세션 유효
 keyring: 항목 있음
-최신 버전: 0.6.2 (현재와 같음)
+최신 버전: 0.6.3 (현재와 같음)
 ```
 
 ## 자주 나오는 오류
@@ -151,6 +151,6 @@ py -3 -c "import sys; print(sys.executable)"
 | `problem_index.json` | 문제 번호 → ID 색인 캐시 | 지우면 다시 찾음 (조금 느려짐) |
 | `update_check.json` | 새 버전 확인 시각·결과·알림 끔 여부 | 지워도 됨 |
 
-`.env` 의 git 관련 키 (설정 페이지에서도 바꿀 수 있음): `SWEA_COMMIT_TEMPLATE` (커밋 메시지 템플릿), `SWEA_AUTO_PUSH=1` (SWEA 제출 Pass 시 자동 커밋+푸시, 기본 0).
+`.env` 의 git 관련 키 (설정 페이지에서도 바꿀 수 있음): `SWEA_COMMIT_TEMPLATE` (커밋 메시지 템플릿), `SWEA_AUTO_PUSH=1` (SWEA 제출 Pass 시 자동 커밋+푸시, 기본 0 — CLI·GUI 모두 적용, CLI 는 `swea-fetch submit --no-push` 로 1회만 해제).
 
 비밀번호는 여기 없고 **Windows 자격 증명 관리자** (제어판 → 자격 증명 관리자 → Windows 자격 증명 → `swea-fetch`) 에 있습니다.

@@ -28,7 +28,8 @@ from ...config import Settings
 from ..theme import tokens
 from ..git_dialog import ask_push
 from ..widgets import Badge, Banner, DiffView, EmptyState, make_busy_bar, set_class, set_invalid
-from ..workers import CheckWorker, GitWorker, SubmitWorker
+from ... import lookup  # noqa: F401  (cached label 은 service 경유)
+from ..workers import CheckWorker, FuncWorker, GitWorker, SubmitWorker
 
 REVERT_HELP_URL = "https://github.com/yoon7270/swea_fetcher/blob/main/docs/troubleshooting.md#자동-푸시를-되돌리려면"
 
@@ -48,6 +49,8 @@ class CheckPage(QWidget):
         self._worker: CheckWorker | None = None
         self._git_worker: GitWorker | None = None
         self._submit_worker: SubmitWorker | None = None
+        self._target_worker: FuncWorker | None = None
+        self._pending_submit: tuple[str, int, bool] | None = None
         self._git_auto = False
         self._last_target: tuple[str, int] | None = None  # 마지막으로 검증한 (topic, num) — [커밋 + 푸시] 대상
         self.setAcceptDrops(True)
@@ -413,16 +416,32 @@ class CheckPage(QWidget):
             self.banner.show_message("error", f"{num}.py 가 없습니다: {problem_dir}", "먼저 저장 페이지에서 문제를 받으세요", [("fetch", "저장 페이지로")])
             return
         auto = bool(self.settings.auto_push_on_pass)
-        body = f"{topic}/{num}/{num}.py 를 SWEA 에 제출합니다.\n제출 가능 횟수가 1회 감소합니다."
+        self._pending_submit = (topic, num, auto)
+        self._show_submit_confirm()
+
+    def _show_submit_confirm(self) -> None:
+        """제출 확인창 (B1): 제출 대상 맥락 표시 + [다시 찾기]. [다시 찾기] 는 클럽 상자를 다시 훑어 라벨 갱신."""
+        if self._pending_submit is None or self.settings is None:
+            return
+        topic, num, auto = self._pending_submit
+        label = service.cached_submit_label(self.settings, num) or "확인 필요 — [다시 찾기] 를 누르세요"
+        body = f"{topic}/{num}/{num}.py 를 SWEA 에 제출합니다.\n제출 대상: {label}\n제출 가능 횟수가 1회 감소합니다."
         body += "\n\nPass 면 확인 없이 커밋 + 푸시합니다 (설정에서 켜져 있음)." if auto else "\n\nPass 면 [커밋 + 푸시] 버튼이 활성화됩니다."
         box = QMessageBox(QMessageBox.Icon.Question, "SWEA 제출", body, parent=self)
         ok = box.addButton("제출", QMessageBox.ButtonRole.AcceptRole)
+        refresh = box.addButton("다시 찾기", QMessageBox.ButtonRole.ActionRole)
         cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(ok)
         box.setEscapeButton(cancel)
         box.exec()
-        if box.clickedButton() is not ok:
+        clicked = box.clickedButton()
+        if clicked is refresh:
+            self._refresh_submit_target()
             return
+        if clicked is not ok:
+            self._pending_submit = None
+            return
+        self._pending_submit = None
         self._last_target = (topic, num)
         self._git_auto = auto
         self.banner.hide()
@@ -439,6 +458,21 @@ class CheckPage(QWidget):
         self._submit_worker.finished.connect(self._submit_cleanup)
         self._submit_worker.start()
 
+    def _refresh_submit_target(self) -> None:
+        """[다시 찾기]: 클럽 상자를 다시 훑어(find_category refresh) 라벨 갱신 후 확인창 재표시."""
+        if self._pending_submit is None or self.settings is None or self._target_worker is not None:
+            return
+        _topic, num, _auto = self._pending_submit
+        self.status_message.emit("제출 대상 다시 찾는 중…")
+        self._target_worker = FuncWorker(lambda: service.resolve_submit_target(self.settings, num, refresh=True), self)
+        self._target_worker.finished_ok.connect(lambda _t: self._show_submit_confirm())
+        self._target_worker.failed.connect(lambda t, h, d: self.banner.show_message("error", f"대상 확인 실패: {t}", h))
+        self._target_worker.finished.connect(self._target_cleanup)
+        self._target_worker.start()
+
+    def _target_cleanup(self) -> None:
+        self._target_worker = None
+
     def _submit_cleanup(self) -> None:
         self._submit_worker = None
         self.submit_btn.setEnabled(self._worker is None)
@@ -450,7 +484,8 @@ class CheckPage(QWidget):
         res = outcome.submit
         for n in outcome.notes:
             self.status_message.emit(n)
-        self._show_git_log(f"[SWEA 제출 응답] contestProbId={outcome.contest_prob_id}\n" + json.dumps(res.raw, ensure_ascii=False, indent=1))
+        cat = f" · categoryType={outcome.category_type} · categoryId={outcome.category_id}" if outcome.category_type else ""
+        self._show_git_log(f"[SWEA 제출 응답] contestProbId={outcome.contest_prob_id}{cat}\n" + json.dumps(res.raw, ensure_ascii=False, indent=1))
         if res.passed:
             self.submit_badge.set_state("Pass", "success")
             self._show_push_button(True)
@@ -522,7 +557,7 @@ class CheckPage(QWidget):
         self.push_btn.setEnabled(True)
 
     def wait_workers(self, ms: int = 5000) -> None:
-        for w in (self._git_worker, self._worker, self._submit_worker):
+        for w in (self._git_worker, self._worker, self._submit_worker, self._target_worker):
             if w is not None and w.isRunning():
                 w.wait(ms)
 
