@@ -121,10 +121,9 @@ def test_is_logged_in_redirect_to_login_page():
     assert auth.is_logged_in(s) is False
 
 
-def test_is_logged_in_redirect_elsewhere_is_network_error():
+def test_is_logged_in_redirect_elsewhere_means_logged_out():  # M8: 어떤 리다이렉트든 세션 없음 → 재로그인
     s = FakeSession([FakeResponse(302, headers={"Location": "https://swexpertacademy.com/main/"})])
-    with pytest.raises(NetworkError):
-        auth.is_logged_in(s)
+    assert auth.is_logged_in(s) is False
 
 
 def test_is_logged_in_500_is_network_error():

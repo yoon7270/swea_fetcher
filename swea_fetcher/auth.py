@@ -115,7 +115,9 @@ def is_logged_in(session: requests.Session) -> bool:
         raise NetworkError(f"세션 확인 요청 실패: {e}") from e
     if r.status_code == 200:
         return True
-    if r.status_code in (301, 302, 303, 307) and "loginPage.do" in r.headers.get("Location", ""):
+    if r.status_code in (301, 302, 303, 307, 308):
+        # loginPage.do 가 보통이지만 SSO/메인으로 보내는 경우도 있음 — 어느 쪽이든 세션 없음으로 보고 재로그인 (M8 실사용에서 발견)
+        log.debug("세션 확인 리다이렉트: %s", r.headers.get("Location", ""))
         return False
     raise NetworkError(f"세션 확인 중 예상 밖 응답: HTTP {r.status_code}")
 
