@@ -448,7 +448,8 @@ def submit_problem(
     _emit(progress, "로그인 세션 확인")
     session = auth.get_session(settings)
     _emit(progress, f"문제 번호 {num} 로 찾는 중")
-    cid, cat_type, cat_id = lookup.find_category(session, settings, num)
+    cid, cat_type, cat_id, context_label = lookup.find_category(session, settings, num)
+    _emit(progress, f"제출 대상: {context_label}")
 
     def run() -> SubmitResult:
         ctx = submit.get_context(session, settings, cid, cat_type, cat_id)
@@ -458,7 +459,7 @@ def submit_problem(
         return submit.submit_source(session, ctx, prepared)
 
     result = client._with_relogin(session, settings, run)
-    _emit(progress, f"채점 결과: {result.summary}")
+    _emit(progress, f"채점 결과: {result.summary} ({context_label})")
     _save_last_submit(settings, num, cid, cat_type, cat_id, result)
     outcome = SubmitOutcome(result, None, notes, cid)
     if push and result.passed:

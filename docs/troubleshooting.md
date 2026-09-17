@@ -12,7 +12,7 @@ swea-fetch doctor
 출력 예:
 
 ```
-swea-fetch 0.6.1  (exe)
+swea-fetch 0.6.2  (exe)
 Python: 3.12.4  C:\Users\you\AppData\Local\Programs\Python\Python312\python.exe  (출처: PATH)
 OS: Windows 11 10.0.26200
 설정 폴더: C:\Users\you\.swea-fetch  (.env 있음 / session.json 있음 / login_state 실패 0회 / problem_index 12건)
@@ -21,7 +21,7 @@ OS: Windows 11 10.0.26200
 git: 2.45.1 / 저장소: C:\Users\you\Desktop\swea (main → origin/main)
 로그인 상태: 세션 유효
 keyring: 항목 있음
-최신 버전: 0.6.1 (현재와 같음)
+최신 버전: 0.6.2 (현재와 같음)
 ```
 
 ## 자주 나오는 오류

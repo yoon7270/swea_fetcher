@@ -163,24 +163,37 @@ CATEGORY_CODE = "CODE"  # 공개 Problem / User Problem: categoryId = contestPro
 CATEGORY_BOX = "BOX"  # Solving Club 문제 상자: categoryId = probBoxId (fnGoProblemTest(id, probBoxId, "BOX"))
 
 
-def find_category(session: requests.Session, settings: Settings, num: int) -> tuple[str, str, str]:
-    """제출에 필요한 (contestProbId, categoryType, categoryId).
+def find_category(session: requests.Session, settings: Settings, num: int) -> tuple[str, str, str, str]:
+    """제출에 필요한 (contestProbId, categoryType, categoryId, 맥락 라벨).
 
-    풀이 화면과 compile/submit.do 는 문제를 연 경로의 category 를 요구한다 — 틀리면 채점은 되지만
-    제출 기록이 문제의 '제출결과' 에 남지 않는다 (M8 실측). 클럽 문제는 상자 ID 가 필요하므로
-    옛 색인(box_id 없음)이면 상자를 다시 훑는다.
+    같은 문제 번호가 '공개 Problem(CODE)' 과 'Solving Club 문제 상자(BOX)' 에 같은 contestProbId 로
+    동시에 있을 수 있는데, **제출 이력은 맥락별로 따로 집계된다** (실측: 1225 가 CODE 2회 / BOX 1회).
+    SSAFY 학생은 클럽 상자(모의)에서 채점받으므로, 번호가 내 클럽 상자에 있으면 그쪽(BOX)으로 제출한다.
+    클럽에 없을 때만 공개 Problem(CODE).
     """
     cid = find_by_number(session, settings, num)
-    entry = load_index(settings).get(str(num), {})
-    if not entry.get("club"):
-        return cid, CATEGORY_CODE, cid
-    if not entry.get("box_id"):
-        log.info("색인에 문제 상자 ID 가 없어 클럽 상자를 다시 훑습니다 (%s)", num)
-        box_id = _with_relogin(session, settings, lambda: _rescan_box_id(session, settings, num))
-        if not box_id:
-            raise InvalidInput(f"문제 {num} 의 Solving Club 문제 상자를 찾지 못했습니다 — 제출에 필요합니다 (--refresh-index 후 재시도)")
-        return cid, CATEGORY_BOX, box_id
-    return cid, CATEGORY_BOX, entry["box_id"]
+    key = str(num)
+    entry = load_index(settings).get(key, {})
+    if entry.get("box_id"):
+        return entry.get("id", cid), CATEGORY_BOX, entry["box_id"], f"모의/클럽 상자 · {entry.get('box', '')}".rstrip(" ·")
+    if entry.get("box_scanned"):  # 이미 클럽을 다 훑었고 없었음 → 공개 문제
+        return cid, CATEGORY_CODE, cid, "공개 Problem"
+    log.info("문제 %s 가 클럽 상자에 있는지 확인 중 (제출 맥락 결정)", num)
+    box_id = _with_relogin(session, settings, lambda: _rescan_box_id(session, settings, num))
+    if box_id:
+        e = load_index(settings).get(key, {})
+        return e.get("id", cid), CATEGORY_BOX, box_id, f"모의/클럽 상자 · {e.get('box', '')}".rstrip(" ·")
+    _mark_box_scanned(settings, key, cid)
+    return cid, CATEGORY_CODE, cid, "공개 Problem"
+
+
+def _mark_box_scanned(settings: Settings, key: str, cid: str) -> None:
+    """클럽 상자를 다 훑었는데 없더라 표시 (다음 제출 때 다시 안 훑도록). 공개 문제로 확정."""
+    index = load_index(settings)
+    entry = index.get(key, {"id": cid, "title": "", "club": "", "box": "Problem"})
+    entry["box_scanned"] = True
+    index[key] = entry
+    save_index(settings, index)
 
 
 def _rescan_box_id(session: requests.Session, settings: Settings, num: int) -> str | None:

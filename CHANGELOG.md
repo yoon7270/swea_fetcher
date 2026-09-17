@@ -2,6 +2,12 @@
 
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/). 버전은 `swea_fetcher/__init__.py` 의 `__version__` 하나로 관리한다.
 
+## v0.6.2 — 2026-09-17
+
+### 수정
+- **제출이 "모의 테스트(클럽 상자)" 가 아니라 "공개 Problem" 쪽에 기록되던 문제**: 같은 문제 번호가 두 곳에 같은 contestProbId 로 있어도 제출 이력은 맥락별(CODE/BOX)로 따로 집계된다 (실측: 1225 가 CODE 2회 / BOX 1회). 이제 번호가 내 Solving Club 문제 상자에 있으면 그쪽(BOX)으로 제출한다 — SSAFY 모의 채점이 남는 맥락. 클럽에 없을 때만 공개 Problem(CODE)
+- 제출 진행 로그·결과에 대상 맥락(예: `모의/클럽 상자 · Queue(09.09)`)을 표시
+
 ## v0.6.1 — 2026-09-17
 
 ### 수정
