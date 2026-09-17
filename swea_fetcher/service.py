@@ -15,6 +15,7 @@ submit_problem: SWEA 에 제출하고 채점 결과를 받는다 (M8). Pass 면 
 from __future__ import annotations
 
 import dataclasses
+import json
 import difflib
 import logging
 import re
@@ -458,10 +459,25 @@ def submit_problem(
 
     result = client._with_relogin(session, settings, run)
     _emit(progress, f"채점 결과: {result.summary}")
+    _save_last_submit(settings, num, cid, cat_type, cat_id, result)
     outcome = SubmitOutcome(result, None, notes, cid)
     if push and result.passed:
         outcome.git = push_problem(settings, topic, num, message=message, push=True, progress=progress)
     return outcome
+
+
+LAST_SUBMIT_FILE = "last_submit.json"
+
+
+def _save_last_submit(settings: Settings, num: int, cid: str, cat_type: str, cat_id: str, result: SubmitResult) -> None:
+    """진단용: 마지막 제출 요청의 category 와 서버 응답(JSON) 을 config_dir 에 남긴다. 쿠키·비밀번호 없음."""
+    try:
+        payload = {"at": datetime.now().isoformat(timespec="seconds"), "num": num, "contestProbId": cid,
+                   "categoryType": cat_type, "categoryId": cat_id, "passed": result.passed, "summary": result.summary,
+                   "response": result.raw}
+        (settings.config_dir / LAST_SUBMIT_FILE).write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError as e:
+        log.debug("last_submit.json 쓰기 실패: %s", e)
 
 
 def logout(config_dir: Path, all_: bool = False) -> list[str]:

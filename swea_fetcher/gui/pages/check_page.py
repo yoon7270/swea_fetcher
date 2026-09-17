@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QUrl, Signal
@@ -449,6 +450,7 @@ class CheckPage(QWidget):
         res = outcome.submit
         for n in outcome.notes:
             self.status_message.emit(n)
+        self._show_git_log(f"[SWEA 제출 응답] contestProbId={outcome.contest_prob_id}\n" + json.dumps(res.raw, ensure_ascii=False, indent=1))
         if res.passed:
             self.submit_badge.set_state("Pass", "success")
             self._show_push_button(True)
@@ -527,7 +529,7 @@ class CheckPage(QWidget):
     def _show_git_log(self, text: str) -> None:
         self.git_log.setPlainText(text)
         if self.tabs.indexOf(self.git_log) < 0:
-            self.tabs.addTab(self.git_log, "git")
+            self.tabs.addTab(self.git_log, "git / 제출 응답")
 
     def _on_git_done(self, result) -> None:
         self._show_git_log(result.output)
