@@ -1,4 +1,4 @@
-"""진입점: `swea-fetch <target> <topic>` / `init` / `logout` / `check` / `doctor` / `push`.
+"""진입점: `swea-fetch <target> <topic>` / `init` / `logout` / `check` / `doctor` / `push` / `submit`.
 
 파이프라인 로직은 service.py 에 있고, 여기서는 인자 파싱·출력·종료 코드만 다룬다.
 모든 도메인 예외는 SweaFetchError.exit_code 로 종료 코드에 매핑하고 e.hint 를 조치 문구로 출력한다.
@@ -15,13 +15,13 @@ import traceback
 from pathlib import Path
 
 from . import auth, checker, config, doctor, service, update
-from .errors import CheckFailed, ConfigMissing, InvalidInput, LoginFailed, SweaFetchError
+from .errors import CheckFailed, ConfigMissing, InvalidInput, LoginFailed, SubmitError, SweaFetchError
 from .models import ProblemInfo, SaveResult
 from .service import FetchOptions, FetchOutcome
 
 log = logging.getLogger("swea_fetcher.cli")
 
-SUBCOMMANDS = ("fetch", "init", "logout", "check", "doctor", "push")
+SUBCOMMANDS = ("fetch", "init", "logout", "check", "doctor", "push", "submit")
 EXIT_UNEXPECTED = 10
 
 
@@ -63,8 +63,15 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("topic", help="주제 폴더 이름 (test/IM_test 처럼 중첩 가능)")
     c.add_argument("num", type=int, help="문제 번호")
     c.add_argument("--timeout", type=float, default=checker.DEFAULT_TIMEOUT, help="실행 제한 시간(초), 기본 10")
-    c.add_argument("--push", action="store_true", help="검증 통과 시에만 문제 폴더를 git 커밋 + 푸시 (M7). 실패면 푸시하지 않음")
     c.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
+
+    s = sub.add_parser("submit", help="SWEA 에 제출하고 채점 결과를 받음 (제출 횟수 1회 소모). --push 면 Pass 일 때만 git 커밋 + 푸시")
+    s.add_argument("topic", help="주제 폴더 이름 (test/IM_test 처럼 중첩 가능)")
+    s.add_argument("num", type=int, help="문제 번호")
+    s.add_argument("--push", action="store_true", help="채점 결과가 Pass 이면 문제 폴더를 git 커밋 + 푸시")
+    s.add_argument("-m", "--message", default=None, help="--push 때 커밋 메시지 (생략하면 템플릿)")
+    s.add_argument("-y", "--yes", action="store_true", help="제출 확인 프롬프트 생략")
+    s.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
 
     g = sub.add_parser("push", help="문제 폴더만 git 커밋 + 푸시 (루트가 git 저장소여야 함. force push 없음)")
     g.add_argument("topic", help="주제 폴더 이름 (test/IM_test 처럼 중첩 가능)")
@@ -77,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--offline", action="store_true", help="네트워크 없이 로컬 정보만 (로그인 상태·최신 버전 생략)")
     d.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
 
-    for sp in (f, i, lo, c, d, g):
+    for sp in (f, i, lo, c, d, g, s):
         sp.add_argument("--no-update-check", action="store_true", help="이번 실행에서 새 버전 확인을 하지 않습니다")
     return p
 
@@ -285,8 +292,8 @@ def run_logout(all_: bool = False, config_dir: Path | None = None) -> int:
 # --- check --------------------------------------------------------------------------
 
 
-def run_check(topic: str, num: int, timeout: float, push: bool = False) -> int:
-    """풀이 실행 → 비교 → 결과 출력. 실패면 CheckFailed (exit 6). push=True 면 통과 시에만 커밋+푸시 (M7)."""
+def run_check(topic: str, num: int, timeout: float) -> int:
+    """풀이 실행 → 비교 → 결과 출력. 실패면 CheckFailed (exit 6)."""
     settings = config.load_settings()
     from . import storage  # 지연 import — resolve_problem_dir 만 필요
 
@@ -309,9 +316,34 @@ def run_check(topic: str, num: int, timeout: float, push: bool = False) -> int:
         print("--- 기대 vs 실제 ---")
         print(checker.format_diff(res.diff) if res.diff else "(출력 없음)")
     if not res.passed:
-        raise CheckFailed(f"{num} 검증 실패 ({status})", hint="검증 실패 — 푸시하지 않음" if push else "")
-    if push:
-        return run_push(topic, num, message=None, push=True)
+        raise CheckFailed(f"{num} 검증 실패 ({status})", hint="")
+    return 0
+
+
+def run_submit(topic: str, num: int, push: bool, message: str | None, yes: bool) -> int:
+    """SWEA 제출 (확인 프롬프트) → 결과 출력. 오답이면 SubmitError (exit 8). --push 는 Pass 일 때만."""
+    settings = config.load_settings()
+    if not yes:
+        if not sys.stdin.isatty():
+            raise InvalidInput("제출 확인이 필요합니다 — 터미널이 아니면 -y 를 붙이세요")
+        answer = input(f"{num} 을(를) SWEA 에 제출합니다. 제출 가능 횟수가 1회 감소합니다. 계속할까요? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("취소했습니다.")
+            return 0
+    outcome = service.submit_problem(settings, topic, num, push=push, message=message)
+    res = outcome.submit
+    tag = "PASS" if res.passed else "FAIL"
+    extra = f"  (실행 {res.execution_time})" if res.execution_time else ""
+    print(f"[{tag}] {num} {res.summary}{extra}")
+    if res.run_error:
+        print("--- 런타임 에러 ---")
+        print(res.run_error)
+    if outcome.git is not None:
+        print(f"[OK] {outcome.git.note}" + (f"  — {outcome.git.message}" if outcome.git.committed else ""))
+    elif push and not res.passed:
+        print("  → Pass 가 아니라 푸시하지 않았습니다")
+    if not res.passed:
+        raise SubmitError(f"{num} 채점 결과 {res.summary}", hint="")
     return 0
 
 
@@ -365,7 +397,9 @@ def _dispatch(args: argparse.Namespace, verbose: bool) -> int:
         if args.command == "logout":
             return run_logout(all_=args.all)
         if args.command == "check":
-            return run_check(args.topic, args.num, args.timeout, push=args.push)
+            return run_check(args.topic, args.num, args.timeout)
+        if args.command == "submit":
+            return run_submit(args.topic, args.num, push=args.push, message=args.message, yes=args.yes)
         if args.command == "push":
             return run_push(args.topic, args.num, message=args.message, push=not args.no_push)
         if args.command == "doctor":

@@ -8,10 +8,10 @@ SWEA(SW Expert Academy) **문제 번호 하나**로 샘플 입력·출력과 풀
 - 문제 번호(예: `25730`) + 주제 폴더 → `swea\{주제}\{번호}\` 에 `input.txt`, `output.txt`, `{번호}.py` 뼈대 생성
 - `{번호}.py` 를 `input.txt` 로 실행해 `output.txt` 와 줄 단위로 비교 (검증)
 - 로그인·세션·문제 찾기를 알아서 처리. 비밀번호는 Windows 자격 증명 관리자에만 저장
-- 검증이 끝나면 버튼 하나로 그 문제 폴더만 **git 커밋 + 푸시** (루트가 git 저장소일 때, 옵트인)
+- **SWEA 에 제출**해 채점 결과를 받고, **Pass 면 그 문제 폴더만 git 커밋 + 푸시** (루트가 git 저장소일 때, 옵트인)
 
 **하지 않는 일**
-- 코드 제출 (SWEA 사이트에서 직접)
+- 채점 결과를 바꾸거나 제출 횟수 제한을 우회하기 (제출은 사이트에서 직접 하는 것과 똑같이 1회씩 셉니다)
 - 루트 폴더를 git 저장소로 만들어 주거나 GitHub 인증을 대신하기 (한 번은 직접 → [GitHub 연동](#github-연동))
 - Python 외 언어의 뼈대·실행
 - Contest 진행 중인 문제, 가입하지 않은 Solving Club 의 문제를 번호로 찾기 (→ [번호로 못 찾는 문제](#번호로-못-찾는-문제))
@@ -185,7 +185,7 @@ swea-fetch check IM_test 25730
 
 실패하면 종료 코드 6. 제한 시간은 `--timeout 30`.
 
-실행이 끝나면 오른쪽 위에 **[커밋 + 푸시]** 가 나타납니다 → [GitHub 연동](#github-연동).
+로컬 검증은 샘플 입출력만 봅니다. 실제 채점은 **[SWEA 제출]** → [SWEA 제출과 GitHub 연동](#github-연동).
 
 ### 최근
 
@@ -217,7 +217,12 @@ Contest 진행 중인 문제나 **가입하지 않은** Solving Club 의 문제�
 
 ## GitHub 연동
 
-검증이 끝난 문제 폴더(`{주제}/{번호}/`)**만** 커밋하고 푸시합니다. 도구는 git 명령을 대신 실행할 뿐입니다 — 토큰을 저장하거나 묻지 않고, force push 와 pull 도 하지 않습니다.
+흐름: 검증 페이지 **[SWEA 제출]** → SWEA 가 채점 → **Pass** 면 그 문제 폴더(`{주제}/{번호}/`)**만** 커밋하고 푸시. 오답이면 푸시하지 않습니다. 도구는 git 명령을 대신 실행할 뿐입니다 — 토큰을 저장하거나 묻지 않고, force push 와 pull 도 하지 않습니다.
+
+**제출 규칙 (SWEA 쪽 제약)**
+- 제출은 사이트에서 직접 누르는 것과 같이 **문제당 제출 횟수를 1회 소모**합니다. 그래서 매번 확인 창이 뜹니다.
+- SWEA 는 Python 코드의 `import sys` 를 거부합니다. 도구가 뼈대의 `import sys` / `sys.stdin = open(...)` 줄을 **빼고** 보내며, 그 밖에 `sys.` 를 쓴 코드(`sys.stdin.readline`, `setrecursionlimit`)는 제출하지 않고 안내합니다.
+- 채점 결과는 제출 응답에 바로 옵니다 (보통 수 초). 결과 배지 `Pass` / `오답: 10개 중 7개` 등.
 
 **전제 (한 번만)**
 1. 루트 폴더가 git 저장소이고 `origin` 이 있어야 합니다. 도구는 저장소를 만들어 주지 않습니다.
@@ -243,13 +248,15 @@ git push -u origin main
 
 이미 저장소로 쓰고 있다면 아무것도 할 게 없습니다. 설정 페이지 **GitHub 연동** 에 `main → origin/main` 처럼 보이면 준비 끝.
 
-**버튼 (기본)** — 검증 페이지에서 실행이 끝나면 **[커밋 + 푸시]** 가 나타납니다 (통과면 파란 버튼, 실패해도 누를 수 있음). 매번 확인 창에서 커밋 메시지를 고치고 [커밋만] / [커밋 + 푸시] 를 고릅니다.
+**버튼 (기본)** — 검증 페이지 **[SWEA 제출]** → 확인 → 채점. Pass 면 배너의 **[커밋 + 푸시]** 를 누릅니다 (확인 창에서 메시지 편집, [커밋만] / [커밋 + 푸시]). 로컬 검증만 한 뒤에도 오른쪽 위 [커밋 + 푸시] 로 수동 푸시는 가능합니다.
+
+![SWEA 제출 결과 Pass](docs/gui-screenshots/10b-submit-pass.png)
 
 ![커밋 + 푸시 확인](docs/gui-screenshots/8b-push-dialog.png)
 
-![푸시됨](docs/gui-screenshots/8c-check-pushed.png)
+**자동 모드 (옵트인)** — 설정 페이지 **"SWEA 제출 결과가 Pass 이면 자동으로 커밋 + 푸시"** 를 켜면 Pass 를 받을 때마다 확인 없이 올라갑니다. 켤 때 경고가 한 번 뜹니다. 로컬 검증 통과만으로는 절대 올라가지 않습니다. 잘못 올렸으면 [되돌리기](docs/troubleshooting.md#자동-푸시를-되돌리려면).
 
-**자동 모드 (옵트인)** — 설정 페이지 **"검증 통과 시 자동으로 커밋 + 푸시"** 를 켜면 통과할 때마다 확인 없이 올라갑니다. 켤 때 경고가 한 번 뜹니다: *샘플 통과가 정답을 뜻하진 않습니다. 미완성 코드가 공개 저장소에 올라갈 수 있습니다.* 잘못 올렸으면 [되돌리기](docs/troubleshooting.md#자동-푸시를-되돌리려면).
+![자동 푸시됨](docs/gui-screenshots/10d-submit-pass-auto-pushed.png)
 
 ![GitHub 연동 설정](docs/gui-screenshots/9-settings-github.png)
 
@@ -258,14 +265,14 @@ git push -u origin main
 CLI:
 
 ```powershell
-swea-fetch check IM_test 25730 --push
+swea-fetch submit IM_test 25730 --push
 ```
 
 ```powershell
 swea-fetch push IM_test 25730 -m "solve: 25730"
 ```
 
-`check --push` 는 **통과했을 때만** 푸시합니다. `push --no-push` 는 커밋만. 실패는 종료 코드 7 → [문제 해결](docs/troubleshooting.md#git-커밋--푸시-종료-코드-7).
+`submit` 은 확인 프롬프트 뒤 제출하고 결과를 출력합니다 (`-y` 로 생략). `--push` 는 **Pass 일 때만** 푸시. 오답은 종료 코드 8, git 실패는 7 → [문제 해결](docs/troubleshooting.md#swea-제출-종료-코드-8). `push --no-push` 는 커밋만.
 
 **공용 PC 주의** — Git Credential Manager 의 GitHub 로그인은 Windows 자격 증명 관리자에 남습니다 (`git:https://github.com` 항목). 자리를 떠날 때 `swea-fetch logout --all` 과 함께 그 항목도 지우세요 → [보안과 계정](#보안과-계정).
 

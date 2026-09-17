@@ -118,6 +118,7 @@ class MainWindow(QMainWindow):
         self.settings_page.timeout_changed.connect(lambda _v: self.check_page.refresh_hint())
         self.history_page.check_requested.connect(self._goto_check)
         self.history_page.push_requested.connect(self._goto_push)
+        self.history_page.submit_requested.connect(self._goto_submit)
         self.fetch_page.saved.connect(lambda _oc: self.history_page.refresh())
         self.fetch_page.saved.connect(lambda _oc: self._update_status())
 
@@ -148,6 +149,10 @@ class MainWindow(QMainWindow):
         self.check_page.set_target(topic, num)
         self.goto("check")
         self.check_page.request_push(topic, num)
+
+    def _goto_submit(self, topic: str, num: int) -> None:
+        self.goto("check")
+        self.check_page.request_submit(topic, num)
 
     def _set_busy(self, busy: bool, suffix: str) -> None:
         self.setWindowTitle(f"{APP_TITLE} — {suffix}" if busy and suffix else APP_TITLE)

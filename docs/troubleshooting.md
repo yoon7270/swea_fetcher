@@ -12,7 +12,7 @@ swea-fetch doctor
 출력 예:
 
 ```
-swea-fetch 0.5.0  (exe)
+swea-fetch 0.6.0  (exe)
 Python: 3.12.4  C:\Users\you\AppData\Local\Programs\Python\Python312\python.exe  (출처: PATH)
 OS: Windows 11 10.0.26200
 설정 폴더: C:\Users\you\.swea-fetch  (.env 있음 / session.json 있음 / login_state 실패 0회 / problem_index 12건)
@@ -21,7 +21,7 @@ OS: Windows 11 10.0.26200
 git: 2.45.1 / 저장소: C:\Users\you\Desktop\swea (main → origin/main)
 로그인 상태: 세션 유효
 keyring: 항목 있음
-최신 버전: 0.5.0 (현재와 같음)
+최신 버전: 0.6.0 (현재와 같음)
 ```
 
 ## 자주 나오는 오류
@@ -54,8 +54,24 @@ keyring: 항목 있음
 | 5 | 네트워크 (`NetworkError`) |
 | 6 | 검증 실패 (`swea-fetch check` 에서 출력이 다름) |
 | 7 | git 커밋/푸시 실패 (`GitError`) → [아래](#git-커밋--푸시-종료-코드-7) |
+| 8 | SWEA 제출 불가 또는 채점 결과 오답 (`SubmitError`) → [아래](#swea-제출-종료-코드-8) |
 | 10 | 내부 오류 |
 | 130 | Ctrl+C |
+
+## SWEA 제출 (종료 코드 8)
+
+[SWEA 제출] / `swea-fetch submit` 은 사이트의 제출 버튼과 같은 요청(컴파일 → 제출)을 보내고 채점 결과를 응답에서 읽습니다. 제출 횟수는 사이트와 똑같이 1회 소모됩니다.
+
+| 메시지 | 원인 | 조치 |
+|---|---|---|
+| `허용하지 않는 키워드가 사용되었습니다 (SWEA 는 import sys 를 거부합니다)` | 도구가 `import sys` / `sys.stdin = open(...)` 줄은 빼고 보내지만, 다른 형태(예: `import sys, os`)가 남음 | 코드에서 `sys` 를 완전히 제거 |
+| `제출 코드에 sys. 사용이 남아 있습니다` | `sys.stdin.readline`, `sys.setrecursionlimit` 등 | `input()` 으로 바꾸고 재귀 제한 설정은 제거 (SWEA 웹 에디터에서도 같은 제약) |
+| `컴파일 오류: …` | 문법 오류 | 로컬 검증([실행])으로 먼저 확인 |
+| `허용하지 않는 라이브러리` / `파일 입력 메소드` / `System call` | SWEA 제약 | 표준 입출력만 사용 |
+| `제출 횟수를 다 채웠습니다` | 문제당 제출 한도 소진 | 사이트에서 확인. 도구로는 더 제출할 수 없음 |
+| `오답: 10개 테스트케이스 중 7개 통과` | 채점 실패 (종료 코드 8, 푸시 안 함) | 코드 수정 후 재제출. `제한시간 초과` 가 붙으면 성능 문제 |
+| `풀이 화면을 열지 못했습니다` | 접근 권한 없는 문제(미가입 클럽·Contest) 또는 세션 만료 | 브라우저에서 그 문제가 열리는지 확인 → 설정 [세션 삭제] 후 재시도 |
+| `제출 응답이 JSON 이 아닙니다` | 로그인이 풀렸거나 사이트 구조 변경 | 설정 [세션 삭제] 후 재시도. 계속되면 이슈에 `doctor` 출력 첨부 |
 
 ## git 커밋 + 푸시 (종료 코드 7)
 
@@ -76,7 +92,7 @@ keyring: 항목 있음
 
 ### 자동 푸시를 되돌리려면
 
-"검증 통과 시 자동으로 커밋 + 푸시" 로 올라간 커밋을 취소하려면 (도구는 revert 를 실행하지 않습니다):
+"SWEA 제출 결과가 Pass 이면 자동으로 커밋 + 푸시" 로 올라간 커밋을 취소하려면 (도구는 revert 를 실행하지 않습니다):
 
 ```powershell
 git revert HEAD --no-edit
@@ -135,6 +151,6 @@ py -3 -c "import sys; print(sys.executable)"
 | `problem_index.json` | 문제 번호 → ID 색인 캐시 | 지우면 다시 찾음 (조금 느려짐) |
 | `update_check.json` | 새 버전 확인 시각·결과·알림 끔 여부 | 지워도 됨 |
 
-`.env` 의 git 관련 키 (설정 페이지에서도 바꿀 수 있음): `SWEA_COMMIT_TEMPLATE` (커밋 메시지 템플릿), `SWEA_AUTO_PUSH=1` (검증 통과 시 자동 커밋+푸시, 기본 0).
+`.env` 의 git 관련 키 (설정 페이지에서도 바꿀 수 있음): `SWEA_COMMIT_TEMPLATE` (커밋 메시지 템플릿), `SWEA_AUTO_PUSH=1` (SWEA 제출 Pass 시 자동 커밋+푸시, 기본 0).
 
 비밀번호는 여기 없고 **Windows 자격 증명 관리자** (제어판 → 자격 증명 관리자 → Windows 자격 증명 → `swea-fetch`) 에 있습니다.

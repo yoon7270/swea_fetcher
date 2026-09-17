@@ -1,7 +1,7 @@
 """도메인 예외. 모든 예외는 SweaFetchError 를 상속하고 exit_code(cli) 와 hint(조치 문구) 를 가진다.
 
 exit code 규약 (project-plan 6절):
-    0 성공 / 1 로그인·설정 실패 / 2 입력·파싱 실패 / 3 저장 충돌 / 4 첨부 없음 / 5 네트워크 / 6 검증 실패 / 7 git 실패
+    0 성공 / 1 로그인·설정 실패 / 2 입력·파싱 실패 / 3 저장 충돌 / 4 첨부 없음 / 5 네트워크 / 6 검증 실패 / 7 git 실패 / 8 제출 실패·오답
 hint: 사용자가 다음에 할 일. cli 는 `→ {hint}` 로, GUI 는 배너에 표시한다.
      클래스 기본 문구를 두고, 발생 지점에서 hint= 로 덮어쓸 수 있다.
 """
@@ -169,3 +169,13 @@ class GitError(SweaFetchError):
 
     exit_code = 7
     default_hint = "README 'GitHub 연동' 절과 docs/troubleshooting.md 의 'git' 항목을 확인하세요"
+
+
+# --- 제출 (exit 8) ----------------------------------------------------------
+
+
+class SubmitError(SweaFetchError):
+    """SWEA 제출 불가(컴파일 오류·허용되지 않는 구문·횟수 소진) 또는 cli `submit` 의 오답 종료 코드 (M8)."""
+
+    exit_code = 8
+    default_hint = "코드를 고친 뒤 다시 제출하세요. 제출은 문제당 횟수 제한이 있습니다"

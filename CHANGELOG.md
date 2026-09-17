@@ -2,6 +2,14 @@
 
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/). 버전은 `swea_fetcher/__init__.py` 의 `__version__` 하나로 관리한다.
 
+## v0.6.0 — 2026-09-17 "SWEA 제출 → Pass 면 푸시"
+
+### 변경 (v0.5.0 의 트리거 교체)
+- 커밋+푸시의 기준이 **로컬 샘플 검증 통과 → SWEA 채점 Pass** 로 바뀌었다. 검증 페이지 **[SWEA 제출]** 이 사이트의 제출 버튼과 같은 요청(compile.do → submit.do)을 보내고 응답의 채점 결과를 보여 준다. 오답이면 푸시하지 않는다
+- 설정 "자동으로 커밋 + 푸시" 는 SWEA Pass 를 받았을 때만 동작한다 (로컬 통과로는 절대 올라가지 않음). `check --push` 옵션 삭제, 대신 `swea-fetch submit <topic> <num> [--push] [-y]` (오답 = 종료 코드 8)
+- 제출용 소스 변환: SWEA 가 `import sys` 를 거부하므로 `import sys` / `sys.stdin = open(...)` 줄을 빼고 보낸다. 다른 `sys.` 사용이 남으면 제출하지 않고 안내
+- 최근 페이지 우클릭 "SWEA 제출…"
+
 ## v0.5.0 — 2026-09-17 "검증 후 커밋 + 푸시"
 
 ### 추가

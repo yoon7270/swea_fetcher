@@ -7,6 +7,7 @@ list_recent   : root 아래 {topic}/{num}/ 를 mtime 순으로 (중첩 주제 �
 write_env     : .env 파일 쓰기 (비밀번호는 절대 쓰지 않음; SWEA_PYTHON 등 다른 키는 보존)
 set_env_values: .env 의 개별 키 갱신 (M7: SWEA_COMMIT_TEMPLATE, SWEA_AUTO_PUSH)
 push_problem  : 문제 폴더만 git 커밋(+푸시) (M7). 자격증명은 다루지 않는다
+submit_problem: SWEA 에 제출하고 채점 결과를 받는다 (M8). Pass 면 push 까지 (submit_and_push)
 
 네트워크·파일 I/O 가 있으므로 GUI 는 워커 스레드에서 호출한다.
 """
@@ -22,10 +23,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from . import auth, client, config, gitops, lookup, parser, storage
+from . import auth, client, config, gitops, lookup, parser, storage, submit
 from .config import Settings
 from .errors import GitError, InvalidInput
 from .gitops import GitResult
+from .submit import SubmitResult
 from .models import ProblemInfo, SaveResult
 
 log = logging.getLogger("swea_fetcher.service")
@@ -407,6 +409,59 @@ def push_problem(
         raise GitError(result.note, hint=result.output[-600:] if result.output else "")
     _emit(progress, result.note)
     return result
+
+
+# --- 제출 (M8) -------------------------------------------------------------------------
+
+
+@dataclass
+class SubmitOutcome:
+    submit: SubmitResult
+    git: GitResult | None = None  # Pass + push 요청 시
+    notes: list[str] = field(default_factory=list)  # 소스 변환 안내 등
+    contest_prob_id: str = ""
+
+
+def submit_problem(
+    settings: Settings,
+    topic: str,
+    num: int,
+    *,
+    push: bool = False,
+    message: str | None = None,
+    progress: ProgressCb | None = None,
+) -> SubmitOutcome:
+    """{topic}/{num}/{num}.py 를 SWEA 에 제출 → 채점 결과. push=True 이고 Pass 면 push_problem 까지.
+
+    호출 전에 사용자 확인 필수 (제출 횟수 1회 소모). 제출 불가·서버 오류는 SubmitError, 오답은 예외 없이 passed=False.
+    """
+    try:
+        problem_dir = storage.resolve_problem_dir(settings.root, topic, num)
+    except ValueError as e:
+        raise InvalidInput(str(e)) from e
+    source = submit.read_solution(problem_dir, num)
+    prepared, notes = submit.prepare_source(source)
+    for n in notes:
+        _emit(progress, f"[알림] {n}")
+
+    _emit(progress, "로그인 세션 확인")
+    session = auth.get_session(settings)
+    _emit(progress, f"문제 번호 {num} 로 찾는 중")
+    cid = lookup.find_by_number(session, settings, num)
+
+    def run() -> SubmitResult:
+        ctx = submit.get_context(session, settings, cid)
+        _emit(progress, f"컴파일 확인: {ctx.title or cid}")
+        submit.compile_source(session, ctx, prepared)
+        _emit(progress, "제출 중 (채점 대기)")
+        return submit.submit_source(session, ctx, prepared)
+
+    result = client._with_relogin(session, settings, run)
+    _emit(progress, f"채점 결과: {result.summary}")
+    outcome = SubmitOutcome(result, None, notes, cid)
+    if push and result.passed:
+        outcome.git = push_problem(settings, topic, num, message=message, push=True, progress=progress)
+    return outcome
 
 
 def logout(config_dir: Path, all_: bool = False) -> list[str]:

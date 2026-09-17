@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QMessageBox,
     QComboBox,
     QFrame,
     QGridLayout,
@@ -26,7 +27,7 @@ from ...config import Settings
 from ..theme import tokens
 from ..git_dialog import ask_push
 from ..widgets import Badge, Banner, DiffView, EmptyState, make_busy_bar, set_class, set_invalid
-from ..workers import CheckWorker, GitWorker
+from ..workers import CheckWorker, GitWorker, SubmitWorker
 
 REVERT_HELP_URL = "https://github.com/yoon7270/swea_fetcher/blob/main/docs/troubleshooting.md#자동-푸시를-되돌리려면"
 
@@ -45,6 +46,7 @@ class CheckPage(QWidget):
         self.settings: Settings | None = None
         self._worker: CheckWorker | None = None
         self._git_worker: GitWorker | None = None
+        self._submit_worker: SubmitWorker | None = None
         self._git_auto = False
         self._last_target: tuple[str, int] | None = None  # 마지막으로 검증한 (topic, num) — [커밋 + 푸시] 대상
         self.setAcceptDrops(True)
@@ -66,6 +68,8 @@ class CheckPage(QWidget):
         self.elapsed = QLabel()
         set_class(self.elapsed, "muted")
         self.elapsed.hide()
+        self.submit_badge = Badge()  # SWEA 채점 결과 "Pass" / "오답 …" (M8)
+        self.submit_badge.hide()
         self.git_badge = Badge()  # "푸시됨 abc1234" / "커밋만" / "변경 없음" / 오류 (M7)
         self.git_badge.hide()
         self.push_btn = QPushButton("커밋 + 푸시")  # 실행 후 항상 표시. 통과면 primary, 실패면 보조 스타일
@@ -75,6 +79,7 @@ class CheckPage(QWidget):
         head.addWidget(self.badge)
         head.addWidget(self.mismatch)
         head.addWidget(self.elapsed)
+        head.addWidget(self.submit_badge)
         head.addWidget(self.git_badge)
         head.addWidget(self.push_btn)
         root.addLayout(head)
@@ -106,6 +111,8 @@ class CheckPage(QWidget):
         self.cancel_btn = QPushButton("취소")
         self.cancel_btn.setToolTip("실행 중인 풀이 프로세스를 중단합니다")
         self.cancel_btn.hide()
+        self.submit_btn = QPushButton("SWEA 제출")  # M8: 제출 → 채점 → Pass 면 (자동) 커밋+푸시
+        self.submit_btn.setToolTip("SWEA 에 제출해 채점받습니다 (제출 횟수 1회 소모). Pass 면 커밋 + 푸시로 이어집니다")
         lt, ln = QLabel("주제"), QLabel("번호")
         set_class(lt, "muted")
         set_class(ln, "muted")
@@ -117,11 +124,12 @@ class CheckPage(QWidget):
         grid.addWidget(self.num, 0, 3)
         grid.addWidget(self.run_btn, 0, 4)
         grid.addWidget(self.cancel_btn, 0, 5, 1, 1, Qt.AlignmentFlag.AlignLeft)
-        grid.setColumnStretch(6, 1)
+        grid.addWidget(self.submit_btn, 0, 6, 1, 1, Qt.AlignmentFlag.AlignLeft)
+        grid.setColumnStretch(7, 1)
         self._grid = grid
         self._run_on_row2 = False
         # 입력창이 드롭을 가로채 파일 경로를 텍스트로 넣지 않도록 — 드롭은 페이지(dropEvent)가 처리한다
-        for w in (self.topic, self.topic.lineEdit(), self.num, self.run_btn):
+        for w in (self.topic, self.topic.lineEdit(), self.num, self.run_btn, self.submit_btn):
             w.setAcceptDrops(False)
         self.hint = QLabel(self._hint_text())
         set_class(self.hint, "hint")
@@ -152,6 +160,7 @@ class CheckPage(QWidget):
         self.run_btn.clicked.connect(self.start)
         self.cancel_btn.clicked.connect(self.cancel)
         self.push_btn.clicked.connect(self.request_push)
+        self.submit_btn.clicked.connect(self.request_submit)
         self.num.returnPressed.connect(self.start)
         self.topic.lineEdit().returnPressed.connect(self.start)
         self.banner.action_clicked.connect(self._banner_action)
@@ -190,12 +199,15 @@ class CheckPage(QWidget):
         if narrow != self._run_on_row2:
             self._grid.removeWidget(self.run_btn)
             self._grid.removeWidget(self.cancel_btn)
+            self._grid.removeWidget(self.submit_btn)
             if narrow:
                 self._grid.addWidget(self.run_btn, 1, 1, 1, 1, Qt.AlignmentFlag.AlignLeft)
                 self._grid.addWidget(self.cancel_btn, 1, 2, 1, 2, Qt.AlignmentFlag.AlignLeft)
+                self._grid.addWidget(self.submit_btn, 1, 4, 1, 3, Qt.AlignmentFlag.AlignLeft)
             else:
                 self._grid.addWidget(self.run_btn, 0, 4)
                 self._grid.addWidget(self.cancel_btn, 0, 5, 1, 1, Qt.AlignmentFlag.AlignLeft)
+                self._grid.addWidget(self.submit_btn, 0, 6, 1, 1, Qt.AlignmentFlag.AlignLeft)
             self._run_on_row2 = narrow
 
     def _clear_invalid(self) -> None:
@@ -242,6 +254,7 @@ class CheckPage(QWidget):
         for w in (self.topic, self.num):
             w.setEnabled(not busy)
         self.run_btn.setEnabled(not busy)
+        self.submit_btn.setEnabled(not busy and self._submit_worker is None)
         self.cancel_btn.setVisible(busy)
         self.cancel_btn.setEnabled(busy)
         if busy:
@@ -283,6 +296,7 @@ class CheckPage(QWidget):
         self.elapsed.hide()
         self.push_btn.hide()
         self.git_badge.hide()
+        self.submit_badge.hide()
         self._last_target = (topic, int(num_s))
         self._worker = CheckWorker(problem_dir, self.settings, self.timeout(), self)
         self._worker.progress.connect(self.status_message)
@@ -329,8 +343,6 @@ class CheckPage(QWidget):
             self.badge.set_state("통과", "success")
             self.mismatch.hide()
             self.status_message.emit(f"통과 · {res.elapsed:.2f}s")
-            if self.settings is not None and self.settings.auto_push_on_pass:
-                self._start_git(None, push=True, auto=True)
         elif res.timed_out:
             self.badge.set_state("시간 초과", "error")
             self.banner.show_message("error", f"{self.timeout():.0f}초 안에 끝나지 않아 중단했습니다",
@@ -356,7 +368,108 @@ class CheckPage(QWidget):
         if key == "revert-help":
             QDesktopServices.openUrl(QUrl(REVERT_HELP_URL))
             return
+        if key == "push":
+            self.request_push()
+            return
         self.goto_requested.emit(key)
+
+    # --- SWEA 제출 (M8) ------------------------------------------------------------------
+    def _target_from_form(self) -> tuple[str, int] | None:
+        topic = self.topic.currentText().strip()
+        num_s = self.num.text().strip()
+        self._clear_invalid()
+        if not topic:
+            set_invalid(self.topic, True)
+            self.err_label.setText("주제 폴더 이름을 입력하세요")
+            self.err_label.show()
+            return None
+        if not num_s.isdigit():
+            set_invalid(self.num, True)
+            self.err_label.setText("문제 번호를 숫자로 입력하세요")
+            self.err_label.show()
+            return None
+        return topic, int(num_s)
+
+    def request_submit(self, topic: str | None = None, num: int | None = None) -> None:
+        """[SWEA 제출] → 확인(제출 횟수 1회 소모) → SubmitWorker. Pass 면 설정에 따라 자동 커밋+푸시 또는 [커밋 + 푸시] 안내."""
+        if self._submit_worker is not None or self._worker is not None or self.settings is None:
+            if self.settings is None:
+                self.banner.show_message("error", "설정이 없습니다", "루트 폴더·SWEA ID·비밀번호를 먼저 저장하세요", [("settings", "설정으로 이동")])
+            return
+        if topic is None or num is None:
+            t = self._target_from_form()
+            if t is None:
+                return
+            topic, num = t
+        else:
+            self.set_target(topic, num)
+        try:
+            problem_dir = storage.resolve_problem_dir(self.settings.root, topic, num)
+        except ValueError as e:
+            self.banner.show_message("error", str(e))
+            return
+        if not (problem_dir / f"{num}.py").is_file():
+            self.banner.show_message("error", f"{num}.py 가 없습니다: {problem_dir}", "먼저 저장 페이지에서 문제를 받으세요", [("fetch", "저장 페이지로")])
+            return
+        auto = bool(self.settings.auto_push_on_pass)
+        body = f"{topic}/{num}/{num}.py 를 SWEA 에 제출합니다.\n제출 가능 횟수가 1회 감소합니다."
+        body += "\n\nPass 면 확인 없이 커밋 + 푸시합니다 (설정에서 켜져 있음)." if auto else "\n\nPass 면 [커밋 + 푸시] 버튼이 활성화됩니다."
+        box = QMessageBox(QMessageBox.Icon.Question, "SWEA 제출", body, parent=self)
+        ok = box.addButton("제출", QMessageBox.ButtonRole.AcceptRole)
+        cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(ok)
+        box.setEscapeButton(cancel)
+        box.exec()
+        if box.clickedButton() is not ok:
+            return
+        self._last_target = (topic, num)
+        self._git_auto = auto
+        self.banner.hide()
+        self.submit_badge.set_state("제출 중…", "running")
+        self.git_badge.hide()
+        self.submit_btn.setEnabled(False)
+        self.submit_btn.setText("채점 중…")
+        self.busy.show()
+        self.busy_changed.emit(True, "SWEA 채점 중…")
+        self._submit_worker = SubmitWorker(self.settings, topic, num, auto, self)
+        self._submit_worker.progress.connect(self.status_message)
+        self._submit_worker.finished_ok.connect(self._on_submit_done)
+        self._submit_worker.failed.connect(self._on_submit_failed)
+        self._submit_worker.finished.connect(self._submit_cleanup)
+        self._submit_worker.start()
+
+    def _submit_cleanup(self) -> None:
+        self._submit_worker = None
+        self.submit_btn.setEnabled(self._worker is None)
+        self.submit_btn.setText("SWEA 제출")
+        self.busy.setVisible(self._worker is not None)
+        self.busy_changed.emit(False, "")
+
+    def _on_submit_done(self, outcome) -> None:
+        res = outcome.submit
+        for n in outcome.notes:
+            self.status_message.emit(n)
+        if res.passed:
+            self.submit_badge.set_state("Pass", "success")
+            self._show_push_button(True)
+            if outcome.git is not None:
+                self._on_git_done(outcome.git)
+                self.banner.show_message("success", f"SWEA Pass → 커밋 + 푸시했습니다 ({outcome.git.commit_hash})",
+                                         outcome.git.note, [("revert-help", "되돌리기 안내")])
+            else:
+                self.banner.show_message("success", "SWEA 채점 결과: Pass",
+                                         "이 풀이를 GitHub 에 올리려면 [커밋 + 푸시] 를 누르세요", [("push", "커밋 + 푸시")])
+            self.status_message.emit("SWEA Pass")
+        else:
+            self.submit_badge.set_state("오답", "error")
+            self._show_push_button(False)
+            body = res.summary + (f"\n\n{res.run_error}" if res.run_error else "")
+            self.banner.show_message("error", "SWEA 채점 결과: 오답 — 푸시하지 않았습니다", body)
+            self.status_message.emit(res.summary)
+
+    def _on_submit_failed(self, title: str, hint: str, detail: str) -> None:
+        self.submit_badge.set_state("제출 실패", "error")
+        self.banner.show_message("error", title, hint or detail[-400:])
 
     # --- 커밋 + 푸시 (M7) ----------------------------------------------------------------
     def _show_push_button(self, passed: bool) -> None:
@@ -407,7 +520,7 @@ class CheckPage(QWidget):
         self.push_btn.setEnabled(True)
 
     def wait_workers(self, ms: int = 5000) -> None:
-        for w in (self._git_worker, self._worker):
+        for w in (self._git_worker, self._worker, self._submit_worker):
             if w is not None and w.isRunning():
                 w.wait(ms)
 

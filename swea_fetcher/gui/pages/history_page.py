@@ -28,6 +28,7 @@ LIMIT = 20
 class HistoryPage(QWidget):
     check_requested = Signal(str, int)  # topic, num
     push_requested = Signal(str, int)  # topic, num — 검증 페이지의 확인 다이얼로그로 (M7)
+    submit_requested = Signal(str, int)  # topic, num — 검증 페이지의 [SWEA 제출] 흐름으로 (M8)
     goto_requested = Signal(str)
     status_message = Signal(str)
 
@@ -142,5 +143,6 @@ class HistoryPage(QWidget):
         menu.addAction("폴더 열기", lambda: open_in_explorer(it.path) and self.status_message.emit("폴더를 열었습니다"))
         menu.addAction("PyCharm 에서 열기", lambda: open_with_default_app(it.path / f"{it.num}.py"))
         menu.addAction("검증하기", lambda: self.check_requested.emit(it.topic, it.num))
+        menu.addAction("SWEA 제출…", lambda: self.submit_requested.emit(it.topic, it.num))
         menu.addAction("커밋 + 푸시…", lambda: self.push_requested.emit(it.topic, it.num))
         menu.exec(self.table.viewport().mapToGlobal(pos))

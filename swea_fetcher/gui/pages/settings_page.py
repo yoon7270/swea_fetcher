@@ -204,8 +204,8 @@ class SettingsPage(QWidget):
         tpl_hint = QLabel("변수: {num} {title} {topic} {date} — 비우면 기본값. 입력 후 Enter 또는 포커스 이동으로 저장")
         set_class(tpl_hint, "hint")
         tpl_hint.setWordWrap(True)
-        self.auto_push = QCheckBox("검증 통과 시 자동으로 커밋 + 푸시 (확인 없음)")
-        auto_hint = QLabel("기본 꺼짐. 켜면 통과한 풀이가 확인 없이 원격에 올라갑니다 — 미완성 코드도 올라갈 수 있습니다")
+        self.auto_push = QCheckBox("SWEA 제출 결과가 Pass 이면 자동으로 커밋 + 푸시 (확인 없음)")
+        auto_hint = QLabel("기본 꺼짐. 켜면 [SWEA 제출] 로 Pass 를 받은 풀이가 확인 없이 원격에 올라갑니다. 로컬 검증 통과만으로는 올라가지 않습니다")
         set_class(auto_hint, "hint")
         auto_hint.setWordWrap(True)
         g5.addWidget(l_repo, 0, 0)
@@ -362,7 +362,7 @@ class SettingsPage(QWidget):
         """켤 때 경고 1회 (사용자 클릭에만 반응 — setChecked 로는 안 뜸)."""
         if on:
             box = QMessageBox(QMessageBox.Icon.Warning, "자동 커밋 + 푸시",
-                              "샘플 통과가 정답을 뜻하진 않습니다.\n미완성 코드가 공개 저장소에 올라갈 수 있습니다.\n\n검증이 통과할 때마다 확인 없이 커밋하고 푸시합니다. 켤까요?",
+                              "SWEA 채점이 Pass 일 때마다 확인 없이 그 문제 폴더를 커밋하고 푸시합니다.\n올라간 코드는 공개 저장소에 남습니다 (되돌리기 안내는 문제 해결 문서에).\n\n켤까요?",
                               parent=self)
             ok = box.addButton("켜기", QMessageBox.ButtonRole.AcceptRole)
             cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
@@ -373,7 +373,7 @@ class SettingsPage(QWidget):
                 self.auto_push.setChecked(False)
                 return
         service.set_env_values(self.config_dir, SWEA_AUTO_PUSH="1" if on else "0")
-        self.status_message.emit("검증 통과 시 자동 커밋+푸시를 " + ("켰습니다" if on else "껐습니다"))
+        self.status_message.emit("SWEA Pass 시 자동 커밋+푸시를 " + ("켰습니다" if on else "껐습니다"))
         self.settings_changed.emit()
 
     def show_first_run(self) -> None:

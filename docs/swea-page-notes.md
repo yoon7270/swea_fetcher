@@ -147,3 +147,20 @@ E2E: `swea-fetch -v <첨부 링크 URL> _e2e_test` (문제 `AZq-gSmq_RfHBISS`, 2
 - `clubView.do?solveclubId=` 도 GET 가능 (주소창에 노출되는 유일한 ID). `problemView.do`/`solvingProblem.do` 는 POST 전용
 - 일반 문제 목록 `problemList.do` 의 `problemTitle` 검색은 **번호도 매칭**(검색창 placeholder "문제 번호, 키워드"). `4014`,`1209`,`20728` 등은 여기서, `16268` 은 `userProblemList.do` 에서 찾힘. 부분 일치라 `span.week_num == "{num}."` 로 정확 매칭 필요. 클럽 전용 문제(25730, 24973, 27482, 16456)는 두 목록 모두에 없음 → 클럽 상자 스캔
 - 탐색 순서(`lookup.find_by_number`): 캐시 → Problem 목록 → User Problem 목록 → 클럽 상자(최신순). 성능: 목록 검색 ≈ 0.3초/회, 상자 1개 스캔 ≈ 0.7초. 본 상자·찾은 문제는 `problem_index.json` 에 캐시
+
+## 제출 API (M8 spike, 2026-09-17 — 풀이 화면 JS 해석 + compile.do 실측)
+
+풀이 화면(`solvingProblem.do`)의 `onEditSubmit()` 이 하는 일 = **컴파일 → 확인창 → 제출**. 두 요청 모두 같은 파라미터, 응답은 JSON. `contextPath="/main"`.
+
+| 단계 | 요청 | 응답 (JSON) |
+|---|---|---|
+| 컴파일 (부작용 없음) | `POST /main/commonCompileRun/compile.do` form: `source`, `langType`(`py`/`java`/`c`/`cpp` — select 값 `Y`→`py`), `probId`(=contestProbId), `categoryId`(hidden, 공개 문제는 빈 값), `categoryType`(`BOX`), `useOptimize=""` | `{result:"success", vo:{exitValue, cmpError, …}, submitFailed, compile}` |
+| 제출 ("제출 가능 횟수 1회 감소", 문제당 99회) | `POST /main/commonCompileRun/submit.do` 같은 파라미터 | `{result, submitFailed, vo:{runValue, usrScore, timeOut, runError, testCaseNo, correctedCases, gradingResult, executionTime, …}}` — **채점 결과가 응답에 바로 옴 (폴링 불필요)** |
+
+- 헤더: 세션 쿠키 + `X-Requested-With: XMLHttpRequest` + `Referer: …/solvingProblem.do`. CSRF 토큰 없음. 실측: compile.do 200 `application/json`.
+- `vo.exitValue` (compile 단계): `"0"` 정상 / `H` 컴파일 오류(`cmpError`) / `EB` 100KB 초과 / `NS` 허용되지 않는 라이브러리 / `FI` 파일 입력 메소드 사용 / `UP` package 선언 / `SC` system call / **`NK`(JS 미처리) = `import sys` 자체를 거부** — 실측: `import sys` 한 줄만 있어도 `NK`, `cmpError="import sys"`. 주석 처리해도 거부(정규식 검사). `from collections import deque` 는 통과.
+- 따라서 제출용 소스 변환 필수: `import sys` 줄과 `sys.stdin = open(...)` 줄 제거 → 그래도 `sys.` 가 남으면(`sys.stdin.readline`, `setrecursionlimit`) 제출 불가로 안내.
+- `submitFailed`: `""` 정상 / `ES` 제출 횟수 소진 / `TU` 제출 시간 종료 / `AP` (미확인).
+- 판정 (`processSubmit`): `vo.runError` 비어 있지 않음 → 오답(런타임 에러); `runValue` 에 `"Pass"` 포함 **and** `timeOut == ""` and `usrScore != "0"` → **Pass**; 그 외 오답 — `testCaseNo`/`correctedCases` 가 있으면 "N개 중 M개", 없으면 `usrScore / 100.0`. `timeOut != ""` 는 제한시간 초과.
+- 제출 후 화면은 `solvingProblem.do` 로 다시 이동할 뿐, 별도 결과 조회 API 없음.
+- 미실측: `submit.do` 의 실제 응답 (분류기가 실제 제출을 막아 사용자가 1회 실행해 확인해야 함). `AP` 의미. 언어별 `langType` 은 Python 만 확인.

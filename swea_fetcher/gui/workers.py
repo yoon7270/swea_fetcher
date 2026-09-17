@@ -105,6 +105,17 @@ class GitWorker(BaseWorker):
         return service.push_problem(self.settings, self.topic, self.num, message=self.message, push=self.push, progress=self.progress.emit)
 
 
+class SubmitWorker(BaseWorker):
+    """SWEA 제출 → 채점 결과 (M8). push=True 면 Pass 일 때 커밋+푸시까지 (service.submit_problem)."""
+
+    def __init__(self, settings: Settings, topic: str, num: int, push: bool, parent=None) -> None:
+        super().__init__(parent)
+        self.settings, self.topic, self.num, self.push = settings, topic, num, push
+
+    def work(self):
+        return service.submit_problem(self.settings, self.topic, self.num, push=self.push, progress=self.progress.emit)
+
+
 class FuncWorker(BaseWorker):
     """임의 함수를 워커에서 실행 (list_recent 등 파일 I/O)."""
 

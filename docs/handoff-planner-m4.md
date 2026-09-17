@@ -46,6 +46,7 @@
 | M5 | 2026-09-17 | 미결 6건 회신 반영: #1 폴백 삭제, #2 README, #3 검증 취소 버튼, #4 보류, #5 GitHub Release(`v0.3.4`, exe 첨부), #6 보류. 지시서의 `v0.3.2` 는 이미 사용된 태그라 `v0.3.4` 로 발행 |
 | M6 | 2026-09-17 | **승인** — v0.4.0 "배포판": README 개편(exe/소스 두 갈래, troubleshooting·development 분리), 중첩 주제 `test/IM_test`, `doctor`, 새 버전 알림, LICENSE·이슈 템플릿·CHANGELOG, 픽스처 식별자 치환 + 히스토리 정리(filter-repo). 사용자가 filter-repo 히스토리 force-push + public 전환 완료(2026-09-17). Release 9개 유지 확인, 새 버전 확인 API 동작 확인 |
 | M7 | 2026-09-17 | v0.5.0 "검증 후 커밋+푸시": `gitops.py`(문제 폴더만 pathspec 커밋, force/pull 없음, GCM 인증), `push`/`check --push`/exit 7, GUI [커밋 + 푸시] 다이얼로그·자동 모드(옵트인, 경고 1회)·GitHub 연동 설정, doctor git 줄. 사용자 확인 대기: 본인 swea 저장소 푸시 1건, 배포자 1명 README 대로 연동 |
+| M8 | 2026-09-17 | 사용자 지적으로 트리거 교체: "로컬 검증 통과" → **"SWEA 제출 Pass"**. spike: compile.do/submit.do (풀이 화면 JS 해석 + compile.do 실측, `import sys` 거부 확인), `submit.py`, `service.submit_problem`, CLI `submit [--push]`(exit 8), GUI [SWEA 제출]·최근 메뉴. 실제 submit.do 응답은 분류기가 실제 제출을 막아 **사용자 1회 제출로 확인 필요**. v0.6.0 |
 
 ## 5. 참고 위치
 
