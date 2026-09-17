@@ -30,7 +30,7 @@ CLI 와 같은 설정(`%USERPROFILE%\.swea-fetch\`)을 공유합니다. 명령�
 
 ```powershell
 pip install -e ".[gui]" pyinstaller pillow
-python packaging\make_ico.py                                   # design\iconspp.ico 생성 (1회)
+python packaging\make_ico.py                                   # design\icons\app.ico 생성 (1회)
 pyinstaller packaging\swea-fetch-gui.spec --noconfirm           # → dist\swea-fetch-gui.exe (약 55 MB)
 ```
 
