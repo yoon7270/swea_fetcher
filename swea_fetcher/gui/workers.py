@@ -94,6 +94,17 @@ class CheckWorker(BaseWorker):
         return checker.run_and_compare(self.problem_dir, self.settings, self.timeout, on_start=self._on_start)
 
 
+class GitWorker(BaseWorker):
+    """문제 폴더 커밋(+푸시) (M7). 결과는 gitops.GitResult, 전제 조건 미충족·git 실패는 GitError → failed."""
+
+    def __init__(self, settings: Settings, topic: str, num: int, message: str | None, push: bool, parent=None) -> None:
+        super().__init__(parent)
+        self.settings, self.topic, self.num, self.message, self.push = settings, topic, num, message, push
+
+    def work(self):
+        return service.push_problem(self.settings, self.topic, self.num, message=self.message, push=self.push, progress=self.progress.emit)
+
+
 class FuncWorker(BaseWorker):
     """임의 함수를 워커에서 실행 (list_recent 등 파일 I/O)."""
 

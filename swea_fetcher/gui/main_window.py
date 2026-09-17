@@ -117,6 +117,7 @@ class MainWindow(QMainWindow):
         self.settings_page.settings_changed.connect(lambda: self.reload_settings(stay=True))
         self.settings_page.timeout_changed.connect(lambda _v: self.check_page.refresh_hint())
         self.history_page.check_requested.connect(self._goto_check)
+        self.history_page.push_requested.connect(self._goto_push)
         self.fetch_page.saved.connect(lambda _oc: self.history_page.refresh())
         self.fetch_page.saved.connect(lambda _oc: self._update_status())
 
@@ -141,6 +142,12 @@ class MainWindow(QMainWindow):
     def _goto_check(self, topic: str, num: int) -> None:
         self.check_page.set_target(topic, num)
         self.goto("check")
+
+    def _goto_push(self, topic: str, num: int) -> None:
+        """최근 페이지 우클릭 '커밋 + 푸시…' → 검증 페이지로 이동 후 같은 확인 다이얼로그 (M7)."""
+        self.check_page.set_target(topic, num)
+        self.goto("check")
+        self.check_page.request_push(topic, num)
 
     def _set_busy(self, busy: bool, suffix: str) -> None:
         self.setWindowTitle(f"{APP_TITLE} — {suffix}" if busy and suffix else APP_TITLE)
@@ -222,4 +229,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e) -> None:  # noqa: N802
         self.qs.setValue("window/geometry", self.saveGeometry())
+        for p in (self.settings_page, self.check_page):  # 실행 중 QThread 가 파괴되지 않게
+            p.wait_workers()
+        if self._update_worker is not None and self._update_worker.isRunning():
+            self._update_worker.wait(3000)
         super().closeEvent(e)

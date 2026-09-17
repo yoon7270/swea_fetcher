@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, Signal
+from PySide6.QtCore import QSettings, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -23,8 +24,11 @@ from PySide6.QtWidgets import (
 from ... import checker, service, storage
 from ...config import Settings
 from ..theme import tokens
+from ..git_dialog import ask_push
 from ..widgets import Badge, Banner, DiffView, EmptyState, make_busy_bar, set_class, set_invalid
-from ..workers import CheckWorker
+from ..workers import CheckWorker, GitWorker
+
+REVERT_HELP_URL = "https://github.com/yoon7270/swea_fetcher/blob/main/docs/troubleshooting.md#자동-푸시를-되돌리려면"
 
 DEFAULT_TIMEOUT = checker.DEFAULT_TIMEOUT
 
@@ -40,6 +44,9 @@ class CheckPage(QWidget):
         self.qs = qsettings
         self.settings: Settings | None = None
         self._worker: CheckWorker | None = None
+        self._git_worker: GitWorker | None = None
+        self._git_auto = False
+        self._last_target: tuple[str, int] | None = None  # 마지막으로 검증한 (topic, num) — [커밋 + 푸시] 대상
         self.setAcceptDrops(True)
         self._build()
 
@@ -59,11 +66,17 @@ class CheckPage(QWidget):
         self.elapsed = QLabel()
         set_class(self.elapsed, "muted")
         self.elapsed.hide()
+        self.git_badge = Badge()  # "푸시됨 abc1234" / "커밋만" / "변경 없음" / 오류 (M7)
+        self.git_badge.hide()
+        self.push_btn = QPushButton("커밋 + 푸시")  # 실행 후 항상 표시. 통과면 primary, 실패면 보조 스타일
+        self.push_btn.hide()
         head.addWidget(title)
         head.addStretch(1)
         head.addWidget(self.badge)
         head.addWidget(self.mismatch)
         head.addWidget(self.elapsed)
+        head.addWidget(self.git_badge)
+        head.addWidget(self.push_btn)
         root.addLayout(head)
         self.busy = make_busy_bar()
         root.addWidget(self.busy)
@@ -129,12 +142,16 @@ class CheckPage(QWidget):
         self.stderr.setReadOnly(True)
         self.stderr.setObjectName("log")
         self.tabs.addTab(self.diff, "출력 비교")
+        self.git_log = QPlainTextEdit()  # git 출력 (M7) — 결과가 있을 때만 탭 추가
+        self.git_log.setReadOnly(True)
+        self.git_log.setObjectName("log")
         self.stack.addWidget(self.empty)
         self.stack.addWidget(self.tabs)
         root.addWidget(holder, 1)
 
         self.run_btn.clicked.connect(self.start)
         self.cancel_btn.clicked.connect(self.cancel)
+        self.push_btn.clicked.connect(self.request_push)
         self.num.returnPressed.connect(self.start)
         self.topic.lineEdit().returnPressed.connect(self.start)
         self.banner.action_clicked.connect(self._banner_action)
@@ -264,6 +281,9 @@ class CheckPage(QWidget):
         self.badge.set_state("실행 중…", "running")
         self.mismatch.hide()
         self.elapsed.hide()
+        self.push_btn.hide()
+        self.git_badge.hide()
+        self._last_target = (topic, int(num_s))
         self._worker = CheckWorker(problem_dir, self.settings, self.timeout(), self)
         self._worker.progress.connect(self.status_message)
         self._worker.finished_ok.connect(self._on_done)
@@ -304,10 +324,13 @@ class CheckPage(QWidget):
 
         self.elapsed.setText(f"{res.elapsed:.2f}s")
         self.elapsed.show()
+        self._show_push_button(res.passed)
         if res.passed:
             self.badge.set_state("통과", "success")
             self.mismatch.hide()
             self.status_message.emit(f"통과 · {res.elapsed:.2f}s")
+            if self.settings is not None and self.settings.auto_push_on_pass:
+                self._start_git(None, push=True, auto=True)
         elif res.timed_out:
             self.badge.set_state("시간 초과", "error")
             self.banner.show_message("error", f"{self.timeout():.0f}초 안에 끝나지 않아 중단했습니다",
@@ -330,4 +353,87 @@ class CheckPage(QWidget):
         self.banner.show_message("error", title, hint or detail[-400:])
 
     def _banner_action(self, key: str) -> None:
+        if key == "revert-help":
+            QDesktopServices.openUrl(QUrl(REVERT_HELP_URL))
+            return
         self.goto_requested.emit(key)
+
+    # --- 커밋 + 푸시 (M7) ----------------------------------------------------------------
+    def _show_push_button(self, passed: bool) -> None:
+        """실행 후 항상 표시. 통과면 주 버튼, 실패면 보조 스타일 + 툴팁."""
+        set_class(self.push_btn, "primary" if passed else "")
+        self.push_btn.setToolTip("" if passed else "실패한 풀이도 커밋할 수 있습니다")
+        self.push_btn.setEnabled(True)
+        self.push_btn.show()
+
+    def request_push(self, topic: str | None = None, num: int | None = None) -> None:
+        """[커밋 + 푸시] → 확인 다이얼로그(매번) → GitWorker. 최근 페이지 메뉴에서도 호출된다."""
+        if self._git_worker is not None or self.settings is None:
+            return
+        if topic is None or num is None:
+            if self._last_target is None:
+                return
+            topic, num = self._last_target
+        self._last_target = (topic, num)
+        try:
+            choice = ask_push(self, self.settings, topic, num)
+        except ValueError as e:
+            self.banner.show_message("error", str(e))
+            return
+        if choice is None:
+            return
+        if isinstance(choice, list):
+            self.banner.show_message("error", "커밋할 수 없습니다", "\n".join(choice))
+            return
+        message, push = choice
+        self._start_git(message, push=push, auto=False)
+
+    def _start_git(self, message: str | None, push: bool, auto: bool) -> None:
+        if self._git_worker is not None or self.settings is None or self._last_target is None:
+            return
+        topic, num = self._last_target
+        self._git_auto = auto
+        self.push_btn.setEnabled(False)
+        self.git_badge.set_state("git 실행 중…", "running")
+        self._git_worker = GitWorker(self.settings, topic, num, message, push, self)
+        self._git_worker.progress.connect(self.status_message)
+        self._git_worker.finished_ok.connect(self._on_git_done)
+        self._git_worker.failed.connect(self._on_git_failed)
+        self._git_worker.finished.connect(self._git_cleanup)
+        self._git_worker.start()
+
+    def _git_cleanup(self) -> None:
+        self._git_worker = None
+        self.push_btn.setEnabled(True)
+
+    def wait_workers(self, ms: int = 5000) -> None:
+        for w in (self._git_worker, self._worker):
+            if w is not None and w.isRunning():
+                w.wait(ms)
+
+    def _show_git_log(self, text: str) -> None:
+        self.git_log.setPlainText(text)
+        if self.tabs.indexOf(self.git_log) < 0:
+            self.tabs.addTab(self.git_log, "git")
+
+    def _on_git_done(self, result) -> None:
+        self._show_git_log(result.output)
+        if result.pushed:
+            label = f"{'자동 ' if self._git_auto else ''}푸시됨 {result.commit_hash}"
+            self.git_badge.set_state(label, "success")
+            if self._git_auto:
+                self.banner.show_message("info", f"검증 통과 → 자동으로 커밋 + 푸시했습니다 ({result.commit_hash})",
+                                         "샘플 통과가 정답을 뜻하진 않습니다. 잘못 올렸다면 되돌리기 안내를 보세요",
+                                         [("revert-help", "되돌리기 안내"), ("settings", "자동 푸시 설정")])
+        elif result.committed:
+            self.git_badge.set_state(f"커밋만 {result.commit_hash}", "success")
+        else:
+            self.git_badge.set_state("변경 없음", "idle")
+        self.status_message.emit(result.note)
+
+    def _on_git_failed(self, title: str, hint: str, detail: str) -> None:
+        self.git_badge.set_state("git 오류", "error")
+        if hint and hint.startswith("$ git"):
+            self._show_git_log(hint)
+            hint = ""
+        self.banner.show_message("error", title, hint or detail[-400:], [("settings", "GitHub 연동 설정")])

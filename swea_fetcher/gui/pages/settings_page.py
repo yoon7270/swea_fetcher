@@ -1,4 +1,4 @@
-"""설정 페이지 (스펙 §6.4): 계정(루트·ID·비밀번호) / 검증 타임아웃 / 진단·업데이트(M6) / 세션·계정 삭제. QScrollArea 안."""
+"""설정 페이지 (스펙 §6.4): 계정(루트·ID·비밀번호) / 검증 타임아웃 / GitHub 연동(M7) / 진단·업데이트(M6) / 세션·계정 삭제. QScrollArea 안."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import config, doctor, service, update
+from ... import config, doctor, gitops, service, update
 from ...config import Settings
 from ..theme import tokens
 from ..widgets import Banner, make_busy_bar, set_class, set_invalid
@@ -44,6 +44,7 @@ class SettingsPage(QWidget):
         self.settings: Settings | None = None
         self._worker: LoginWorker | None = None
         self._doctor_worker: FuncWorker | None = None
+        self._git_worker: FuncWorker | None = None
         self._build()
 
     def _build(self) -> None:
@@ -176,6 +177,47 @@ class SettingsPage(QWidget):
         g2.setColumnStretch(3, 1)
         root.addWidget(card2)
 
+        # --- GitHub 연동 (M7)
+        sec5 = QLabel("GitHub 연동")
+        set_class(sec5, "section")
+        root.addWidget(sec5)
+        card5 = QFrame()
+        set_class(card5, "card")
+        g5 = QGridLayout(card5)
+        g5.setContentsMargins(tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2)
+        g5.setVerticalSpacing(tokens.SPACE)
+        g5.setColumnMinimumWidth(0, 96)
+        l_repo = QLabel("저장소")
+        set_class(l_repo, "muted")
+        l_repo.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.git_status = QLabel("확인 중…")
+        self.git_status.setWordWrap(True)
+        self.git_status.setOpenExternalLinks(True)
+        self.git_status.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        l_tpl = QLabel("커밋 메시지")
+        set_class(l_tpl, "muted")
+        l_tpl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.commit_template = QLineEdit()
+        self.commit_template.setPlaceholderText(gitops.DEFAULT_COMMIT_TEMPLATE)
+        self.commit_template.setAccessibleName("커밋 메시지 템플릿")
+        l_tpl.setBuddy(self.commit_template)
+        tpl_hint = QLabel("변수: {num} {title} {topic} {date} — 비우면 기본값. 입력 후 Enter 또는 포커스 이동으로 저장")
+        set_class(tpl_hint, "hint")
+        tpl_hint.setWordWrap(True)
+        self.auto_push = QCheckBox("검증 통과 시 자동으로 커밋 + 푸시 (확인 없음)")
+        auto_hint = QLabel("기본 꺼짐. 켜면 통과한 풀이가 확인 없이 원격에 올라갑니다 — 미완성 코드도 올라갈 수 있습니다")
+        set_class(auto_hint, "hint")
+        auto_hint.setWordWrap(True)
+        g5.addWidget(l_repo, 0, 0)
+        g5.addWidget(self.git_status, 0, 1)
+        g5.addWidget(l_tpl, 1, 0)
+        g5.addWidget(self.commit_template, 1, 1)
+        g5.addWidget(tpl_hint, 2, 1)
+        g5.addWidget(self.auto_push, 3, 1)
+        g5.addWidget(auto_hint, 4, 1)
+        g5.setColumnStretch(1, 1)
+        root.addWidget(card5)
+
         # --- 진단·업데이트 (M6 §3·§4)
         sec4 = QLabel("진단·업데이트")
         set_class(sec4, "section")
@@ -229,6 +271,8 @@ class SettingsPage(QWidget):
         self.logout_all_btn.clicked.connect(lambda: self._logout(True))
         self.doctor_btn.clicked.connect(self.copy_doctor)
         self.update_check.toggled.connect(lambda on: update.set_disabled(self.config_dir, not on))
+        self.commit_template.editingFinished.connect(self._save_template)
+        self.auto_push.clicked.connect(self._auto_push_clicked)
         for w, err in ((self.root_edit, self.root_err), (self.id_edit, self.id_err), (self.pw_edit, self.pw_err)):
             w.textEdited.connect(lambda _t, w=w, err=err: (set_invalid(w, False), err.hide()))
 
@@ -248,6 +292,89 @@ class SettingsPage(QWidget):
         self.root_edit.setText(str(settings.root) if settings else fallback)
         self.id_edit.setText(settings.user_id if settings else (values.get("SWEA_ID") or ""))
         self.pw_edit.clear()
+        # GitHub 연동 (M7)
+        tpl = settings.commit_template if settings else (values.get("SWEA_COMMIT_TEMPLATE") or "")
+        self.commit_template.setText("" if tpl == gitops.DEFAULT_COMMIT_TEMPLATE else tpl)
+        self.auto_push.setChecked(bool(settings.auto_push_on_pass) if settings else config._truthy(values.get("SWEA_AUTO_PUSH")))
+        self._git_root = settings.root if settings else None
+        self._git_status_stale = True
+        if self.isVisible():
+            self.refresh_git_status(self._git_root)
+        else:
+            self.git_status.setText("확인 중…" if self._git_root else "루트 폴더를 먼저 저장하세요")
+
+    def showEvent(self, e) -> None:  # noqa: N802
+        """저장소 상태는 페이지가 보일 때만 읽는다 (git 호출 수 절약, 테스트에서 불필요한 워커 방지)."""
+        super().showEvent(e)
+        if getattr(self, "_git_status_stale", False):
+            self.refresh_git_status(getattr(self, "_git_root", None))
+
+    def wait_workers(self, ms: int = 5000) -> None:
+        """창 닫힐 때 워커가 살아 있으면 기다린다 (QThread 가 실행 중 파괴되면 abort)."""
+        for w in (self._git_worker, self._doctor_worker, self._worker):
+            if w is not None and w.isRunning():
+                w.wait(ms)
+
+    README_GIT_URL = "https://github.com/yoon7270/swea_fetcher#github-연동"
+
+    def refresh_git_status(self, root: Path | None) -> None:
+        """루트의 저장소 상태를 워커에서 읽어 표시 (git 호출 여러 번이라 UI 스레드에서 하지 않는다)."""
+        if root is None:
+            self.git_status.setText("루트 폴더를 먼저 저장하세요")
+            return
+        if self._git_worker is not None:
+            return
+        self._git_status_stale = False
+        self.git_status.setText("확인 중…")
+        self._git_worker = FuncWorker(lambda: (gitops.git_version(), gitops.find_repo(root)), self)
+        self._git_worker.finished_ok.connect(self._show_git_status)
+        self._git_worker.failed.connect(lambda t, h, d: self.git_status.setText(f"확인 실패: {t}"))
+        self._git_worker.finished.connect(self._git_status_cleanup)
+        self._git_worker.start()
+
+    def _git_status_cleanup(self) -> None:
+        self._git_worker = None
+
+    def _show_git_status(self, info) -> None:
+        version, repo = info
+        link = f'<a href="{self.README_GIT_URL}">README \'GitHub 연동\'</a>'
+        if version is None:
+            self.git_status.setText(f"git 이 설치되어 있지 않습니다 — 커밋+푸시를 쓰려면 Git for Windows 설치 ({link})")
+            return
+        if repo is None:
+            self.git_status.setText(f"저장소 아님 — 루트 폴더에서 git init 과 원격 설정이 필요합니다 ({link})")
+            return
+        branch = repo.branch or "(detached HEAD)"
+        target = f" → {repo.upstream}" if repo.upstream else (" (upstream 없음 — 첫 푸시 때 설정)" if repo.remote else " (원격 없음)")
+        self.git_status.setText(f"{repo.toplevel}<br>{branch}{target}")
+        self.git_status.setToolTip(repo.remote or "")
+
+    def _save_template(self) -> None:
+        tpl = self.commit_template.text().strip()
+        current = self.settings.commit_template if self.settings else gitops.DEFAULT_COMMIT_TEMPLATE
+        if (tpl or gitops.DEFAULT_COMMIT_TEMPLATE) == current:
+            return
+        service.set_env_values(self.config_dir, SWEA_COMMIT_TEMPLATE=tpl or None)
+        self.status_message.emit("커밋 메시지 템플릿을 저장했습니다")
+        self.settings_changed.emit()
+
+    def _auto_push_clicked(self, on: bool) -> None:
+        """켤 때 경고 1회 (사용자 클릭에만 반응 — setChecked 로는 안 뜸)."""
+        if on:
+            box = QMessageBox(QMessageBox.Icon.Warning, "자동 커밋 + 푸시",
+                              "샘플 통과가 정답을 뜻하진 않습니다.\n미완성 코드가 공개 저장소에 올라갈 수 있습니다.\n\n검증이 통과할 때마다 확인 없이 커밋하고 푸시합니다. 켤까요?",
+                              parent=self)
+            ok = box.addButton("켜기", QMessageBox.ButtonRole.AcceptRole)
+            cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(cancel)
+            box.setEscapeButton(cancel)
+            box.exec()
+            if box.clickedButton() is not ok:
+                self.auto_push.setChecked(False)
+                return
+        service.set_env_values(self.config_dir, SWEA_AUTO_PUSH="1" if on else "0")
+        self.status_message.emit("검증 통과 시 자동 커밋+푸시를 " + ("켰습니다" if on else "껐습니다"))
+        self.settings_changed.emit()
 
     def show_first_run(self) -> None:
         self.banner.show_message("info", "처음 실행 — 계정 설정이 필요합니다",
