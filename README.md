@@ -34,7 +34,7 @@ python packaging\make_ico.py                                   # design\iconspp
 pyinstaller packaging\swea-fetch-gui.spec --noconfirm           # → dist\swea-fetch-gui.exe (약 55 MB)
 ```
 
-`dist\swea-fetch-gui.exe` 를 바탕화면에 바로 가기로 두면 됩니다. CLI 와 같은 설정·자격 증명을 사용하고 Python 설치가 없어도 실행됩니다. exe 는 저장소에 커밋하지 않습니다.
+`dist\swea-fetch-gui.exe` 를 바탕화면에 바로 가기로 두면 됩니다 (PowerShell 한 줄: `$s=(New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\SWEA Fetch.lnk"); $s.TargetPath="$PWD\dist\swea-fetch-gui.exe"; $s.IconLocation="$PWD\design\icons\app.ico,0"; $s.Save()`). CLI 와 같은 설정·자격 증명을 사용하고 Python 설치가 없어도 실행됩니다. exe 는 저장소에 커밋하지 않습니다.
 
 - **백신 오탐**: 공용 PC 백신이 PyInstaller onefile 을 차단하면 `packaging\swea-fetch-gui.spec` 의 `ONEFILE = False` 로 바꿔 폴더형(`dist\swea-fetch-gui\`)으로 빌드하거나, venv 의 `swea-fetch-gui` 명령으로 실행하세요.
 - 빌드 검증: `set SWEA_FETCH_SELFTEST=%TEMP%\swea_selftest.txt && dist\swea-fetch-gui.exe` → 창 없이 진단 결과(아이콘·자격 증명 백엔드·설정 로드)를 파일에 쓰고 종료.
