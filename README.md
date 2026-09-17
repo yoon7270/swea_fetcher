@@ -8,9 +8,11 @@ SWEA(SW Expert Academy) **문제 번호 하나**로 샘플 입력·출력과 풀
 - 문제 번호(예: `25730`) + 주제 폴더 → `swea\{주제}\{번호}\` 에 `input.txt`, `output.txt`, `{번호}.py` 뼈대 생성
 - `{번호}.py` 를 `input.txt` 로 실행해 `output.txt` 와 줄 단위로 비교 (검증)
 - 로그인·세션·문제 찾기를 알아서 처리. 비밀번호는 Windows 자격 증명 관리자에만 저장
+- 검증이 끝나면 버튼 하나로 그 문제 폴더만 **git 커밋 + 푸시** (루트가 git 저장소일 때, 옵트인)
 
 **하지 않는 일**
 - 코드 제출 (SWEA 사이트에서 직접)
+- 루트 폴더를 git 저장소로 만들어 주거나 GitHub 인증을 대신하기 (한 번은 직접 → [GitHub 연동](#github-연동))
 - Python 외 언어의 뼈대·실행
 - Contest 진행 중인 문제, 가입하지 않은 Solving Club 의 문제를 번호로 찾기 (→ [번호로 못 찾는 문제](#번호로-못-찾는-문제))
 
@@ -183,15 +185,17 @@ swea-fetch check IM_test 25730
 
 실패하면 종료 코드 6. 제한 시간은 `--timeout 30`.
 
+실행이 끝나면 오른쪽 위에 **[커밋 + 푸시]** 가 나타납니다 → [GitHub 연동](#github-연동).
+
 ### 최근
 
-저장한 문제를 최근 순으로. 더블클릭 → 검증, 우클릭 → 폴더 열기.
+저장한 문제를 최근 순으로. 더블클릭 → 검증, 우클릭 → 폴더 열기 / 커밋 + 푸시.
 
 ![최근](docs/gui-screenshots/5-history.png)
 
 ### 설정
 
-루트·ID·비밀번호, 검증 타임아웃, **[진단 정보 복사]**, 새 버전 알림, 세션/계정 삭제.
+루트·ID·비밀번호, 검증 타임아웃, GitHub 연동(커밋 메시지·자동 푸시), **[진단 정보 복사]**, 새 버전 알림, 세션/계정 삭제.
 
 ![설정](docs/gui-screenshots/6-settings-doctor.png)
 
@@ -211,6 +215,62 @@ Contest 진행 중인 문제나 **가입하지 않은** Solving Club 의 문제�
 
 ---
 
+## GitHub 연동
+
+검증이 끝난 문제 폴더(`{주제}/{번호}/`)**만** 커밋하고 푸시합니다. 도구는 git 명령을 대신 실행할 뿐입니다 — 토큰을 저장하거나 묻지 않고, force push 와 pull 도 하지 않습니다.
+
+**전제 (한 번만)**
+1. 루트 폴더가 git 저장소이고 `origin` 이 있어야 합니다. 도구는 저장소를 만들어 주지 않습니다.
+2. GitHub 인증은 [Git for Windows](https://git-scm.com/download/win) 에 포함된 **Git Credential Manager** 가 맡습니다. 첫 푸시 때 브라우저 로그인 창이 한 번 뜹니다.
+
+처음 설정하는 사람 (GitHub 에서 빈 저장소를 먼저 만든 뒤, 루트 폴더에서):
+
+```powershell
+git init -b main
+```
+
+```powershell
+git remote add origin https://github.com/<계정>/<저장소>.git
+```
+
+```powershell
+git add . ; git commit -m "init"
+```
+
+```powershell
+git push -u origin main
+```
+
+이미 저장소로 쓰고 있다면 아무것도 할 게 없습니다. 설정 페이지 **GitHub 연동** 에 `main → origin/main` 처럼 보이면 준비 끝.
+
+**버튼 (기본)** — 검증 페이지에서 실행이 끝나면 **[커밋 + 푸시]** 가 나타납니다 (통과면 파란 버튼, 실패해도 누를 수 있음). 매번 확인 창에서 커밋 메시지를 고치고 [커밋만] / [커밋 + 푸시] 를 고릅니다.
+
+![커밋 + 푸시 확인](docs/gui-screenshots/8b-push-dialog.png)
+
+![푸시됨](docs/gui-screenshots/8c-check-pushed.png)
+
+**자동 모드 (옵트인)** — 설정 페이지 **"검증 통과 시 자동으로 커밋 + 푸시"** 를 켜면 통과할 때마다 확인 없이 올라갑니다. 켤 때 경고가 한 번 뜹니다: *샘플 통과가 정답을 뜻하진 않습니다. 미완성 코드가 공개 저장소에 올라갈 수 있습니다.* 잘못 올렸으면 [되돌리기](docs/troubleshooting.md#자동-푸시를-되돌리려면).
+
+![GitHub 연동 설정](docs/gui-screenshots/9-settings-github.png)
+
+커밋 메시지 템플릿은 기본 `solve: {num}. {title} ({topic})` — 변수 `{num}` `{title}` `{topic}` `{date}`.
+
+CLI:
+
+```powershell
+swea-fetch check IM_test 25730 --push
+```
+
+```powershell
+swea-fetch push IM_test 25730 -m "solve: 25730"
+```
+
+`check --push` 는 **통과했을 때만** 푸시합니다. `push --no-push` 는 커밋만. 실패는 종료 코드 7 → [문제 해결](docs/troubleshooting.md#git-커밋--푸시-종료-코드-7).
+
+**공용 PC 주의** — Git Credential Manager 의 GitHub 로그인은 Windows 자격 증명 관리자에 남습니다 (`git:https://github.com` 항목). 자리를 떠날 때 `swea-fetch logout --all` 과 함께 그 항목도 지우세요 → [보안과 계정](#보안과-계정).
+
+---
+
 ## 보안과 계정
 
 - 비밀번호는 **Windows 자격 증명 관리자**(제어판 → 자격 증명 관리자 → Windows 자격 증명 → `swea-fetch`)에만 저장됩니다. `%USERPROFILE%\.swea-fetch\.env` 에는 루트 경로와 ID 만 있고, 프로젝트 폴더 밖이라 git 에 올라가지 않습니다.
@@ -222,6 +282,7 @@ swea-fetch logout --all
 
 - SWEA 는 **로그인 5회 연속 실패 시 계정을 잠급니다.** 도구는 한 실행에 1회, 누적 3회에서 스스로 멈추고 안내합니다. 잠금 후에는 브라우저에서 로그인이 되는지 확인하고 설정 페이지 [세션 삭제] (또는 `login_state.json` 삭제) 후 다시 시도하세요.
 - 로그인 세션은 `session.json` 에 캐시되어 매번 로그인하지 않습니다. `swea-fetch logout` (옵션 없이) 은 세션만 지웁니다.
+- **공용 PC 자리 반납 체크리스트**: ① `swea-fetch logout --all` ② 풀이 저장소 `git status` 로 미푸시 커밋 없는지 확인 후 푸시 ③ 자격 증명 관리자 → Windows 자격 증명에서 `git:https://github.com` 항목 삭제 (GitHub 연동을 썼다면) ④ 브라우저에 저장된 SWEA/GitHub 로그인 삭제. 로컬 폴더는 원격에 있으니 지워도 됩니다.
 
 ---
 

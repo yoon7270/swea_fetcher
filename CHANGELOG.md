@@ -2,6 +2,18 @@
 
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/). 버전은 `swea_fetcher/__init__.py` 의 `__version__` 하나로 관리한다.
 
+## v0.5.0 — 2026-09-17 "검증 후 커밋 + 푸시"
+
+### 추가
+- **[커밋 + 푸시]** (검증 페이지, 최근 페이지 우클릭): 검증이 끝난 **문제 폴더만** `git add`/`commit`/`push`. 매번 확인 창(메시지 편집, [커밋만]/[커밋 + 푸시]). 도구는 자격증명을 다루지 않고(Git Credential Manager), force push·pull 도 하지 않는다
+- **자동 모드 (옵트인)**: 설정 "검증 통과 시 자동으로 커밋 + 푸시" — 기본 꺼짐, 켤 때 경고 1회, 결과 카드에 되돌리기 안내
+- CLI `swea-fetch push <topic> <num> [-m] [--no-push]`, `swea-fetch check … --push` (통과 시에만). 종료 코드 7 = git 실패
+- 설정 "GitHub 연동": 저장소 상태(브랜치 → 원격), 커밋 메시지 템플릿 `SWEA_COMMIT_TEMPLATE` (변수 `{num} {title} {topic} {date}`)
+- `doctor` 에 `git:` 줄 (버전, 저장소, 브랜치 → upstream)
+
+### 변경
+- 설정 저장 시 `.env` 의 다른 키(`SWEA_PYTHON` 등)를 더 이상 지우지 않는다
+
 ## v0.4.0 — 2026-09-17 "배포판"
 
 ### 추가

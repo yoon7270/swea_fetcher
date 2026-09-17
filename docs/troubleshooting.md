@@ -12,15 +12,16 @@ swea-fetch doctor
 출력 예:
 
 ```
-swea-fetch 0.4.0  (exe)
+swea-fetch 0.5.0  (exe)
 Python: 3.12.4  C:\Users\you\AppData\Local\Programs\Python\Python312\python.exe  (출처: PATH)
 OS: Windows 11 10.0.26200
 설정 폴더: C:\Users\you\.swea-fetch  (.env 있음 / session.json 있음 / login_state 실패 0회 / problem_index 12건)
 루트: C:\Users\you\Desktop\swea  (존재함, 주제 폴더 7개)
 설정: 정상 (비밀번호 출처: keyring)
+git: 2.45.1 / 저장소: C:\Users\you\Desktop\swea (main → origin/main)
 로그인 상태: 세션 유효
 keyring: 항목 있음
-최신 버전: 0.4.0 (현재와 같음)
+최신 버전: 0.5.0 (현재와 같음)
 ```
 
 ## 자주 나오는 오류
@@ -52,8 +53,40 @@ keyring: 항목 있음
 | 4 | 첨부 없음 (`AttachmentNotFound`) |
 | 5 | 네트워크 (`NetworkError`) |
 | 6 | 검증 실패 (`swea-fetch check` 에서 출력이 다름) |
+| 7 | git 커밋/푸시 실패 (`GitError`) → [아래](#git-커밋--푸시-종료-코드-7) |
 | 10 | 내부 오류 |
 | 130 | Ctrl+C |
+
+## git 커밋 + 푸시 (종료 코드 7)
+
+도구는 문제 폴더만 `git add`/`commit` 하고 `git push` 합니다. force push·pull 은 하지 않으므로 아래 상황은 **사용자가 git 으로 해결**한 뒤 다시 누르면 됩니다. 실패 시 GUI 는 "git" 탭에, CLI 는 오류 아래 `→` 줄에 git 출력을 보여 줍니다.
+
+| 메시지 | 원인 | 조치 |
+|---|---|---|
+| `루트 폴더가 git 저장소가 아닙니다` | 루트에서 `git init` 을 한 적 없음 | [README 'GitHub 연동'](../README.md#github-연동) 의 4줄. 도구는 저장소를 만들어 주지 않습니다 |
+| `원격 저장소(origin)가 없습니다` | `git remote add origin …` 을 안 함 | 루트에서 `git remote add origin https://github.com/<계정>/<저장소>.git` → 첫 푸시는 `git push -u origin main` |
+| `GitHub 인증 실패 — 브라우저 로그인 창이 뜨지 않았다면 …` | Git Credential Manager 가 없거나 자격증명이 만료 | 루트에서 직접 `git push` 를 한 번 실행해 로그인 창을 띄우세요. Git for Windows 를 다시 설치하면 GCM 이 포함됩니다 |
+| `원격에 새 커밋이 있습니다. git pull 후 다시 시도` | non-fast-forward (다른 PC 에서 먼저 푸시) | 루트에서 `git pull` (충돌이 나면 해결 후 `git add` + `git commit`) → 다시 [커밋 + 푸시] |
+| `병합(merge)/리베이스(rebase) 진행 중입니다` | 끝내지 않은 merge/rebase | `git status` 로 확인 → 끝내거나 `git merge --abort` / `git rebase --abort` |
+| `브랜치가 아닌 상태(detached HEAD)` | 특정 커밋을 checkout 한 상태 | `git switch main` |
+| `git 사용자 이름/이메일이 없습니다` | 첫 커밋 전 설정 누락 | `git config --global user.name "이름"` / `git config --global user.email "메일"` |
+| `풀이 파일이 없습니다` | `{번호}.py` 가 없음 | 저장 페이지에서 먼저 받거나 파일 이름 확인 |
+| `푸시 시간 초과(30초)` | 인증 창이 뒤에 숨어 있거나 네트워크 | 작업 표시줄의 로그인 창 확인 → 없으면 네트워크 확인 |
+| `이 저장소에 푸시 권한이 없습니다` | 다른 계정으로 로그인됨 / 협업자 아님 | 자격 증명 관리자에서 `git:https://github.com` 항목을 지우고 다시 푸시해 올바른 계정으로 로그인 |
+
+### 자동 푸시를 되돌리려면
+
+"검증 통과 시 자동으로 커밋 + 푸시" 로 올라간 커밋을 취소하려면 (도구는 revert 를 실행하지 않습니다):
+
+```powershell
+git revert HEAD --no-edit
+```
+
+```powershell
+git push
+```
+
+이미 공개 저장소에 올라간 내용은 revert 해도 히스토리에 남습니다. 자동 모드는 설정 페이지에서 언제든 끌 수 있습니다.
 
 ## 백신이 exe 를 차단할 때
 
@@ -101,5 +134,7 @@ py -3 -c "import sys; print(sys.executable)"
 | `login_state.json` | 연속 로그인 실패 횟수 | 잠금 해제용으로 지움 |
 | `problem_index.json` | 문제 번호 → ID 색인 캐시 | 지우면 다시 찾음 (조금 느려짐) |
 | `update_check.json` | 새 버전 확인 시각·결과·알림 끔 여부 | 지워도 됨 |
+
+`.env` 의 git 관련 키 (설정 페이지에서도 바꿀 수 있음): `SWEA_COMMIT_TEMPLATE` (커밋 메시지 템플릿), `SWEA_AUTO_PUSH=1` (검증 통과 시 자동 커밋+푸시, 기본 0).
 
 비밀번호는 여기 없고 **Windows 자격 증명 관리자** (제어판 → 자격 증명 관리자 → Windows 자격 증명 → `swea-fetch`) 에 있습니다.
