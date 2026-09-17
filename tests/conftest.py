@@ -214,6 +214,10 @@ class FakeResponse:
 
         return _json.loads(self.text)
 
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"HTTP {self.status_code}", response=self)  # type: ignore[arg-type]
+
 
 def login_redirect() -> FakeResponse:
     return FakeResponse(

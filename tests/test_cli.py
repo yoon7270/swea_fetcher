@@ -698,3 +698,211 @@ def test_submit_auto_push_setting_off_with_push_flag(submit_stub, monkeypatch):
     _answer(monkeypatch, "y")
     assert cli.main(["submit", "sim", "1234", "--push"]) == 0
     assert submit_stub["seen"]["calls"][0]["push"] is True
+
+
+# =============================================================================
+# M10: doctor
+# =============================================================================
+
+import json as _json  # noqa: E402
+
+from swea_fetcher import doctor, lookup, update  # noqa: E402
+from swea_fetcher.errors import NetworkError  # noqa: E402
+from swea_fetcher.gitops import RepoInfo  # noqa: E402
+
+
+def _rows(config_dir, offline=True) -> dict[str, str]:
+    return dict(doctor.collect(config_dir, offline=offline))
+
+
+@pytest.fixture
+def no_http_probe(monkeypatch):
+    """온라인 항목이 실제 조회를 시도하면 기록 (HTTP 0 확인용)."""
+    calls = {"update": 0, "login": 0}
+
+    def upd(config_dir, **kw):
+        calls["update"] += 1
+        return None
+
+    def logged_in(session):
+        calls["login"] += 1
+        return True
+
+    monkeypatch.setattr(doctor.update, "check", upd)
+    monkeypatch.setattr(doctor.auth, "is_logged_in", logged_in)
+    return calls
+
+
+def test_doctor_offline_rows_and_no_http(cfg, no_http_probe):
+    rows = doctor.collect(cfg, offline=True)
+    keys = [k for k, _ in rows]
+    assert keys == ["swea-fetch", "Python", "OS", "설정 폴더", "루트", "설정", "git", "keyring"]
+    assert no_http_probe == {"update": 0, "login": 0}
+    d = dict(rows)
+    assert d["swea-fetch"].startswith(f"{doctor.__version__}  (source)")
+    assert d["설정"] == "정상 (비밀번호 출처: keyring)"
+    assert d["keyring"] == "항목 있음"
+
+
+def test_doctor_online_adds_login_and_latest(cfg, no_http_probe):
+    (cfg / "session.json").write_text(_json.dumps({"SESSION": "tok"}), encoding="utf-8")
+    keys = [k for k, _ in doctor.collect(cfg, offline=False)]
+    assert "로그인 상태" in keys and "최신 버전" in keys
+    assert keys.index("로그인 상태") == keys.index("git") + 1 and keys[-1] == "최신 버전"
+    assert no_http_probe == {"update": 1, "login": 1}
+
+
+def test_doctor_login_row_states(cfg, monkeypatch):
+    settings = config.load_settings(cfg)
+    assert doctor._login_row(None) == "확인 불가 (설정 없음)"
+    assert doctor._login_row(settings) == "세션 없음"
+    (cfg / "session.json").write_text(_json.dumps({"SESSION": "tok"}), encoding="utf-8")
+    monkeypatch.setattr(doctor.auth, "is_logged_in", lambda s: True)
+    assert doctor._login_row(settings) == "세션 유효"
+    monkeypatch.setattr(doctor.auth, "is_logged_in", lambda s: False)
+    assert "만료" in doctor._login_row(settings)
+
+    def boom(s):
+        raise NetworkError("x")
+
+    monkeypatch.setattr(doctor.auth, "is_logged_in", boom)
+    assert "네트워크" in doctor._login_row(settings)
+
+
+def test_doctor_latest_row_states(cfg, monkeypatch):
+    monkeypatch.setattr(doctor.update, "check", lambda d, **kw: None)
+    assert doctor._latest_row(cfg).startswith("확인 실패")
+    monkeypatch.setattr(doctor.update, "check", lambda d, **kw: update.UpdateInfo("0.1.0", "9.9.9", "u"))
+    assert doctor._latest_row(cfg) == "9.9.9 있음 → u"
+    monkeypatch.setattr(doctor.update, "check", lambda d, **kw: update.UpdateInfo("9.9.9", "9.9.9", "u"))
+    assert doctor._latest_row(cfg) == "9.9.9 (현재와 같음)"
+    update.set_disabled(cfg, True)
+    assert doctor._latest_row(cfg).endswith("[알림 꺼짐]")
+
+
+def test_doctor_latest_row_forces_check(cfg, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(doctor.update, "check", lambda d, **kw: seen.update(kw) or None)
+    doctor._latest_row(cfg)
+    assert seen.get("force") is True
+
+
+def test_doctor_settings_row_incomplete_hides_details(config_dir, no_http_probe):
+    d = _rows(config_dir)
+    assert d["설정"].startswith("불완전 — 설정이 없습니다")
+    assert "swea-fetch init" not in d["설정"]
+    assert d["keyring"] == "확인 불가 (SWEA_ID 없음)"
+    assert d["루트"] == "(설정 없음)"
+
+
+def test_doctor_settings_row_password_missing_does_not_leak_id(root_dir, config_dir, fake_keyring, no_http_probe):
+    service.write_env(config_dir, root_dir, DUMMY_ID)  # keyring 비어 있음
+    d = _rows(config_dir)
+    assert d["설정"].startswith("불완전")
+    assert DUMMY_ID not in d["설정"]
+    assert d["keyring"] == "항목 없음"
+
+
+def test_doctor_keyring_row_failure(cfg, fake_keyring, no_http_probe):
+    fake_keyring.fail = fake_keyring.errors.KeyringError("locked")
+    assert _rows(cfg)["keyring"].startswith("확인 실패")
+
+
+def test_doctor_config_row_counts(cfg, no_http_probe):
+    (cfg / "session.json").write_text("{}")
+    auth._write_failures(cfg / config.LOGIN_STATE_FILE_NAME, 2)
+    lookup.save_index(config.load_settings(cfg), {"1": {"id": "x"}, "2": {"id": "y"}})
+    row = _rows(cfg)["설정 폴더"]
+    assert str(cfg) in row
+    assert ".env 있음" in row and "session.json 있음" in row and "실패 2회" in row and "problem_index 2건" in row
+
+
+def test_doctor_config_row_absent(config_dir, no_http_probe):
+    row = _rows(config_dir)["설정 폴더"]
+    assert ".env 없음" in row and "session.json 없음" in row and "실패 0회" in row and "problem_index 없음" in row
+
+
+def test_doctor_root_row(cfg, root_dir, no_http_probe):
+    (root_dir / "BFS").mkdir()
+    (root_dir / "DP").mkdir()
+    assert _rows(cfg)["루트"] == f"{root_dir}  (존재함, 주제 폴더 2개)"
+    service.write_env(cfg, root_dir / "gone", DUMMY_ID)
+    assert _rows(cfg)["루트"].endswith("(폴더 없음)")
+
+
+def test_doctor_git_row_no_git(cfg, monkeypatch, no_http_probe):
+    monkeypatch.setattr(doctor.gitops, "git_version", lambda: None)
+    assert _rows(cfg)["git"].startswith("없음")
+
+
+def test_doctor_git_row_not_a_repo(cfg, monkeypatch, no_http_probe):
+    monkeypatch.setattr(doctor.gitops, "git_version", lambda: (2, 45, 0))
+    monkeypatch.setattr(doctor.gitops, "find_repo", lambda root, problem_dir=None: None)
+    assert _rows(cfg)["git"] == "2.45.0 / 저장소 아님"
+
+
+def test_doctor_git_row_repo_and_old_version_warning(cfg, root_dir, monkeypatch, no_http_probe):
+    monkeypatch.setattr(doctor.gitops, "git_version", lambda: (2, 20, 1))
+    repo = RepoInfo(root_dir.resolve(), "main", "https://github.com/u/r.git", "origin/main", False, root_dir / ".git")
+    monkeypatch.setattr(doctor.gitops, "find_repo", lambda root, problem_dir=None: repo)
+    row = _rows(cfg)["git"]
+    assert row.startswith("2.20.1  [경고: 2.30 이상 권장] / 저장소: ")
+    assert "(main → origin/main)" in row
+    repo2 = RepoInfo(root_dir.resolve(), "", "https://x", None, False, root_dir / ".git")
+    monkeypatch.setattr(doctor.gitops, "find_repo", lambda root, problem_dir=None: repo2)
+    assert "(detached HEAD) (upstream 없음)" in _rows(cfg)["git"]
+    repo3 = RepoInfo(root_dir.resolve(), "main", None, None, False, root_dir / ".git")
+    monkeypatch.setattr(doctor.gitops, "find_repo", lambda root, problem_dir=None: repo3)
+    assert "(main (origin 없음))" in _rows(cfg)["git"]
+
+
+def test_doctor_git_row_without_root(config_dir, monkeypatch, no_http_probe):
+    monkeypatch.setattr(doctor.gitops, "git_version", lambda: (2, 45, 0))
+    assert _rows(config_dir)["git"] == "2.45.0 / 저장소: (루트 설정 없음)"
+
+
+def test_doctor_python_row_sources(cfg, monkeypatch, no_http_probe):
+    settings = config.load_settings(cfg)
+    row = doctor._python_row(settings)
+    assert "(출처: 실행 중인 인터프리터)" in row and str(Path(cli.sys.executable)) in row
+
+    def nf(s):
+        raise doctor.checker.PythonNotFound("x")
+
+    monkeypatch.setattr(doctor.checker, "resolve_python", nf)
+    assert doctor._python_row(settings).startswith("찾지 못함")
+
+
+def test_doctor_row_failure_is_isolated(cfg, monkeypatch, no_http_probe):
+    def boom(*a):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(doctor, "_git_row", boom)
+    d = _rows(cfg)
+    assert d["git"] == "확인 실패 (RuntimeError: kaboom)"
+    assert d["설정"] == "정상 (비밀번호 출처: keyring)"  # 나머지는 채워짐
+
+
+def test_doctor_report_format_and_no_secrets(cfg, fake_keyring, no_http_probe, monkeypatch):
+    (cfg / "session.json").write_text(_json.dumps({"SESSION": "supersecretcookie"}), encoding="utf-8")
+    monkeypatch.setenv("SWEA_PW", DUMMY_PW)
+    text = doctor.report(cfg, offline=False)
+    lines = text.splitlines()
+    assert lines[0].startswith(f"swea-fetch {doctor.__version__}")
+    assert all(": " in ln for ln in lines[1:])
+    for secret in (DUMMY_PW, "supersecretcookie", "SESSION=", DUMMY_ID):
+        assert secret not in text, secret
+
+
+def test_doctor_cli_offline_prints_report(cfg, capsys, no_http_probe):
+    assert cli.main(["doctor", "--offline"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("swea-fetch ") and "로그인 상태" not in out and "최신 버전" not in out
+    assert no_http_probe == {"update": 0, "login": 0}
+
+
+def test_doctor_cli_online_uses_default_config_dir(cfg, capsys, no_http_probe):
+    assert cli.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "로그인 상태: 세션 없음" in out and "최신 버전: 확인 실패" in out
+    assert no_http_probe["update"] == 1
