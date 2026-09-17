@@ -262,6 +262,18 @@ def fake_session() -> FakeSession:
 
 
 @pytest.fixture(autouse=True)
+def _no_network(monkeypatch: pytest.MonkeyPatch):
+    """테스트가 실서버(SWEA/GitHub)에 닿지 않도록 requests 의 실제 전송과 업데이트 조회를 막는다."""
+    from swea_fetcher import update
+
+    def blocked(*_a, **_k):
+        raise RuntimeError("테스트에서는 네트워크를 쓰지 않습니다")
+
+    monkeypatch.setattr(update, "fetch_latest", blocked)
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", blocked)
+
+
+@pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch: pytest.MonkeyPatch):
     """client 의 재시도 대기를 없앤다."""
     from swea_fetcher import client

@@ -1,0 +1,27 @@
+{
+ "result": "success",
+ "vo": {
+  "cmpError": "",
+  "cmpValue": "",
+  "exitValue": "0",
+  "runValue": "Fail ",
+  "userResult": "",
+  "runError": "Traceback (most recent call last):<br>&nbsp;&nbsp;File \"Main.py\", line 4<br>ZeroDivisionError: division by zero",
+  "timeOut": "",
+  "executionTime": "",
+  "exitCode": "0",
+  "existCharTC": "",
+  "usrScore": "0.00",
+  "computeScore": "",
+  "probScore": 100,
+  "testCaseNo": 10,
+  "correctedCases": "0",
+  "maxOutputSize": 0,
+  "gradingResult": null,
+  "cutOutput": false
+ },
+ "submitFailed": "",
+ "compileTime": "",
+ "testInput": "",
+ "compile": ""
+}

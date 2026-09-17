@@ -266,3 +266,108 @@ def test_find_by_number_session_still_expired(settings, monkeypatch):
     s = FakeSession([login_redirect(), login_redirect()])
     with pytest.raises(LoginFailed):
         lookup.find_by_number(s, settings, 4014)
+
+
+# =============================================================================
+# M8/M9: find_category — 제출 맥락 (BOX 우선, box_scanned 캐시)
+# =============================================================================
+
+BOX_ID = "AZ-xsmtqr73HBIS2"
+
+
+def _club_scan_responses(box_rows, clubs=(("C1", "SSAFY"),), boxes=(("B1", "Queue(09.09)"),)):
+    """myClubList → problemBoxList → problemBoxDetail 순 응답."""
+    out = [api_ok({"myClubList": [{"solveclubId": c, "title": t} for c, t in clubs]})]
+    for _ in clubs:
+        out.append(api_ok({"problemBoxList": [{"probBoxId": b, "title": t} for b, t in boxes], "endPage": 1}))
+        for _ in boxes:
+            out.append(FakeResponse(200, text=caption_box(*box_rows)))
+    return out
+
+
+def test_find_category_box_from_index_makes_no_request(settings):
+    lookup.save_index(settings, {"1225": {"id": ID, "title": "t", "club": "SSAFY", "box": "Queue(09.09)", "club_id": "C1", "box_id": BOX_ID}})
+    s = FakeSession()
+    cid, cat_type, cat_id, label = lookup.find_category(s, settings, 1225)
+    assert (cid, cat_type, cat_id) == (ID, lookup.CATEGORY_BOX, BOX_ID)
+    assert "Queue(09.09)" in label and s.calls == []
+
+
+def test_find_category_box_scanned_entry_returns_code_without_requests(settings):
+    lookup.save_index(settings, {"4014": {"id": ID2, "title": "t", "club": "", "box": "Problem", "box_scanned": True}})
+    s = FakeSession()
+    assert lookup.find_category(s, settings, 4014) == (ID2, lookup.CATEGORY_CODE, ID2, "공개 Problem")
+    assert s.calls == []
+
+
+def test_find_category_old_index_without_box_id_rescans_clubs_and_finds_box(settings):
+    """v0.6.1 이전 색인(box_id 없음)이면 클럽 상자를 다시 훑어 BOX 로 결정하고 색인을 채운다."""
+    lookup.save_index(settings, {"1225": {"id": ID, "title": "t", "club": "SSAFY", "box": "Queue(09.09)"}})
+    s = FakeSession(_club_scan_responses([(1225, ID, "t"), (1226, ID3, "u")], boxes=(("B0", "old box"), (BOX_ID, "Queue(09.09)"))))
+    # B0 에는 없고 BOX_ID 에 있음
+    s.responses[2] = FakeResponse(200, text=caption_box((9, ID3, "x")))
+    cid, cat_type, cat_id, label = lookup.find_category(s, settings, 1225)
+    assert (cid, cat_type, cat_id) == (ID, lookup.CATEGORY_BOX, BOX_ID)
+    idx = lookup.load_index(settings)
+    assert idx["1225"]["box_id"] == BOX_ID and idx["1225"]["club_id"] == "C1"
+    assert idx["1226"]["box_id"] == BOX_ID  # 훑은 상자의 다른 문제도 채움
+    assert "box_scanned" not in idx["1225"]
+    # 두 번째 호출은 색인만으로 (HTTP 0)
+    s2 = FakeSession()
+    assert lookup.find_category(s2, settings, 1225)[1] == lookup.CATEGORY_BOX and s2.calls == []
+
+
+def test_find_category_public_only_marks_box_scanned(settings):
+    lookup.save_index(settings, {"4014": {"id": ID2, "title": "활주로", "club": "", "box": "Problem"}})
+    s = FakeSession(_club_scan_responses([(1225, ID, "t")]))
+    assert lookup.find_category(s, settings, 4014) == (ID2, lookup.CATEGORY_CODE, ID2, "공개 Problem")
+    entry = lookup.load_index(settings)["4014"]
+    assert entry["box_scanned"] is True and entry["id"] == ID2 and "box_id" not in entry
+    s2 = FakeSession()
+    lookup.find_category(s2, settings, 4014)
+    assert s2.calls == []  # 재스캔 안 함
+
+
+def test_find_category_box_wins_when_number_is_in_both_public_and_box(settings):
+    """공개 목록에서 먼저 찾힌 번호라도 클럽 상자에 같은 번호가 있으면 BOX (제출 이력이 맥락별로 집계됨)."""
+    s = FakeSession(
+        [FakeResponse(200, text=caption_list((1225, ID, "공개 1225")))]  # find_by_number: 공개 목록 hit → box 없음
+        + _club_scan_responses([(1225, ID, "클럽 1225")])  # find_category: 클럽 재스캔 → BOX
+    )
+    cid, cat_type, cat_id, label = lookup.find_category(s, settings, 1225)
+    assert (cid, cat_type, cat_id) == (ID, lookup.CATEGORY_BOX, "B1")
+    assert "클럽 상자" in label
+
+
+def test_find_category_number_unknown_raises_before_scanning(settings):
+    s = FakeSession([FakeResponse(200, text=EMPTY_LIST), FakeResponse(200, text=EMPTY_LIST), api_ok({"myClubList": []})])
+    with pytest.raises(InvalidInput):
+        lookup.find_category(s, settings, 99999)
+
+
+def test_find_category_index_fields_roundtrip(settings):
+    lookup.save_index(settings, {"1": {"id": ID, "title": "t", "club": "c", "box": "b", "club_id": "C1", "box_id": "B1", "box_scanned": False}})
+    e = lookup.load_index(settings)["1"]
+    assert (e["club_id"], e["box_id"], e["box_scanned"]) == ("C1", "B1", False)
+
+
+def test_find_category_relogins_once_during_rescan(settings, monkeypatch):
+    from swea_fetcher import client
+
+    logins: list = []
+    monkeypatch.setattr(client.auth, "login", lambda sess, st: logins.append(1))
+    lookup.save_index(settings, {"1225": {"id": ID, "title": "t", "club": "", "box": ""}})
+    s = FakeSession([login_redirect()] + _club_scan_responses([(1225, ID, "t")]))
+    assert lookup.find_category(s, settings, 1225)[1] == lookup.CATEGORY_BOX
+    assert len(logins) == 1
+
+
+def test_refresh_index_via_find_by_number_fills_box_id(settings):
+    """fetch --refresh-index 경로: find_by_number(refresh=True) 가 상자를 다시 훑어 club_id/box_id 를 채운다."""
+    lookup.save_index(settings, {"1225": {"id": ID, "title": "t", "club": "", "box": "Problem", "box_scanned": True}})
+    s = FakeSession([FakeResponse(200, text=EMPTY_LIST), FakeResponse(200, text=EMPTY_LIST)] + _club_scan_responses([(1225, ID, "t")]))
+    assert lookup.find_by_number(s, settings, 1225, refresh=True) == ID
+    e = lookup.load_index(settings)["1225"]
+    assert e["box_id"] == "B1" and e["club_id"] == "C1"
+    s2 = FakeSession()
+    assert lookup.find_category(s2, settings, 1225)[1] == lookup.CATEGORY_BOX and s2.calls == []

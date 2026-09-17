@@ -420,3 +420,197 @@ def test_logout_nothing_to_remove(config_dir):
 def test_logout_all_without_env_skips_keyring(config_dir, fake_keyring):
     service.logout(config_dir, all_=True)
     assert fake_keyring.calls == []
+
+
+# =============================================================================
+# M8/M9: submit_problem — compile→submit 순서, Pass 일 때만 push, last_submit.json
+# =============================================================================
+
+import json as _json  # noqa: E402
+
+from swea_fetcher import gitops  # noqa: E402
+from swea_fetcher.errors import LoginFailed as _LoginFailed, SessionExpired, SubmitError  # noqa: E402
+from swea_fetcher.gitops import GitResult, RepoInfo  # noqa: E402
+from tests.conftest import FIXTURE_DIR, FakeResponse, login_redirect  # noqa: E402
+
+BOX_ID = "AZ-xsmtqr73HBIS2"
+SOLUTION = "# 1234. A+B\nimport sys\nsys.stdin = open('input.txt', 'r')\nT = int(input())\nprint('#1 3')\n"
+
+
+def _fx(name: str) -> FakeResponse:
+    return FakeResponse(200, json_data=_json.loads((FIXTURE_DIR / f"submit_{name}.json").read_text(encoding="utf-8")))
+
+
+def _solver(cat_id: str = ID, cat_type: str = "CODE") -> FakeResponse:
+    return FakeResponse(200, text=f"<html><body><input name='categoryId' value='{cat_id}'><input name='categoryType' value='{cat_type}'><h3 class='problem_title'>1234. A+B</h3></body></html>")
+
+
+@pytest.fixture
+def submit_env(settings, monkeypatch):
+    """세션·find_category·gitops 스텁. HTTP 는 FakeSession 큐 (get_context → compile → submit 순)."""
+    d = settings.root / "sim" / "1234"
+    d.mkdir(parents=True)
+    (d / "1234.py").write_text(SOLUTION, encoding="utf-8")
+    st = {"session": FakeSession(), "category": (ID, "BOX", BOX_ID, "모의/클럽 상자 · Queue"), "git_calls": [], "problem_dir": d}
+
+    monkeypatch.setattr(service.auth, "get_session", lambda settings: st["session"])
+    monkeypatch.setattr(service.lookup, "find_category", lambda s, settings, num: st["category"])
+
+    repo = RepoInfo(settings.root.resolve(), "main", "https://github.com/u/r.git", "origin/main", False, settings.root / ".git")
+    monkeypatch.setattr(service.gitops, "git_available", lambda: "git")
+    monkeypatch.setattr(service.gitops, "find_repo", lambda root, problem_dir=None: repo)
+    monkeypatch.setattr(service.gitops, "preflight", lambda repo, problem_dir, push=True: [])
+
+    def commit_and_push(repo, problem_dir, message, *, push=True, timeout=None):
+        st["git_calls"].append({"problem_dir": problem_dir, "message": message, "push": push})
+        return GitResult(True, push, "abc1234", message, "", "푸시됨" if push else "커밋만")
+
+    monkeypatch.setattr(service.gitops, "commit_and_push", commit_and_push)
+    return st
+
+
+def test_submit_pass_without_push(settings, submit_env):
+    s = submit_env["session"]
+    s.queue(_solver(BOX_ID, "BOX"), _fx("compile_ok"), _fx("pass"))
+    progress: list[str] = []
+    oc = service.submit_problem(settings, "sim", 1234, progress=progress.append)
+    assert oc.submit.passed is True and oc.git is None and oc.contest_prob_id == ID
+    assert [c["url"].rsplit("/", 1)[1] for c in s.calls] == ["solvingProblem.do", "compile.do", "submit.do"]
+    assert submit_env["git_calls"] == []
+    # 제출 파라미터: 소스 변환 + BOX 맥락
+    sub = s.calls[2]["data"]
+    assert "import sys" not in sub["source"] and "print('#1 3')" in sub["source"]
+    assert (sub["probId"], sub["categoryType"], sub["categoryId"], sub["langType"]) == (ID, "BOX", BOX_ID, "py")
+    assert s.calls[1]["data"] == sub  # compile 과 submit 은 같은 파라미터
+    assert any("[알림]" in m and "import sys" in m for m in progress)
+    assert any("모의/클럽 상자" in m for m in progress)
+    assert oc.notes and "import sys" in oc.notes[0]
+
+
+def test_submit_pass_with_push_calls_git(settings, submit_env):
+    submit_env["session"].queue(_solver(), _fx("compile_ok"), _fx("pass"))
+    oc = service.submit_problem(settings, "sim", 1234, push=True, message="custom msg")
+    assert oc.git is not None and oc.git.pushed and oc.git.committed
+    assert submit_env["git_calls"] == [{"problem_dir": submit_env["problem_dir"].resolve(), "message": "custom msg", "push": True}]
+
+
+def test_submit_pass_with_push_uses_template_message(settings, submit_env):
+    submit_env["session"].queue(_solver(), _fx("compile_ok"), _fx("pass"))
+    service.submit_problem(settings, "sim", 1234, push=True)
+    msg = submit_env["git_calls"][0]["message"]
+    assert "1234" in msg and "A+B" in msg and "sim" in msg
+
+
+def test_submit_wrong_answer_returns_without_exception_and_no_push(settings, submit_env):
+    submit_env["session"].queue(_solver(), _fx("compile_ok"), _fx("wrong"))
+    oc = service.submit_problem(settings, "sim", 1234, push=True)
+    assert oc.submit.passed is False and "7개" in oc.submit.summary
+    assert oc.git is None and submit_env["git_calls"] == []
+
+
+@pytest.mark.parametrize("fixture", ["timeout", "runerror"])
+def test_submit_timeout_or_runerror_no_push(settings, submit_env, fixture):
+    submit_env["session"].queue(_solver(), _fx("compile_ok"), _fx(fixture))
+    oc = service.submit_problem(settings, "sim", 1234, push=True)
+    assert oc.submit.passed is False and submit_env["git_calls"] == []
+
+
+def test_submit_compile_failure_stops_before_submit(settings, submit_env):
+    s = submit_env["session"]
+    s.queue(_solver(), _fx("compile_nk"))
+    with pytest.raises(SubmitError, match="import sys"):
+        service.submit_problem(settings, "sim", 1234, push=True)
+    assert [c["url"].rsplit("/", 1)[1] for c in s.calls] == ["solvingProblem.do", "compile.do"]
+    assert submit_env["git_calls"] == []
+    assert not (settings.config_dir / "last_submit.json").exists()
+
+
+def test_submit_sys_usage_rejected_before_any_request(settings, submit_env):
+    (submit_env["problem_dir"] / "1234.py").write_text("import sys\nsys.setrecursionlimit(10**6)\nprint(1)\n", encoding="utf-8")
+    with pytest.raises(SubmitError, match="sys\\."):
+        service.submit_problem(settings, "sim", 1234)
+    assert submit_env["session"].calls == []
+
+
+def test_submit_missing_solution_before_any_request(settings, submit_env):
+    (submit_env["problem_dir"] / "1234.py").unlink()
+    with pytest.raises(SubmitError, match="1234.py"):
+        service.submit_problem(settings, "sim", 1234)
+    assert submit_env["session"].calls == []
+
+
+def test_submit_bad_topic_is_invalid_input(settings, submit_env):
+    with pytest.raises(InvalidInput):
+        service.submit_problem(settings, "a:b", 1234)
+
+
+def test_submit_failed_es_raises(settings, submit_env):
+    submit_env["session"].queue(_solver(), _fx("compile_ok"), _fx("failed_es"))
+    with pytest.raises(SubmitError, match="횟수"):
+        service.submit_problem(settings, "sim", 1234)
+
+
+def test_submit_relogins_once_on_session_expiry(settings, submit_env, monkeypatch):
+    logins: list = []
+    monkeypatch.setattr(service.client.auth, "login", lambda s, st: logins.append(1))
+    s = submit_env["session"]
+    s.queue(login_redirect(), _solver(), _fx("compile_ok"), _fx("pass"))
+    oc = service.submit_problem(settings, "sim", 1234)
+    assert oc.submit.passed and len(logins) == 1
+    assert [c["url"].rsplit("/", 1)[1] for c in s.calls] == ["solvingProblem.do", "solvingProblem.do", "compile.do", "submit.do"]
+
+
+def test_submit_session_expired_twice_raises_login_failed(settings, submit_env, monkeypatch):
+    monkeypatch.setattr(service.client.auth, "login", lambda s, st: None)
+    s = submit_env["session"]
+    s.queue(_solver(), _fx("compile_ok"), login_redirect(), login_redirect())
+    with pytest.raises(_LoginFailed):
+        service.submit_problem(settings, "sim", 1234)
+    # 재시도는 run() 전체(get_context→compile→submit)를 다시 돈다 → submit.do 는 최대 2회 시도되지만 성공 응답은 0
+    assert sum(1 for c in s.calls if c["url"].endswith("submit.do")) == 1
+    assert sum(1 for c in s.calls if c["url"].endswith("solvingProblem.do")) == 2
+
+
+def test_submit_writes_last_submit_json_without_secrets(settings, submit_env):
+    settings_pw = settings.password
+    s = submit_env["session"]
+    s.cookies.set("SESSION", "supersecretcookievalue")
+    s.queue(_solver(BOX_ID, "BOX"), _fx("compile_ok"), _fx("wrong"))
+    service.submit_problem(settings, "sim", 1234)
+    p = settings.config_dir / "last_submit.json"
+    text = p.read_text(encoding="utf-8")
+    data = _json.loads(text)
+    assert data["num"] == 1234 and data["contestProbId"] == ID
+    assert (data["categoryType"], data["categoryId"]) == ("BOX", BOX_ID)
+    assert data["passed"] is False and "7개" in data["summary"]
+    assert data["response"]["vo"]["correctedCases"] == "7"
+    assert "at" in data
+    assert "supersecretcookievalue" not in text and settings_pw not in text and DUMMY_ID not in text
+    assert "SESSION" not in text
+
+
+def test_submit_last_submit_json_overwritten_each_time(settings, submit_env):
+    s = submit_env["session"]
+    s.queue(_solver(), _fx("compile_ok"), _fx("wrong"), _solver(), _fx("compile_ok"), _fx("pass"))
+    service.submit_problem(settings, "sim", 1234)
+    service.submit_problem(settings, "sim", 1234)
+    assert _json.loads((settings.config_dir / "last_submit.json").read_text(encoding="utf-8"))["passed"] is True
+
+
+def test_submit_push_failure_raises_git_error_after_pass(settings, submit_env, monkeypatch):
+    from swea_fetcher.errors import GitError
+
+    monkeypatch.setattr(service.gitops, "commit_and_push", lambda *a, **k: GitResult(False, False, None, "m", "err", "푸시 실패", failed=True))
+    submit_env["session"].queue(_solver(), _fx("compile_ok"), _fx("pass"))
+    with pytest.raises(GitError):
+        service.submit_problem(settings, "sim", 1234, push=True)
+    # 제출 자체는 끝났으므로 진단 파일은 남는다
+    assert _json.loads((settings.config_dir / "last_submit.json").read_text(encoding="utf-8"))["passed"] is True
+
+
+def test_submit_push_flag_ignores_auto_push_setting(settings, submit_env):
+    """service 는 push 인자만 본다 — auto_push_on_pass 는 호출자(cli/gui)가 push 로 번역해야 한다."""
+    auto = replace(settings, auto_push_on_pass=True)
+    submit_env["session"].queue(_solver(), _fx("compile_ok"), _fx("pass"))
+    oc = service.submit_problem(auto, "sim", 1234)  # push 기본값 False
+    assert oc.git is None and submit_env["git_calls"] == []

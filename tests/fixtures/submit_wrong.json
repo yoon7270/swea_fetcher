@@ -1,0 +1,27 @@
+{
+ "result": "success",
+ "vo": {
+  "cmpError": "",
+  "cmpValue": "",
+  "exitValue": "0",
+  "runValue": "Fail ",
+  "userResult": "#1 3\n#2 8\n",
+  "runError": "",
+  "timeOut": "",
+  "executionTime": "0.101 ms",
+  "exitCode": "0",
+  "existCharTC": "",
+  "usrScore": "70.00",
+  "computeScore": "70.00",
+  "probScore": 100,
+  "testCaseNo": 10,
+  "correctedCases": "7",
+  "maxOutputSize": 0,
+  "gradingResult": null,
+  "cutOutput": false
+ },
+ "submitFailed": "",
+ "compileTime": "",
+ "testInput": "",
+ "compile": ""
+}

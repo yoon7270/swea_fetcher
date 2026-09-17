@@ -1,0 +1,27 @@
+{
+ "result": "success",
+ "vo": {
+  "cmpError": "import sys",
+  "cmpValue": "",
+  "exitValue": "NK",
+  "runValue": "",
+  "userResult": "",
+  "runError": "",
+  "timeOut": "",
+  "executionTime": "",
+  "exitCode": "0",
+  "existCharTC": "",
+  "usrScore": "",
+  "computeScore": "",
+  "probScore": 100,
+  "testCaseNo": 0,
+  "correctedCases": "",
+  "maxOutputSize": 0,
+  "gradingResult": null,
+  "cutOutput": false
+ },
+ "submitFailed": "",
+ "compileTime": "",
+ "testInput": "",
+ "compile": ""
+}

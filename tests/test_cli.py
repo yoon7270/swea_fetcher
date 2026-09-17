@@ -464,3 +464,173 @@ def test_check_passes_timeout_to_checker(cfg, root_dir, monkeypatch):
     monkeypatch.setattr(cli.checker, "run_and_compare", fake)
     assert cli.main(["check", "sim", "1234", "--timeout", "2.5"]) == 0
     assert seen["timeout"] == 2.5
+
+
+# =============================================================================
+# M8/M9: submit
+# =============================================================================
+
+from swea_fetcher.errors import SubmitError  # noqa: E402
+from swea_fetcher.gitops import GitResult  # noqa: E402
+from swea_fetcher.service import SubmitOutcome  # noqa: E402
+from swea_fetcher.submit import SubmitResult  # noqa: E402
+
+
+def _submit_result(passed: bool, **kw) -> SubmitResult:
+    base = dict(summary="Pass" if passed else "오답: 10개 테스트케이스 중 7개 통과", score="100.00" if passed else "70.00",
+                test_cases=10, corrected=10 if passed else 7, execution_time="0.123 ms")
+    base.update(kw)
+    return SubmitResult(passed, **base)
+
+
+@pytest.fixture
+def submit_stub(cfg, monkeypatch):
+    """service.submit_problem 스텁 + 터미널(tty) 흉내. seen 에 호출 인자 기록."""
+    seen: dict = {"calls": []}
+    st = {"result": _submit_result(True), "git": None, "raise": None}
+
+    def fake(settings, topic, num, *, push=False, message=None, progress=None):
+        seen["calls"].append({"topic": topic, "num": num, "push": push, "message": message})
+        if st["raise"]:
+            raise st["raise"]
+        git = st["git"] if push and st["result"].passed else None
+        return SubmitOutcome(st["result"], git, ["`import sys` 줄을 빼고 제출합니다"], CONTEST_PROB_ID)
+
+    monkeypatch.setattr(cli.service, "submit_problem", fake)
+
+    class Tty:
+        @staticmethod
+        def isatty():
+            return True
+
+    monkeypatch.setattr(cli.sys, "stdin", Tty())
+    st["seen"] = seen
+    return st
+
+
+def _answer(monkeypatch, text: str, prompts: list[str] | None = None):
+    def fake_input(prompt=""):
+        if prompts is not None:
+            prompts.append(prompt)
+        return text
+
+    monkeypatch.setattr("builtins.input", fake_input)
+
+
+def test_submit_prompt_default_is_no(submit_stub, monkeypatch, capsys):
+    prompts: list[str] = []
+    _answer(monkeypatch, "", prompts)
+    assert cli.main(["submit", "sim", "1234"]) == 0
+    assert submit_stub["seen"]["calls"] == []
+    assert "취소" in capsys.readouterr().out
+    assert prompts and "1회 감소" in prompts[0] and "[y/N]" in prompts[0]
+
+
+@pytest.mark.parametrize("answer", ["n", "N", "no", "yes please", "ㅇ"])
+def test_submit_prompt_rejections(submit_stub, monkeypatch, answer):
+    _answer(monkeypatch, answer)
+    assert cli.main(["submit", "sim", "1234"]) == 0
+    assert submit_stub["seen"]["calls"] == []
+
+
+@pytest.mark.parametrize("answer", ["y", "Y", "yes", " YES "])
+def test_submit_prompt_accepts(submit_stub, monkeypatch, answer, capsys):
+    _answer(monkeypatch, answer)
+    assert cli.main(["submit", "sim", "1234"]) == 0
+    assert submit_stub["seen"]["calls"] == [{"topic": "sim", "num": 1234, "push": False, "message": None}]
+    out = capsys.readouterr().out
+    assert "[PASS] 1234 Pass" in out and "0.123 ms" in out
+
+
+def test_submit_yes_skips_prompt(submit_stub, monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda p="": pytest.fail("프롬프트가 떠서는 안 됨"))
+    assert cli.main(["submit", "sim", "1234", "-y"]) == 0
+    assert len(submit_stub["seen"]["calls"]) == 1
+
+
+def test_submit_non_tty_without_yes_refuses(submit_stub, monkeypatch, capsys):
+    class NoTty:
+        @staticmethod
+        def isatty():
+            return False
+
+    monkeypatch.setattr(cli.sys, "stdin", NoTty())
+    monkeypatch.setattr("builtins.input", lambda p="": pytest.fail("프롬프트가 떠서는 안 됨"))
+    assert cli.main(["submit", "sim", "1234"]) == 2
+    assert submit_stub["seen"]["calls"] == []
+    assert "-y" in capsys.readouterr().err
+
+
+def test_submit_wrong_answer_exit_8(submit_stub, capsys):
+    submit_stub["result"] = _submit_result(False)
+    assert cli.main(["submit", "sim", "1234", "-y"]) == 8
+    captured = capsys.readouterr()
+    assert "[FAIL] 1234 오답: 10개 테스트케이스 중 7개 통과" in captured.out
+    assert "[오류] 1234 채점 결과" in captured.err
+
+
+def test_submit_wrong_answer_with_push_says_not_pushed(submit_stub, capsys):
+    submit_stub["result"] = _submit_result(False)
+    submit_stub["git"] = GitResult(True, True, "abc", "m", "", "푸시됨")
+    assert cli.main(["submit", "sim", "1234", "-y", "--push"]) == 8
+    out = capsys.readouterr().out
+    assert "Pass 가 아니라 푸시하지 않았습니다" in out and "푸시됨" not in out
+    assert submit_stub["seen"]["calls"][0]["push"] is True
+
+
+def test_submit_run_error_printed(submit_stub, capsys):
+    submit_stub["result"] = _submit_result(False, summary="오답 · 런타임 에러", run_error="ZeroDivisionError: division by zero")
+    assert cli.main(["submit", "sim", "1234", "-y"]) == 8
+    out = capsys.readouterr().out
+    assert "--- 런타임 에러 ---" in out and "ZeroDivisionError" in out
+
+
+def test_submit_push_and_message_forwarded(submit_stub, capsys):
+    submit_stub["git"] = GitResult(True, True, "abc1234", "solve: 1234", "", "푸시됨 abc1234")
+    assert cli.main(["submit", "sim", "1234", "-y", "--push", "-m", "solve: 1234"]) == 0
+    assert submit_stub["seen"]["calls"] == [{"topic": "sim", "num": 1234, "push": True, "message": "solve: 1234"}]
+    out = capsys.readouterr().out
+    assert "[OK] 푸시됨 abc1234" in out and "solve: 1234" in out
+
+
+def test_submit_long_message_flag(submit_stub):
+    submit_stub["git"] = GitResult(True, True, "abc", "m", "", "푸시됨")
+    assert cli.main(["submit", "sim", "1234", "-y", "--push", "--message", "hello"]) == 0
+    assert submit_stub["seen"]["calls"][0]["message"] == "hello"
+
+
+def test_submit_error_exit_8_with_hint(submit_stub, capsys):
+    submit_stub["raise"] = SubmitError("허용하지 않는 키워드가 사용되었습니다", hint="코드를 고친 뒤 다시 제출하세요")
+    assert cli.main(["submit", "sim", "1234", "-y"]) == 8
+    err = capsys.readouterr().err
+    assert "허용하지 않는 키워드" in err and "→ 코드를 고친 뒤" in err
+
+
+def test_submit_nested_topic_and_int_num(submit_stub):
+    assert cli.main(["submit", "test/IM_test", "25730", "-y"]) == 0
+    assert submit_stub["seen"]["calls"][0] == {"topic": "test/IM_test", "num": 25730, "push": False, "message": None}
+
+
+def test_submit_requires_int_num():
+    with pytest.raises(SystemExit) as ei:
+        cli.main(["submit", "sim", "abc", "-y"])
+    assert ei.value.code == 2
+
+
+def test_submit_without_settings_exit_1(monkeypatch, capsys):
+    monkeypatch.setattr(cli.service, "submit_problem", lambda *a, **k: pytest.fail("설정 없이 호출됨"))
+    assert cli.main(["submit", "sim", "1234", "-y"]) == 1
+    assert "설정이 없습니다" in capsys.readouterr().err
+
+
+def test_check_push_flag_was_removed(cfg, capsys):
+    """M7 의 `check --push` 는 M8 에서 삭제 — argparse 오류(exit 2)."""
+    with pytest.raises(SystemExit) as ei:
+        cli.main(["check", "sim", "1234", "--push"])
+    assert ei.value.code == 2
+    assert "--push" in capsys.readouterr().err
+
+
+def test_normalize_argv_keeps_submit_and_push_subcommands():
+    assert cli.normalize_argv(["submit", "sim", "1"]) == ["submit", "sim", "1"]
+    assert cli.normalize_argv(["push", "sim", "1"]) == ["push", "sim", "1"]
