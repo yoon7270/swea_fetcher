@@ -24,6 +24,7 @@ log = logging.getLogger("swea_fetcher.update")
 REPO = "yoon7270/swea_fetcher"
 LATEST_API = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_URL = f"https://github.com/{REPO}/releases"
+LATEST_PAGE = f"{RELEASES_URL}/latest"  # 302 → /releases/tag/vX.Y.Z (API 속도 제한 없음)
 CACHE_FILE_NAME = "update_check.json"
 CHECK_INTERVAL = timedelta(hours=24)
 TIMEOUT = 3.0
@@ -91,8 +92,21 @@ def set_disabled(config_dir: Path, disabled: bool) -> None:
 
 
 def fetch_latest(timeout: float = TIMEOUT, session: requests.Session | None = None) -> tuple[str, str]:
-    """(최신 버전 문자열, Release 페이지 URL). 실패 시 예외."""
+    """(최신 버전 문자열, Release 페이지 URL). 실패 시 예외.
+
+    1차: `releases/latest` 페이지의 302 Location (`…/releases/tag/vX.Y.Z`) — API 속도 제한(공용 IP 60회/시)에 걸리지 않음.
+    2차: GitHub API (tag_name).
+    """
     s = session or requests.Session()
+    try:
+        r = s.get(LATEST_PAGE, timeout=timeout, allow_redirects=False, headers={"User-Agent": USER_AGENT})
+        loc = r.headers.get("Location", "")
+        m = re.search(r"/releases/tag/([^/?#]+)", loc)
+        if r.status_code in (301, 302, 303, 307, 308) and m:
+            tag = m.group(1)
+            return tag.lstrip("vV"), loc if loc.startswith("http") else f"https://github.com{loc}"
+    except requests.RequestException as e:
+        log.debug("releases/latest 리다이렉트 확인 실패, API 로 재시도: %s", e)
     r = s.get(LATEST_API, timeout=timeout, headers={"Accept": "application/vnd.github+json", "User-Agent": USER_AGENT})
     r.raise_for_status()
     data = r.json()
