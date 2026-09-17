@@ -89,7 +89,7 @@ SWEA 에는 문제 관련 페이지가 **세 종류** 있고, 사용자의 실�
     <span class="week_text"><a href="#none" onclick="javascript:fn_move_page('AZ8R9tAKeaPHBITH');">A+B…</a></span>
   </div>
   ```
-  → 상세 페이지는 이 위젯이 아니라 **`p.problem_title` = `"4014. [모의 SW 역량테스트] 활주로 건설"`** (픽스처 `problem_detail_regular.html`). `parser._parse_detail_title` 은 이를 1순위로, `span.week_num`/`week_text` 는 폴백으로 둠. `_parse_detail_title` 은 실패해도 예외 대신 `(None, "")` 을 돌려주고 cli 가 `--num` 을 요구
+  → 상세 페이지는 이 위젯이 아니라 **`p.problem_title` = `"4014. [모의 SW 역량테스트] 활주로 건설"`** (픽스처 `problem_detail_regular.html`). `parser._parse_detail_title` 은 이 요소만 읽는다 (목록 위젯 `span.week_num` 폴백은 M5 에서 삭제 — 실사용 경로에서 실행된 적 없음). 실패해도 예외 대신 `(None, "")` 을 돌려주고 cli/GUI 가 `--num` 을 요구
 - Solving Club 의 `contestProbId`(`AZq-gSmq_RfHBISS`) 로 `problemDetail.do?contestProbId=...` 를 열면 **시스템 오류 페이지**가 뜸 (로그인 상태에서 확인, 픽스처 `error_page.html`). 즉 Solving Club 문제는 일반 페이지로 우회할 수 없고, 번호 획득 경로는 별도 확인 필요
 
 ### 계정 정보 제거 내역 (픽스처)
@@ -132,7 +132,7 @@ E2E: `swea-fetch -v <첨부 링크 URL> _e2e_test` (문제 `AZq-gSmq_RfHBISS`, 2
 4
 0 1 2 0...`). 사용자가 브라우저로 받아 둔 `input7_sample.txt` 와 바이트 단위 동일 (출력은 끝 줄바꿈만 도구가 추가) |
 | 세션 캐시 재사용 | `session.json` 복원 후 `GET userInformation.do` 200 → 재로그인 없이 진행됨 |
-| 일반 (A) `problemDetail.do` 페이지 선택자 | **여전히 미검증** (solver 경로가 먼저 성공하므로 폴백이 실행되지 않음). `span.week_num`/`span.week_text` 구현은 유지 |
+| 일반 (A) `problemDetail.do` 페이지 선택자 | `p.problem_title` 로 확정(4014 픽스처). 목록 위젯 폴백은 M5 에서 삭제 |
 
 ## Solving Club 색인 API (M2, 실제 세션으로 확인) — 문제 번호 → contestProbId
 

@@ -168,11 +168,12 @@ def test_parse_club_missing_title():
 
 
 # =============================================================================
-# parse — detail 페이지 (A, 미검증 선택자)
+# parse — detail 페이지 (A) — p.problem_title 만 (목록 위젯 폴백은 M5 에서 삭제)
 # =============================================================================
 
 
-def test_parse_detail_with_week_widgets():
+def test_parse_detail_ignores_list_widgets():
+    """목록 페이지 위젯(span.week_num)만 있으면 번호를 추정하지 않는다 → (None, "") 로 --num 안내."""
     html = (
         "<html><body><div class='header-caption'>"
         "<span class='week_num'>27008.</span>"
@@ -180,7 +181,7 @@ def test_parse_detail_with_week_widgets():
         f"</div>{BOTH}</body></html>"
     )
     info = parser.parse(html, "detail", ID)
-    assert (info.num, info.title, info.page_kind) == (27008, "A+B", "detail")
+    assert (info.num, info.title, info.page_kind) == (None, "", "detail")
 
 
 def test_parse_detail_without_title_widgets_does_not_raise():
@@ -346,14 +347,14 @@ def test_parse_detail_prefers_problem_title_over_week_widgets():
     assert (info.num, info.title) == (4014, "활주로 건설")
 
 
-def test_parse_detail_problem_title_without_number_falls_back_to_week():
+def test_parse_detail_problem_title_without_number_returns_none():
     html = (
         "<html><body><p class='problem_title'>[07] 항아리 게임</p>"
         "<span class='week_num'>27008.</span><span class='week_text'>A+B</span>"
         f"{BOTH}</body></html>"
     )
     info = parser.parse(html, "detail", ID)
-    assert (info.num, info.title) == (27008, "A+B")
+    assert (info.num, info.title) == (None, "")
 
 
 def test_parse_without_required_attachments():

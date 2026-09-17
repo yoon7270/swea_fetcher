@@ -3,7 +3,8 @@
 페이지 종류 (docs/swea-page-notes.md):
 - "solver": 문제 풀기 화면. h3.problem_title = "25730. [07] 항아리 게임"  ← 번호가 있는 유일한 페이지
 - "club"  : Solving Club 상세. p.problem_title = "[07] 항아리 게임" (번호 없음)
-- "detail": 일반 문제 상세 problemDetail.do. p.problem_title = "4014. [모의 SW 역량테스트] 활주로 건설" (M2 확인)
+- "detail": 일반 문제 상세 problemDetail.do. p.problem_title = "4014. [모의 SW 역량테스트] 활주로 건설" (M2 확인).
+            번호를 못 읽으면 (None, "") — cli/GUI 가 --num 을 안내 (목록 위젯 폴백은 M5 에서 삭제)
 첨부: div.down_area a[href*="contestProbDown.do"], href 의 downType=in|out 으로 구분
 """
 
@@ -24,9 +25,7 @@ BASE = "https://swexpertacademy.com"
 
 # --- 선택자 / 패턴 상수 ---------------------------------------------------------
 SEL_SOLVER_TITLE = "h3.problem_title"
-SEL_CLUB_TITLE = "p.problem_title"
-SEL_DETAIL_NUM = "span.week_num"
-SEL_DETAIL_TITLE = "span.week_text"
+SEL_CLUB_TITLE = "p.problem_title"  # detail 페이지도 같은 요소
 SEL_ATTACH = 'div.down_area a[href*="contestProbDown.do"]'
 
 TITLE_RE = re.compile(r"^(\d+)\.\s*(?:\[\d+\]\s*)?(.+)$")  # "25730. [07] 항아리 게임"
@@ -112,23 +111,14 @@ def _parse_club_title(soup: BeautifulSoup) -> str:
 
 
 def _parse_detail_title(soup: BeautifulSoup) -> tuple[int | None, str]:
-    """일반 문제 페이지. p.problem_title 의 "NNNN. 제목" 을 우선 쓰고, 없으면 목록형 week_num/week_text 폴백.
-    실패해도 예외 대신 (None, "") — cli 가 --num 을 요구한다."""
-    el = soup.select_one(SEL_CLUB_TITLE)  # detail 도 p.problem_title 을 쓴다
+    """일반 문제 페이지. p.problem_title 의 "NNNN. 제목". 실패해도 예외 대신 (None, "") — cli 가 --num 을 요구한다."""
+    el = soup.select_one(SEL_CLUB_TITLE)
     if el is not None:
         text = " ".join(_own_text(el).split())
         m = TITLE_RE.match(text)
         if m:
             return int(m.group(1)), m.group(2).strip()
-    num_el = soup.select_one(SEL_DETAIL_NUM)
-    title_el = soup.select_one(SEL_DETAIL_TITLE)
-    num: int | None = None
-    if num_el is not None:
-        m = re.match(r"^\s*(\d+)\.?", num_el.get_text(strip=True))
-        if m:
-            num = int(m.group(1))
-    title = title_el.get_text(" ", strip=True) if title_el is not None else ""
-    return num, title
+    return None, ""
 
 
 def _attachment_filename(a: Tag) -> str:
