@@ -190,6 +190,7 @@ for test_case in range(1, T + 1):
 | 1 | 2단계 인증 (`MfaRequired`) | 계정의 MFA 를 해제해야 자동 로그인 가능 (현재 계정은 해당 없음) |
 | 2 | 입력 해석 실패 (`InvalidInput`) | 번호를 어디서도 못 찾았거나 URL 에 ID 가 없음(주소창 URL). 번호 확인 → `--refresh-index` → 문제 URL 로 지정 |
 | 2 | 문제 없음 (`ProblemNotFound`) | `contestProbId` 가 맞는지, 그 문제에 접근 권한(클럽 가입 등)이 있는지 확인 |
+| 2 | 번호로 못 찾는 문제 (Contest, 가입하지 않은 클럽) | 범위 밖 — 문제 화면의 첨부 링크 URL 또는 `contestProbId` 를 직접 입력 |
 | 2 | 번호/제목 파싱 실패 (`ParseError`) | `--num` 으로 지정하거나 `-v` 출력을 제보 |
 | 3 | 파일 충돌 (`AlreadyExists`) | 기존 파일 확인 후 `--force` |
 | 4 | 첨부 없음 (`AttachmentNotFound`) | 샘플 첨부가 없는 문제. `--skeleton-only` 로 폴더·뼈대만 만들고 본문에서 직접 복사 |
