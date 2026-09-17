@@ -1,4 +1,4 @@
-"""진입점: `swea-fetch <target> <topic>` / `init` / `logout` / `check` / `doctor`.
+"""진입점: `swea-fetch <target> <topic>` / `init` / `logout` / `check` / `doctor` / `push`.
 
 파이프라인 로직은 service.py 에 있고, 여기서는 인자 파싱·출력·종료 코드만 다룬다.
 모든 도메인 예외는 SweaFetchError.exit_code 로 종료 코드에 매핑하고 e.hint 를 조치 문구로 출력한다.
@@ -21,7 +21,7 @@ from .service import FetchOptions, FetchOutcome
 
 log = logging.getLogger("swea_fetcher.cli")
 
-SUBCOMMANDS = ("fetch", "init", "logout", "check", "doctor")
+SUBCOMMANDS = ("fetch", "init", "logout", "check", "doctor", "push")
 EXIT_UNEXPECTED = 10
 
 
@@ -63,13 +63,21 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("topic", help="주제 폴더 이름 (test/IM_test 처럼 중첩 가능)")
     c.add_argument("num", type=int, help="문제 번호")
     c.add_argument("--timeout", type=float, default=checker.DEFAULT_TIMEOUT, help="실행 제한 시간(초), 기본 10")
+    c.add_argument("--push", action="store_true", help="검증 통과 시에만 문제 폴더를 git 커밋 + 푸시 (M7). 실패면 푸시하지 않음")
     c.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
+
+    g = sub.add_parser("push", help="문제 폴더만 git 커밋 + 푸시 (루트가 git 저장소여야 함. force push 없음)")
+    g.add_argument("topic", help="주제 폴더 이름 (test/IM_test 처럼 중첩 가능)")
+    g.add_argument("num", type=int, help="문제 번호")
+    g.add_argument("-m", "--message", default=None, help="커밋 메시지. 생략하면 템플릿(SWEA_COMMIT_TEMPLATE) 사용")
+    g.add_argument("--no-push", action="store_true", help="커밋만 하고 푸시하지 않음")
+    g.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
 
     d = sub.add_parser("doctor", help="진단 정보 출력 (문의할 때 이 출력을 이슈에 붙여 주세요. 비밀번호·쿠키는 포함되지 않음)")
     d.add_argument("--offline", action="store_true", help="네트워크 없이 로컬 정보만 (로그인 상태·최신 버전 생략)")
     d.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
 
-    for sp in (f, i, lo, c, d):
+    for sp in (f, i, lo, c, d, g):
         sp.add_argument("--no-update-check", action="store_true", help="이번 실행에서 새 버전 확인을 하지 않습니다")
     return p
 
@@ -277,8 +285,8 @@ def run_logout(all_: bool = False, config_dir: Path | None = None) -> int:
 # --- check --------------------------------------------------------------------------
 
 
-def run_check(topic: str, num: int, timeout: float) -> int:
-    """풀이 실행 → 비교 → 결과 출력. 실패면 CheckFailed (exit 6)."""
+def run_check(topic: str, num: int, timeout: float, push: bool = False) -> int:
+    """풀이 실행 → 비교 → 결과 출력. 실패면 CheckFailed (exit 6). push=True 면 통과 시에만 커밋+푸시 (M7)."""
     settings = config.load_settings()
     from . import storage  # 지연 import — resolve_problem_dir 만 필요
 
@@ -301,7 +309,17 @@ def run_check(topic: str, num: int, timeout: float) -> int:
         print("--- 기대 vs 실제 ---")
         print(checker.format_diff(res.diff) if res.diff else "(출력 없음)")
     if not res.passed:
-        raise CheckFailed(f"{num} 검증 실패 ({status})", hint="")
+        raise CheckFailed(f"{num} 검증 실패 ({status})", hint="검증 실패 — 푸시하지 않음" if push else "")
+    if push:
+        return run_push(topic, num, message=None, push=True)
+    return 0
+
+
+def run_push(topic: str, num: int, message: str | None, push: bool) -> int:
+    """문제 폴더만 커밋(+푸시). 전제 조건 미충족·git 실패는 GitError (exit 7)."""
+    settings = config.load_settings()
+    result = service.push_problem(settings, topic, num, message=message, push=push)
+    print(f"[OK] {result.note}" + (f"  — {result.message}" if result.committed else ""))
     return 0
 
 
@@ -347,7 +365,9 @@ def _dispatch(args: argparse.Namespace, verbose: bool) -> int:
         if args.command == "logout":
             return run_logout(all_=args.all)
         if args.command == "check":
-            return run_check(args.topic, args.num, args.timeout)
+            return run_check(args.topic, args.num, args.timeout, push=args.push)
+        if args.command == "push":
+            return run_push(args.topic, args.num, message=args.message, push=not args.no_push)
         if args.command == "doctor":
             return run_doctor(offline=args.offline)
         return run_fetch(

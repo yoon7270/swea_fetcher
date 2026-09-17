@@ -15,7 +15,7 @@ from pathlib import Path
 
 import requests
 
-from . import __version__, auth, checker, config, lookup, service, update
+from . import __version__, auth, checker, config, gitops, lookup, service, update
 from .config import Settings
 from .errors import ConfigMissing, NetworkError
 
@@ -81,6 +81,24 @@ def _root_row(config_dir: Path) -> str:
     return f"{root}  (존재함, 주제 폴더 {len(service.list_topics(root))}개)"
 
 
+def _git_row(config_dir: Path) -> str:
+    """`git: 2.45 / 저장소: C:\\...\\swea (main → origin/main)` 또는 `저장소 아님`. 2.30 미만이면 경고."""
+    ver = gitops.git_version()
+    if ver is None:
+        return "없음 (git 이 설치되어 있지 않음 — 커밋+푸시 기능 사용 불가)"
+    ver_s = ".".join(str(v) for v in ver)
+    warn = "  [경고: 2.30 이상 권장]" if ver < gitops.MIN_GIT_VERSION else ""
+    raw = os.environ.get("SWEA_ROOT") or config.read_env_file(config_dir).get("SWEA_ROOT") or ""
+    if not raw.strip():
+        return f"{ver_s}{warn} / 저장소: (루트 설정 없음)"
+    repo = gitops.find_repo(Path(raw.strip()).expanduser())
+    if repo is None:
+        return f"{ver_s}{warn} / 저장소 아님"
+    branch = repo.branch or "(detached HEAD)"
+    target = f" → {repo.upstream}" if repo.upstream else (" (upstream 없음)" if repo.remote else " (origin 없음)")
+    return f"{ver_s}{warn} / 저장소: {repo.toplevel} ({branch}{target})"
+
+
 def _settings_row(settings: Settings | None, err: ConfigMissing | None) -> str:
     if settings is not None:
         return f"정상 (비밀번호 출처: {settings.password_source})"
@@ -141,6 +159,7 @@ def collect(config_dir: Path | None = None, offline: bool = False) -> list[Row]:
         ("설정 폴더", _safe(_config_row, config_dir)),
         ("루트", _safe(_root_row, config_dir)),
         ("설정", _settings_row(settings, err)),
+        ("git", _safe(_git_row, config_dir)),
     ]
     if not offline:
         rows.append(("로그인 상태", _safe(_login_row, settings)))

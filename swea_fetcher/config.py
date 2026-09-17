@@ -38,6 +38,8 @@ class Settings:
     output_name: str = "output.txt"
     config_dir: Path = CONFIG_DIR
     python: str | None = None  # 검증에 쓸 Python 실행 파일 (SWEA_PYTHON). None 이면 자동 탐색
+    commit_template: str = "solve: {num}. {title} ({topic})"  # SWEA_COMMIT_TEMPLATE (M7)
+    auto_push_on_pass: bool = False  # SWEA_AUTO_PUSH=1: 검증 통과 시 확인 없이 커밋+푸시 (M7, 기본 꺼짐)
     password_source: str = field(default="keyring", repr=False)  # "env" | "dotenv" | "keyring"
 
     @property
@@ -136,6 +138,10 @@ def strip_password_from_env_file(config_dir: Path | None = None) -> bool:
     return True
 
 
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 # --- 로드 -----------------------------------------------------------------------------
 
 
@@ -191,5 +197,7 @@ def load_settings(config_dir: Path | None = None) -> Settings:
         output_name=get("SWEA_OUTPUT_NAME").strip() or "output.txt",
         config_dir=config_dir,
         python=get("SWEA_PYTHON").strip() or None,
+        commit_template=get("SWEA_COMMIT_TEMPLATE").strip() or Settings.commit_template,
+        auto_push_on_pass=_truthy(get("SWEA_AUTO_PUSH")),
         password_source=source,
     )

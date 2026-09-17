@@ -1,7 +1,7 @@
 """도메인 예외. 모든 예외는 SweaFetchError 를 상속하고 exit_code(cli) 와 hint(조치 문구) 를 가진다.
 
 exit code 규약 (project-plan 6절):
-    0 성공 / 1 로그인·설정 실패 / 2 입력·파싱 실패 / 3 저장 충돌 / 4 첨부 없음 / 5 네트워크 / 6 검증 실패
+    0 성공 / 1 로그인·설정 실패 / 2 입력·파싱 실패 / 3 저장 충돌 / 4 첨부 없음 / 5 네트워크 / 6 검증 실패 / 7 git 실패
 hint: 사용자가 다음에 할 일. cli 는 `→ {hint}` 로, GUI 는 배너에 표시한다.
      클래스 기본 문구를 두고, 발생 지점에서 hint= 로 덮어쓸 수 있다.
 """
@@ -159,3 +159,13 @@ class CheckFailed(SweaFetchError):
 
     exit_code = 6
     default_hint = "diff 의 changed/missing/extra 행을 확인하세요"
+
+
+# --- git (exit 7) -----------------------------------------------------------
+
+
+class GitError(SweaFetchError):
+    """커밋/푸시 전제 조건 미충족 또는 git 명령 실패 (M7). 도구는 force push·pull 을 하지 않는다."""
+
+    exit_code = 7
+    default_hint = "README 'GitHub 연동' 절과 docs/troubleshooting.md 의 'git' 항목을 확인하세요"

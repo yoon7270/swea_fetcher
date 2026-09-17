@@ -4,7 +4,9 @@ fetch_problem : settings → contestProbId → 세션 → 페이지 → 파싱 �
 verify_login  : 세션 확보만 (설정 확인용)
 list_topics   : root 아래 주제 폴더 (중첩 가능, `test/IM_test` 표기)
 list_recent   : root 아래 {topic}/{num}/ 를 mtime 순으로 (중첩 주제 포함)
-write_env     : .env 파일 쓰기 (비밀번호는 절대 쓰지 않음)
+write_env     : .env 파일 쓰기 (비밀번호는 절대 쓰지 않음; SWEA_PYTHON 등 다른 키는 보존)
+set_env_values: .env 의 개별 키 갱신 (M7: SWEA_COMMIT_TEMPLATE, SWEA_AUTO_PUSH)
+push_problem  : 문제 폴더만 git 커밋(+푸시) (M7). 자격증명은 다루지 않는다
 
 네트워크·파일 I/O 가 있으므로 GUI 는 워커 스레드에서 호출한다.
 """
@@ -20,9 +22,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from . import auth, client, config, lookup, parser, storage
+from . import auth, client, config, gitops, lookup, parser, storage
 from .config import Settings
-from .errors import InvalidInput
+from .errors import GitError, InvalidInput
+from .gitops import GitResult
 from .models import ProblemInfo, SaveResult
 
 log = logging.getLogger("swea_fetcher.service")
@@ -303,17 +306,46 @@ def list_recent(settings_or_root: Settings | Path, limit: int = 20) -> list[Rece
 
 
 def write_env(config_dir: Path, root: Path, user_id: str, input_name: str = "input.txt", output_name: str = "output.txt") -> Path:
-    """.env 를 쓴다. 비밀번호는 받지도 쓰지도 않는다 (config.save_password 가 담당)."""
+    """.env 를 쓴다. 비밀번호는 받지도 쓰지도 않는다 (config.save_password 가 담당).
+
+    기본 4개 키 외에 이미 있던 키(SWEA_PYTHON, SWEA_COMMIT_TEMPLATE, SWEA_AUTO_PUSH …)는 보존한다.
+    남아 있던 평문 SWEA_PW 줄은 제거한다 (init 이 keyring 으로 옮긴 뒤 호출).
+    """
+    values = {
+        "SWEA_ROOT": str(root),
+        "SWEA_ID": user_id.strip(),
+        "SWEA_INPUT_NAME": input_name,
+        "SWEA_OUTPUT_NAME": output_name,
+        config.PASSWORD_KEY: None,
+    }
+    return set_env_values(config_dir, **values)
+
+
+def set_env_values(config_dir: Path, **values: str | None) -> Path:
+    """.env 의 키를 갱신한다 (있으면 그 줄 교체, 없으면 끝에 추가, 값이 None 이면 줄 삭제). 다른 줄은 그대로.
+
+    SWEA_PW 는 어떤 값이 와도 쓰지 않는다 (None 으로 주면 남아 있던 줄을 지운다).
+    """
     config_dir = Path(config_dir)
     config_dir.mkdir(parents=True, exist_ok=True)
     env_file = config_dir / config.ENV_FILE_NAME
-    lines = [
-        f"SWEA_ROOT={quote_env(str(root))}",
-        f"SWEA_ID={quote_env(user_id.strip())}",
-        f"SWEA_INPUT_NAME={input_name}",
-        f"SWEA_OUTPUT_NAME={output_name}",
-    ]
-    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    values = {k: (None if k == config.PASSWORD_KEY else v) for k, v in values.items()}
+    lines = env_file.read_text(encoding="utf-8").splitlines() if env_file.is_file() else []
+    out: list[str] = []
+    seen: set[str] = set()
+    for line in lines:
+        m = re.match(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=", line)
+        key = m.group(1) if m else None
+        if key in values:
+            seen.add(key)
+            if values[key] is not None:
+                out.append(f"{key}={quote_env(str(values[key]))}")
+            continue
+        out.append(line)
+    for key, val in values.items():
+        if key not in seen and val is not None:
+            out.append(f"{key}={quote_env(str(val))}")
+    env_file.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
     return env_file
 
 
@@ -322,6 +354,59 @@ def quote_env(value: str) -> str:
     if any(ch in value for ch in ' #="\'') or value != value.strip():
         return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
     return value
+
+
+# --- git (M7) --------------------------------------------------------------------------
+
+
+def git_status(settings_or_root: Settings | Path) -> gitops.RepoInfo | None:
+    """설정 페이지·doctor 용: 루트의 저장소 정보 (없으면 None). git 자체가 없어도 None."""
+    root = settings_or_root.root if isinstance(settings_or_root, Settings) else Path(settings_or_root)
+    return gitops.find_repo(root)
+
+
+def commit_message_for(settings: Settings, topic: str, num: int, problem_dir: Path | None = None) -> str:
+    """템플릿 + 뼈대 첫 줄의 제목으로 커밋 메시지를 만든다 (GUI 다이얼로그 기본값)."""
+    if problem_dir is None:
+        problem_dir = storage.resolve_problem_dir(settings.root, topic, num)
+    title = read_skeleton_title(Path(problem_dir) / f"{num}.py")
+    return gitops.render_message(settings.commit_template, RecentItem(num, title, topic, Path(problem_dir), datetime.now()), topic)
+
+
+def push_problem(
+    settings: Settings,
+    topic: str,
+    num: int,
+    *,
+    message: str | None = None,
+    push: bool = True,
+    progress: ProgressCb | None = None,
+) -> GitResult:
+    """문제 폴더만 커밋(+푸시). 전제 조건 미충족·git 실패 → GitError (exit 7).
+
+    force push·pull 은 하지 않는다. 인증은 Git Credential Manager 가 담당 (GIT_TERMINAL_PROMPT=0).
+    """
+    try:
+        problem_dir = storage.resolve_problem_dir(settings.root, topic, num)
+    except ValueError as e:
+        raise InvalidInput(str(e)) from e
+    if gitops.git_available() is None:
+        raise GitError("git 이 설치되어 있지 않습니다", hint="https://git-scm.com 에서 Git for Windows 를 설치한 뒤 다시 시도하세요")
+    _emit(progress, "저장소 확인")
+    repo = gitops.find_repo(settings.root, problem_dir)
+    reasons = gitops.preflight(repo, problem_dir, push=push)
+    if reasons:
+        raise GitError("; ".join(reasons))
+    assert repo is not None
+    if not (message or "").strip():
+        message = commit_message_for(settings, topic, num, problem_dir)
+    rel = problem_dir.resolve().relative_to(repo.toplevel).as_posix()
+    _emit(progress, f"git add/commit: {rel} ({repo.branch}{' → ' + repo.upstream if repo.upstream and push else ''})")
+    result = gitops.commit_and_push(repo, problem_dir, message.strip(), push=push)
+    if result.failed:
+        raise GitError(result.note, hint=result.output[-600:] if result.output else "")
+    _emit(progress, result.note)
+    return result
 
 
 def logout(config_dir: Path, all_: bool = False) -> list[str]:
