@@ -52,6 +52,12 @@ def _selftest(out_path: str) -> int:
         lines.append(f"check_python={checker.resolve_python(st)}")
     except Exception as e:  # noqa: BLE001
         lines.append(f"check_python_error={type(e).__name__}: {e}")
+    try:
+        from .. import doctor
+
+        lines.append(f"doctor_offline_rows={len(doctor.collect(offline=True))}")  # M6: 동결 상태에서 진단 모듈 동작 확인
+    except Exception as e:  # noqa: BLE001
+        lines.append(f"doctor_error={type(e).__name__}: {e}")
     from .main_window import MainWindow
 
     win = MainWindow()
