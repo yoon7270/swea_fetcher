@@ -95,11 +95,18 @@ def _headers() -> dict[str, str]:
     return {"X-Requested-With": "XMLHttpRequest", "Referer": client.SOLVER_URL}
 
 
-def get_context(session: requests.Session, settings: Settings, contest_prob_id: str) -> SubmitContext:
-    """풀이 화면에서 categoryId/categoryType 을 읽는다 (공개 문제는 categoryId 가 빈 값)."""
+def get_context(
+    session: requests.Session, settings: Settings, contest_prob_id: str, category_type: str = "CODE", category_id: str | None = None
+) -> SubmitContext:
+    """풀이 화면을 실제 경로(category)로 열고 hidden 값을 읽는다.
+
+    공개/User Problem: ("CODE", contestProbId), Solving Club 상자: ("BOX", probBoxId) — lookup.find_category.
+    category 가 틀리면 채점은 되지만 제출 기록이 문제의 '제출결과' 에 남지 않는다.
+    """
+    category_id = category_id if category_id is not None else contest_prob_id
     r = client._request(
         session, "POST", client.SOLVER_URL,
-        data={"contestProbId": contest_prob_id, "categoryType": "BOX", "isPostMethod": "Y"},
+        data={"contestProbId": contest_prob_id, "categoryId": category_id, "categoryType": category_type, "isPostMethod": "Y"},
     )
     if r.status_code != 200 or client._is_error_page(r.text):
         raise SubmitError(f"풀이 화면을 열지 못했습니다 (HTTP {r.status_code}) — contestProbId={contest_prob_id}")
@@ -109,8 +116,8 @@ def get_context(session: requests.Session, settings: Settings, contest_prob_id: 
     title = soup.select_one("h3.problem_title")
     return SubmitContext(
         contest_prob_id,
-        (cat_id.get("value") if cat_id else "") or "",
-        (cat_type.get("value") if cat_type else "") or "BOX",
+        (cat_id.get("value") if cat_id else "") or category_id,
+        (cat_type.get("value") if cat_type else "") or category_type,
         title.get_text(" ", strip=True) if title else "",
     )
 

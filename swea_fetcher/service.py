@@ -447,10 +447,10 @@ def submit_problem(
     _emit(progress, "로그인 세션 확인")
     session = auth.get_session(settings)
     _emit(progress, f"문제 번호 {num} 로 찾는 중")
-    cid = lookup.find_by_number(session, settings, num)
+    cid, cat_type, cat_id = lookup.find_category(session, settings, num)
 
     def run() -> SubmitResult:
-        ctx = submit.get_context(session, settings, cid)
+        ctx = submit.get_context(session, settings, cid, cat_type, cat_id)
         _emit(progress, f"컴파일 확인: {ctx.title or cid}")
         submit.compile_source(session, ctx, prepared)
         _emit(progress, "제출 중 (채점 대기)")

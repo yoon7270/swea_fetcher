@@ -222,7 +222,8 @@ def test_find_by_number_scans_club_boxes_and_caches_all(settings):
     )
     assert lookup.find_by_number(s, settings, 25730) == ID
     idx = lookup.load_index(settings)
-    assert idx["25730"] == {"id": ID, "title": "항아리 게임", "club": "SSAFY", "box": "09.03 모의"}
+    assert {k: idx["25730"][k] for k in ("id", "title", "club", "box")} == {"id": ID, "title": "항아리 게임", "club": "SSAFY", "box": "09.03 모의"}
+    assert idx["25730"]["box_id"] and idx["25730"]["club_id"]  # M8: 제출 category 용
     assert idx["1"]["id"] == ID3 and idx["24973"]["id"] == ID2  # 훑은 것은 모두 캐시
     assert len(s.calls) == 6  # 찾은 뒤 더 훑지 않음
 

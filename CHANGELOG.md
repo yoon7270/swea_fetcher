@@ -2,6 +2,13 @@
 
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/). 버전은 `swea_fetcher/__init__.py` 의 `__version__` 하나로 관리한다.
 
+## v0.6.1 — 2026-09-17
+
+### 수정
+- **제출 기록이 문제의 '제출결과' 에 남지 않던 문제**: 제출 시 문제를 연 경로의 category 를 보내야 한다. 공개 Problem / User Problem 은 `("CODE", contestProbId)`, Solving Club 문제 상자는 `("BOX", probBoxId)`. `lookup.find_category` 가 색인의 발견 경로로 정하고, 옛 색인에는 상자 ID 가 없어 클럽 상자를 다시 훑는다 (한 번만)
+- `--refresh-index` 가 기존 색인을 지우던 동작 제거 (캐시만 무시)
+- 테스트 픽스처의 클럽 이름을 `DUMMY_CLUB` 으로 치환
+
 ## v0.6.0 — 2026-09-17 "SWEA 제출 → Pass 면 푸시"
 
 ### 변경 (v0.5.0 의 트리거 교체)

@@ -164,3 +164,4 @@ E2E: `swea-fetch -v <첨부 링크 URL> _e2e_test` (문제 `AZq-gSmq_RfHBISS`, 2
 - 판정 (`processSubmit`): `vo.runError` 비어 있지 않음 → 오답(런타임 에러); `runValue` 에 `"Pass"` 포함 **and** `timeOut == ""` and `usrScore != "0"` → **Pass**; 그 외 오답 — `testCaseNo`/`correctedCases` 가 있으면 "N개 중 M개", 없으면 `usrScore / 100.0`. `timeOut != ""` 는 제한시간 초과.
 - 제출 후 화면은 `solvingProblem.do` 로 다시 이동할 뿐, 별도 결과 조회 API 없음.
 - 미실측: `submit.do` 의 실제 응답 (분류기가 실제 제출을 막아 사용자가 1회 실행해 확인해야 함). `AP` 의미. 언어별 `langType` 은 Python 만 확인.
+- **category 가 맞아야 제출 기록이 남는다 (2026-09-17 실측)**: `categoryType=BOX`+빈 `categoryId` 로 제출하면 채점은 되지만 문제의 '제출결과' 에 기록되지 않음(제출횟수 안 늘어남). 올바른 값은 문제를 연 경로: 공개 Problem / User Problem 은 `fnGoProblemTest(id, id, "CODE")` → `("CODE", contestProbId)`, Solving Club 상자는 `fnGoProblemTest(id, probBoxId, "BOX")` → `("BOX", probBoxId)` (`/main/js/common-problem.js`). `lookup.find_category` 가 색인의 발견 경로로 결정하고, 옛 색인엔 `box_id` 가 없어 클럽 상자를 다시 훑는다. 풀이 화면은 보낸 category 를 hidden 으로 그대로 돌려준다.

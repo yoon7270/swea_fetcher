@@ -159,6 +159,44 @@ def search_problem_lists(session: requests.Session, num: int) -> tuple[str, str,
 # --- 공개 API -----------------------------------------------------------------------
 
 
+CATEGORY_CODE = "CODE"  # 공개 Problem / User Problem: categoryId = contestProbId (fnGoProblemTest(id, id, "CODE"))
+CATEGORY_BOX = "BOX"  # Solving Club 문제 상자: categoryId = probBoxId (fnGoProblemTest(id, probBoxId, "BOX"))
+
+
+def find_category(session: requests.Session, settings: Settings, num: int) -> tuple[str, str, str]:
+    """제출에 필요한 (contestProbId, categoryType, categoryId).
+
+    풀이 화면과 compile/submit.do 는 문제를 연 경로의 category 를 요구한다 — 틀리면 채점은 되지만
+    제출 기록이 문제의 '제출결과' 에 남지 않는다 (M8 실측). 클럽 문제는 상자 ID 가 필요하므로
+    옛 색인(box_id 없음)이면 상자를 다시 훑는다.
+    """
+    cid = find_by_number(session, settings, num)
+    entry = load_index(settings).get(str(num), {})
+    if not entry.get("club"):
+        return cid, CATEGORY_CODE, cid
+    if not entry.get("box_id"):
+        log.info("색인에 문제 상자 ID 가 없어 클럽 상자를 다시 훑습니다 (%s)", num)
+        box_id = _with_relogin(session, settings, lambda: _rescan_box_id(session, settings, num))
+        if not box_id:
+            raise InvalidInput(f"문제 {num} 의 Solving Club 문제 상자를 찾지 못했습니다 — 제출에 필요합니다 (--refresh-index 후 재시도)")
+        return cid, CATEGORY_BOX, box_id
+    return cid, CATEGORY_BOX, entry["box_id"]
+
+
+def _rescan_box_id(session: requests.Session, settings: Settings, num: int) -> str | None:
+    """클럽 상자만 다시 훑어 num 이 든 상자의 probBoxId 를 찾고 색인에 club_id/box_id 를 채운다."""
+    index = load_index(settings)
+    for club_id, club_title in list_my_clubs(session):
+        for box_id, box_title in list_boxes(session, club_id):
+            for p_num, p_id, p_title in list_box_problems(session, club_id, box_id):
+                index[str(p_num)] = {"id": p_id, "title": p_title, "club": club_title, "box": box_title,
+                                     "club_id": club_id, "box_id": box_id}
+            save_index(settings, index)
+            if str(num) in index and index[str(num)].get("box_id") == box_id:
+                return box_id
+    return None
+
+
 def find_by_number(session: requests.Session, settings: Settings, num: int, refresh: bool = False) -> str:
     """문제 번호로 contestProbId 를 찾는다.
 
@@ -166,8 +204,8 @@ def find_by_number(session: requests.Session, settings: Settings, num: int, refr
     찾으면 ID 를 돌려주고, 훑는 동안 본 문제는 모두 캐시에 넣는다. 못 찾으면 InvalidInput.
     """
     key = str(num)
-    index = {} if refresh else load_index(settings)
-    if key in index and index[key].get("id"):
+    index = load_index(settings)  # refresh 여도 기존 항목은 유지 (캐시 무시만)
+    if not refresh and key in index and index[key].get("id"):
         log.debug("색인 캐시에서 %s → %s", key, index[key]["id"])
         return index[key]["id"]
 
@@ -189,7 +227,8 @@ def find_by_number(session: requests.Session, settings: Settings, num: int, refr
             for box_id, box_title in list_boxes(session, club_id):
                 problems = list_box_problems(session, club_id, box_id)
                 for p_num, p_id, p_title in problems:
-                    index[str(p_num)] = {"id": p_id, "title": p_title, "club": club_title, "box": box_title}
+                    index[str(p_num)] = {"id": p_id, "title": p_title, "club": club_title, "box": box_title,
+                                         "club_id": club_id, "box_id": box_id}
                 save_index(settings, index)
                 if key in index:
                     log.info("찾음: %s (%s / %s)", index[key]["title"], club_title, box_title)
