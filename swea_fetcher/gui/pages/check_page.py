@@ -108,6 +108,7 @@ class CheckPage(QWidget):
             w.setAcceptDrops(False)
         self.hint = QLabel(self._hint_text())
         set_class(self.hint, "hint")
+        self.hint.setWordWrap(True)  # 720 폭에서 잘리지 않도록
         grid.addWidget(self.hint, 2, 1, 1, 5)
         self.err_label = QLabel()
         set_class(self.err_label, "error")

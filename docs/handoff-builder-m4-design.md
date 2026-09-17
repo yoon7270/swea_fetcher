@@ -57,3 +57,42 @@
 **스펙 §15 추가 항목**: 없음 (W6 상태바만 "고정폭 360 elide" 로 구현했음을 §3 상태바 줄에 반영 부탁).
 
 **720×480 실창 확인 요청**: offscreen 에서 W2·W3·W4·W6 를 확인했으나 실제 창의 Tab 포커스 점선(W4)은 캡처로 볼 수 없어 디자이너 또는 사용자가 한 번 확인해 주세요.
+
+---
+
+## designer → builder: exe 재빌드 요청 (2026-09-17)
+
+사용자가 실창 4장(저장 대기·검증 대기·최근·설정)을 보내 주셨는데 **W1~W6 수정 전 빌드**였습니다. 근거 2가지:
+
+- 설정 페이지 타임아웃 QSpinBox 에 깨진 스핀 화살표가 그대로 (W5 미반영)
+- 검증 페이지 힌트가 옛 문구 "또는 .py 파일을 이 창에 끌어다 놓으세요" (S6 미반영)
+
+S1(최근 테이블 헤더 왼쪽 정렬)만 들어 있는 것으로 보아 사용자는 `dist/swea-fetch-gui.exe`(v0.3.1, M4c 빌드)를 실행 중입니다. 소스 수정만으로는 사용자 화면이 바뀌지 않습니다.
+
+### 요청
+
+1. `packaging/swea-fetch-gui.spec` 으로 **exe 재빌드** (W1~W6 + S1~S7 반영 커밋 기준). `--onefile --windowed --icon design/icons/app.ico` 그대로.
+2. 빌드 후 `SWEA_FETCH_SELFTEST` 자가진단 통과 확인 + **실창 캡처 4장** 을 `docs/gui-screenshots/real/` 에 추가 (offscreen 아님, 사용자 PC 와 같은 Windows 렌더링):
+   - `settings.png` — 스핀 버튼 없음 (W5)
+   - `check-720.png` — 창 너비 720 에서 [실행] 이 행2 로 내려감 + 새 힌트 문구 (W2·S6)
+   - `fetch-success.png` — 결과 카드의 `원본 …`/`뼈대 생성` 이 맑은 고딕 크기 (W1)
+   - `check-fail-selected.png` — diff 행 하나 선택해 왼쪽 2px 파란 세로선 (W3)
+3. 태그: 기존 `v0.3.1` 은 두고 **`v0.3.2`** 로 (디자인 검토 반영 빌드). 사용자에게는 exe 교체 안내 한 줄 — "바탕화면 exe 를 새 `dist/swea-fetch-gui.exe` 로 덮어쓰기".
+4. `.gitignore` 상 `dist/` 는 미커밋 그대로. Release 첨부 여부는 사용자 결정 (planner 전달문 §3-5).
+
+### 디자이너 확인 절차
+
+위 캡처 4장이 오면 캡처만으로 W1·W2·W5·S6 확인 → 사용자가 새 exe 로 Tab 포커스(W4)와 Ctrl+C 복사(W3)를 한 번 눌러 보면 **M4 디자인 게이트 종료**. 추가 라운드 없음.
+
+---
+
+## builder 회신 2 (2026-09-17, 재빌드)
+
+1. **exe 재빌드 완료** — `dist/swea-fetch-gui.exe` (55.8 MB, W1~W6·S1~S7 반영 커밋 기준, `packaging/swea-fetch-gui.spec` 그대로). 자가진단(`SWEA_FETCH_SELFTEST`) 통과: 아이콘 10개, `WinVaultKeyring`, 설정 로드, 창 생성 `● 로그인됨`.
+2. **실렌더링 캡처 4장** — `docs/gui-screenshots/real/` (Windows QPA 로 실제 창을 띄워 `grab()`, offscreen 아님):
+   - `settings.png` (W5 스핀 버튼 없음) · `check-720.png` (W2 [실행] 행2 + S6 새 힌트) · `fetch-success.png` (W1 카드 한글이 맑은 고딕) · `check-fail-selected.png` (W3 선택 행 왼쪽 2px 파란 세로선)
+   - 캡처 중 발견·수정: 720 폭에서 검증 힌트가 잘려 `setWordWrap(True)` 추가.
+3. **태그 `v0.3.2`** (버전 0.3.2). `v0.3.1` 은 유지. `dist/` 미커밋.
+4. 사용자 안내: **바탕화면의 exe 를 새 `dist\swea-fetch-gui.exe` 로 덮어쓰기** (바로 가기를 만들었다면 대상은 그대로).
+
+남은 확인 (사용자, 새 exe 로): Tab 으로 내비 진입 시 포커스 점선(W4), 검증 diff 에서 행 클릭 후 Ctrl+C 붙여넣기(W3). 이 둘이 되면 디자인 게이트 종료.

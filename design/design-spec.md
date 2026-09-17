@@ -130,7 +130,7 @@ QMainWindow  880×600 (min 720×480)   배경 bg
 └─ QStatusBar (h 26, surface, border-top)
      ├─ 좌: QLabel[class=login]  "● 로그인됨" (state=ok, success_text) / "○ 세션 없음" (state=none, text_muted) / "○ 설정 없음" (state=none, ConfigMissing 일 때)
      ├─ 중: showMessage() 임시 메시지 (4초 후 자동 소거)
-     └─ 우: 루트 경로 QLabel[class=hint], 중간 생략(elide middle), 전체 경로는 툴팁
+     └─ 우: 루트 경로 QLabel[class=hint], **고정폭 360** 안에서 중간 생략(`elidedText` ElideMiddle), 전체 경로는 툴팁 (permanent 위젯은 Ignored 정책에서 0폭이 되어 고정폭으로 구현 — M4 W6)
 ```
 
 - 내비 선택 상태: 배경 `primary_subtle`, 글자 `primary_text` semibold, 아이콘은 같은 SVG 를 `primary_text` 로 재착색 (§12).
