@@ -276,3 +276,21 @@ def test_strip_password_noop(config_dir):
     (config_dir / ".env").write_text("SWEA_ID=me\n", encoding="utf-8")
     assert config.strip_password_from_env_file(config_dir) is False
     assert (config_dir / ".env").read_text(encoding="utf-8") == "SWEA_ID=me\n"
+
+
+# =============================================================================
+# v0.3.3: SWEA_PYTHON
+# =============================================================================
+
+
+def test_python_default_none(env_with_id, config_dir, fake_keyring):
+    fake_keyring.store[(KEYRING_SERVICE, DUMMY_ID)] = DUMMY_PW
+    assert load_settings(config_dir).python is None
+
+
+def test_python_from_env_file_and_env_var(root_dir, config_dir, fake_keyring, monkeypatch):
+    _write_env(config_dir, SWEA_ROOT=str(root_dir), SWEA_ID=DUMMY_ID, SWEA_PYTHON="C:/py/python.exe")
+    fake_keyring.store[(KEYRING_SERVICE, DUMMY_ID)] = DUMMY_PW
+    assert load_settings(config_dir).python == "C:/py/python.exe"
+    monkeypatch.setenv("SWEA_PYTHON", "  D:/other/python.exe  ")
+    assert load_settings(config_dir).python == "D:/other/python.exe"

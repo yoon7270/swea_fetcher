@@ -535,3 +535,98 @@ def test_func_worker(qtbot):
         w.start()
     w.wait()
     assert sig.args == [42]
+
+
+# =============================================================================
+# M5 #3: 검증 취소
+# =============================================================================
+
+INFINITE = "import time\nprint('#1 3', flush=True)\nwhile True:\n    time.sleep(0.05)\n"
+
+
+def _infinite_problem(root: Path, num: int = 1234) -> Path:
+    d = root / "sim" / str(num)
+    d.mkdir(parents=True)
+    (d / "input.txt").write_text("1\n", encoding="utf-8")
+    (d / "output.txt").write_text("#1 3\n", encoding="utf-8")
+    (d / f"{num}.py").write_text(INFINITE, encoding="utf-8")
+    return d
+
+
+def test_check_worker_cancel_kills_running_process(qtbot, settings):
+    d = _infinite_problem(settings.root)
+    w = workers.CheckWorker(d, settings, timeout=30)
+    with qtbot.waitSignal(w.finished_ok, timeout=15000) as sig:
+        w.start()
+        qtbot.waitUntil(lambda: w._proc is not None and w._proc.poll() is None, timeout=WAIT)
+        w.cancel()
+    w.wait()
+    res = sig.args[0]
+    assert res.cancelled is True and res.passed is False and res.timed_out is False
+    assert w._proc.poll() is not None  # 프로세스 종료됨
+
+
+def test_check_worker_cancel_before_process_starts(qtbot, settings):
+    d = _infinite_problem(settings.root)
+    w = workers.CheckWorker(d, settings, timeout=30)
+    w.cancel()  # 아직 안 떴음
+    with qtbot.waitSignal(w.finished_ok, timeout=15000) as sig:
+        w.start()
+    w.wait()
+    assert sig.args[0].cancelled is True
+
+
+def test_check_worker_cancel_after_finish_is_noop(qtbot, settings):
+    d = settings.root / "sim" / "1"
+    d.mkdir(parents=True)
+    (d / "input.txt").write_text("1\n")
+    (d / "output.txt").write_text("x\n")
+    (d / "1.py").write_text("print('x')\n")
+    w = workers.CheckWorker(d, settings, timeout=30)
+    with qtbot.waitSignal(w.finished_ok, timeout=15000) as sig:
+        w.start()
+    w.wait()
+    w.cancel()  # 예외 없어야 함
+    assert sig.args[0].passed is True and sig.args[0].cancelled is False
+
+
+def test_check_page_cancel_button_flow(main_window, qtbot):
+    w = main_window
+    _infinite_problem(w.settings.root)
+    cp = w.check_page
+    assert not cp.cancel_btn.isVisibleTo(cp)
+    cp.set_target("sim", 1234)
+    cp.start()
+    assert cp.cancel_btn.isVisibleTo(cp) and cp.cancel_btn.isEnabled()
+    assert not cp.run_btn.isEnabled()
+    qtbot.waitUntil(lambda: cp._worker is not None and cp._worker._proc is not None, timeout=WAIT)
+    cp.cancel_btn.click()
+    assert not cp.cancel_btn.isEnabled()
+    qtbot.waitUntil(lambda: cp._worker is None, timeout=15000)
+    assert cp.badge.text() == "취소됨"
+    assert "취소했습니다" in cp.banner.title.text()
+    assert not cp.cancel_btn.isVisibleTo(cp)
+    assert cp.run_btn.isEnabled() and cp.run_btn.text() == "실행"
+    assert not cp.mismatch.isVisibleTo(cp) and not cp.elapsed.isVisibleTo(cp)
+    assert "SWEA Fetch" == w.windowTitle()
+
+
+def test_check_page_cancel_then_rerun_works(main_window, qtbot):
+    w = main_window
+    d = _infinite_problem(w.settings.root)
+    cp = w.check_page
+    cp.set_target("sim", 1234)
+    cp.start()
+    qtbot.waitUntil(lambda: cp._worker is not None and cp._worker._proc is not None, timeout=WAIT)
+    cp.cancel()
+    qtbot.waitUntil(lambda: cp._worker is None, timeout=15000)
+    (d / "1234.py").write_text("print('#1 3')\n", encoding="utf-8")
+    cp.start()
+    qtbot.waitUntil(lambda: cp._worker is None, timeout=30000)
+    assert cp.badge.text() == "통과"
+
+
+def test_check_page_cancel_when_idle_is_noop(main_window):
+    cp = main_window.check_page
+    cp.cancel()
+    assert cp._worker is None

@@ -211,3 +211,123 @@ def test_truncate_marks_cut():
     assert cut is True and "잘렸습니다" in text
     text, cut = checker._truncate(b"abc")
     assert (text, cut) == ("abc", False)
+
+
+# =============================================================================
+# v0.3.3: resolve_python / _python_cmd
+# =============================================================================
+
+
+import sys  # noqa: E402
+from dataclasses import replace  # noqa: E402
+
+
+@pytest.fixture
+def fake_py(tmp_path: Path) -> Path:
+    p = tmp_path / "bin" / "python.exe"
+    p.parent.mkdir()
+    p.write_text("")
+    return p
+
+
+def test_resolve_python_default_is_sys_executable_when_not_frozen(settings, monkeypatch):
+    monkeypatch.delenv("SWEA_PYTHON", raising=False)
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    assert checker.resolve_python(settings) == str(Path(sys.executable))
+    assert checker.resolve_python(None) == str(Path(sys.executable))
+
+
+def test_resolve_python_settings_override_first(settings, fake_py, monkeypatch):
+    monkeypatch.setenv("SWEA_PYTHON", str(fake_py.parent / "missing.exe"))
+    assert checker.resolve_python(replace(settings, python=str(fake_py))) == str(fake_py)
+
+
+def test_resolve_python_env_override_second(settings, fake_py, monkeypatch):
+    monkeypatch.setenv("SWEA_PYTHON", str(fake_py))
+    assert checker.resolve_python(settings) == str(fake_py)
+
+
+def test_resolve_python_skips_nonexistent_candidates(settings, fake_py, monkeypatch):
+    monkeypatch.setenv("SWEA_PYTHON", str(fake_py.parent / "nope.exe"))
+    assert checker.resolve_python(replace(settings, python=str(fake_py.parent / "nope2.exe"))) == str(Path(sys.executable))
+
+
+def test_resolve_python_frozen_skips_sys_executable_and_uses_path(settings, fake_py, monkeypatch):
+    monkeypatch.delenv("SWEA_PYTHON", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(checker.shutil, "which", lambda name: str(fake_py) if name == "python" else None)
+    assert checker.resolve_python(settings) == str(fake_py)
+
+
+def test_resolve_python_frozen_never_returns_gui_exe(settings, tmp_path, monkeypatch):
+    gui = tmp_path / "swea-fetch-gui.exe"
+    gui.write_text("")
+    monkeypatch.delenv("SWEA_PYTHON", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(checker.shutil, "which", lambda name: str(gui) if name == "python" else None)
+    with pytest.raises(checker.PythonNotFound, match="SWEA_PYTHON"):
+        checker.resolve_python(settings)
+
+
+def test_resolve_python_not_found(settings, monkeypatch):
+    monkeypatch.delenv("SWEA_PYTHON", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(checker.shutil, "which", lambda name: None)
+    with pytest.raises(checker.PythonNotFound):
+        checker.resolve_python(settings)
+
+
+def test_python_cmd_adds_minus_3_for_py_launcher():
+    assert checker._python_cmd(r"C:\Windows\py.exe") == [r"C:\Windows\py.exe", "-3"]
+    assert checker._python_cmd(r"C:\py\python.exe") == [r"C:\py\python.exe"]
+
+
+def test_run_and_compare_reports_missing_python_as_note(problem_dir, settings, monkeypatch):
+    (problem_dir / "1234.py").write_text("print(1)\n", encoding="utf-8")
+
+    def boom(s):
+        raise checker.PythonNotFound("no python")
+
+    monkeypatch.setattr(checker, "resolve_python", boom)
+    res = run_and_compare(problem_dir, settings)
+    assert res.passed is False and res.note == "no python" and res.diff == []
+
+
+def test_run_and_compare_uses_settings_python(problem_dir, settings):
+    (problem_dir / "1234.py").write_text(SOLUTION_OK, encoding="utf-8")
+    assert run_and_compare(problem_dir, replace(settings, python=sys.executable), timeout=30).passed is True
+
+
+# =============================================================================
+# M5 #3: on_start / 취소
+# =============================================================================
+
+
+def test_run_and_compare_on_start_receives_live_process(problem_dir, settings):
+    (problem_dir / "1234.py").write_text(SOLUTION_OK, encoding="utf-8")
+    seen = {}
+
+    def on_start(proc):
+        seen["pid"] = proc.pid
+        seen["alive"] = proc.poll() is None
+
+    res = run_and_compare(problem_dir, settings, timeout=30, on_start=on_start)
+    assert res.passed is True and seen["pid"] > 0 and seen["alive"] is True
+
+
+def test_run_and_compare_cancelled_via_on_start(problem_dir, settings):
+    (problem_dir / "1234.py").write_text("import time\nprint('#1 3', flush=True)\nwhile True:\n    time.sleep(0.05)\n", encoding="utf-8")
+
+    def cancel(proc):
+        proc._swea_cancelled = True
+        proc.kill()
+
+    res = run_and_compare(problem_dir, settings, timeout=30, on_start=cancel)
+    assert res.cancelled is True and res.passed is False and res.timed_out is False
+    assert res.note == "취소했습니다" and res.diff == [] and res.stderr == ""
+    assert res.elapsed < 10
+
+
+def test_run_and_compare_default_is_not_cancelled(problem_dir, settings):
+    (problem_dir / "1234.py").write_text(SOLUTION_OK, encoding="utf-8")
+    assert run_and_compare(problem_dir, settings, timeout=30).cancelled is False
