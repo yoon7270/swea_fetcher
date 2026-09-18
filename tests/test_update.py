@@ -171,6 +171,16 @@ def test_check_failure_backs_off_for_a_day_even_without_prior_success(config_dir
     assert fetch["calls"] == 1, "실패 1시간 뒤에 다시 조회함 — 매 명령마다 타임아웃(최대 6초)을 기다리게 됨"
 
 
+def test_check_fresh_checked_at_without_latest_is_none_and_no_http(config_dir, fetch):
+    """W1 회귀: 실패 직후 캐시 상태(checked_at 만 있음)에서 하루 안에는 조회하지 않고 None."""
+    update.write_cache(config_dir, checked_at=(NOW - timedelta(hours=23)).isoformat())
+    assert check(config_dir, now=NOW) is None
+    assert fetch["calls"] == 0
+    # 하루가 지나면 다시 조회한다
+    assert check(config_dir, now=NOW + timedelta(hours=2)).latest == NEWER
+    assert fetch["calls"] == 1
+
+
 def test_check_failure_with_stale_cache_returns_cached(config_dir, fetch):
     update.write_cache(config_dir, latest="9.9.9", url="old", checked_at=(NOW - timedelta(days=2)).isoformat())
     fetch["raise"] = requests.ConnectionError("down")

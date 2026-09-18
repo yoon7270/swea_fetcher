@@ -8,7 +8,9 @@ from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
+    QButtonGroup,
     QCheckBox,
+    QRadioButton,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -204,17 +206,58 @@ class SettingsPage(QWidget):
         tpl_hint = QLabel("변수: {num} {title} {topic} {date} — 비우면 기본값. 입력 후 Enter 또는 포커스 이동으로 저장")
         set_class(tpl_hint, "hint")
         tpl_hint.setWordWrap(True)
-        self.auto_push = QCheckBox("SWEA 제출 결과가 Pass 이면 자동으로 커밋 + 푸시 (확인 없음)")
-        auto_hint = QLabel("기본 꺼짐. 켜면 [SWEA 제출] 로 Pass 를 받은 풀이가 확인 없이 원격에 올라갑니다. 로컬 검증 통과만으로는 올라가지 않습니다")
+        self.auto_push = QCheckBox("GitHub 자동 동기화 켜기")
+        auto_hint = QLabel("선택한 시점마다 확인 없이 GitHub 에 올라갑니다. 공용 PC 에선 자리 반납 시 logout --all 과 git 자격증명 정리를 잊지 마세요")
         set_class(auto_hint, "hint")
         auto_hint.setWordWrap(True)
+        # 범위
+        self.scope_problem = QRadioButton("문제 폴더만")
+        self.scope_root = QRadioButton("루트 전체 (swea 폴더의 모든 변경, .gitignore 제외)")
+        self.scope_group = QButtonGroup(self)
+        self.scope_group.addButton(self.scope_problem)
+        self.scope_group.addButton(self.scope_root)
+        self.scope_problem.setChecked(True)
+        scope_row = QHBoxLayout()
+        scope_row.addWidget(self.scope_problem)
+        scope_row.addWidget(self.scope_root)
+        scope_row.addStretch(1)
+        scope_wrap = QWidget()
+        scope_wrap.setLayout(scope_row)
+        # 시점
+        self.on_pass = QCheckBox("SWEA 제출 Pass")
+        self.on_check = QCheckBox("로컬 검증 통과")
+        self.on_save = QCheckBox("저장 직후")
+        self.on_watch = QCheckBox("변경 감지 — 앱이 켜져 있는 동안 파일이 바뀌면 90초 뒤 자동 (버튼 불필요)")
+        self.on_pass.setChecked(True)
+        when_box = QVBoxLayout()
+        when_row = QHBoxLayout()
+        for w in (self.on_pass, self.on_check, self.on_save):
+            when_row.addWidget(w)
+        when_row.addStretch(1)
+        when_box.addLayout(when_row)
+        when_box.addWidget(self.on_watch)
+        when_wrap = QWidget()
+        when_wrap.setLayout(when_box)
+        self.sync_on_close = QCheckBox("앱 종료 시 남은 변경 동기화")
+        self.sync_now_btn = QPushButton("지금 동기화")
+        l_scope = QLabel("범위")
+        l_when = QLabel("시점")
+        for lb in (l_scope, l_when):
+            set_class(lb, "muted")
+            lb.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
         g5.addWidget(l_repo, 0, 0)
         g5.addWidget(self.git_status, 0, 1)
+        g5.addWidget(self.sync_now_btn, 0, 2)
         g5.addWidget(l_tpl, 1, 0)
-        g5.addWidget(self.commit_template, 1, 1)
-        g5.addWidget(tpl_hint, 2, 1)
-        g5.addWidget(self.auto_push, 3, 1)
-        g5.addWidget(auto_hint, 4, 1)
+        g5.addWidget(self.commit_template, 1, 1, 1, 2)
+        g5.addWidget(tpl_hint, 2, 1, 1, 2)
+        g5.addWidget(self.auto_push, 3, 1, 1, 2)
+        g5.addWidget(auto_hint, 4, 1, 1, 2)
+        g5.addWidget(l_scope, 5, 0)
+        g5.addWidget(scope_wrap, 5, 1, 1, 2)
+        g5.addWidget(l_when, 6, 0)
+        g5.addWidget(when_wrap, 6, 1, 1, 2)
+        g5.addWidget(self.sync_on_close, 7, 1, 1, 2)
         g5.setColumnStretch(1, 1)
         root.addWidget(card5)
 
@@ -273,6 +316,12 @@ class SettingsPage(QWidget):
         self.update_check.toggled.connect(lambda on: update.set_disabled(self.config_dir, not on))
         self.commit_template.editingFinished.connect(self._save_template)
         self.auto_push.clicked.connect(self._auto_push_clicked)
+        self.scope_root.toggled.connect(self._scope_root_toggled)
+        for w in (self.on_pass, self.on_check, self.on_save, self.on_watch):
+            w.toggled.connect(lambda _c: self._save_autosync())
+        self.scope_problem.toggled.connect(lambda _c: self._save_autosync())
+        self.sync_on_close.toggled.connect(lambda on: self.qs.setValue("autosync/sync_on_close", on))
+        self.sync_now_btn.clicked.connect(self._sync_now_clicked)
         for w, err in ((self.root_edit, self.root_err), (self.id_edit, self.id_err), (self.pw_edit, self.pw_err)):
             w.textEdited.connect(lambda _t, w=w, err=err: (set_invalid(w, False), err.hide()))
 
@@ -295,7 +344,19 @@ class SettingsPage(QWidget):
         # GitHub 연동 (M7)
         tpl = settings.commit_template if settings else (values.get("SWEA_COMMIT_TEMPLATE") or "")
         self.commit_template.setText("" if tpl == gitops.DEFAULT_COMMIT_TEMPLATE else tpl)
-        self.auto_push.setChecked(bool(settings.auto_push_on_pass) if settings else config._truthy(values.get("SWEA_AUTO_PUSH")))
+        self._loading_autosync = True
+        self.auto_push.setChecked(bool(settings.auto_push) if settings else config._truthy(values.get("SWEA_AUTO_PUSH")))
+        scope = settings.auto_push_scope if settings else (values.get("SWEA_AUTO_PUSH_SCOPE") or "problem")
+        self.scope_root.setChecked(scope == "root")
+        self.scope_problem.setChecked(scope != "root")
+        on = set(settings.auto_push_on) if settings else {m.strip() for m in (values.get("SWEA_AUTO_PUSH_ON") or "pass").split(",")}
+        self.on_pass.setChecked("pass" in on)
+        self.on_check.setChecked("check" in on)
+        self.on_save.setChecked("save" in on)
+        self.on_watch.setChecked("watch" in on)
+        self.sync_on_close.setChecked(self.qs.value("autosync/sync_on_close", True, type=bool))
+        self.sync_on_close.setVisible(self.on_watch.isChecked())
+        self._loading_autosync = False
         self._git_root = settings.root if settings else None
         self._git_status_stale = True
         if self.isVisible():
@@ -359,10 +420,10 @@ class SettingsPage(QWidget):
         self.settings_changed.emit()
 
     def _auto_push_clicked(self, on: bool) -> None:
-        """켤 때 경고 1회 (사용자 클릭에만 반응 — setChecked 로는 안 뜸)."""
+        """켤 때 경고 1회 (사용자 클릭에만 반응)."""
         if on:
-            box = QMessageBox(QMessageBox.Icon.Warning, "자동 커밋 + 푸시",
-                              "SWEA 채점이 Pass 일 때마다 확인 없이 그 문제 폴더를 커밋하고 푸시합니다.\n올라간 코드는 공개 저장소에 남습니다 (되돌리기 안내는 문제 해결 문서에).\n\n켤까요?",
+            box = QMessageBox(QMessageBox.Icon.Warning, "GitHub 자동 동기화",
+                              "선택한 시점마다 확인 없이 GitHub 에 올라갑니다.\n루트 전체를 고르면 풀이 외 파일도 포함됩니다.\n공용 PC 에선 자리 반납 시 logout --all 과 git 자격증명 정리를 잊지 마세요.\n\n켤까요?",
                               parent=self)
             ok = box.addButton("켜기", QMessageBox.ButtonRole.AcceptRole)
             cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
@@ -372,9 +433,77 @@ class SettingsPage(QWidget):
             if box.clickedButton() is not ok:
                 self.auto_push.setChecked(False)
                 return
-        service.set_env_values(self.config_dir, SWEA_AUTO_PUSH="1" if on else "0")
-        self.status_message.emit("SWEA Pass 시 자동 커밋+푸시를 " + ("켰습니다" if on else "껐습니다"))
+        self._save_autosync()
+        self.status_message.emit("GitHub 자동 동기화를 " + ("켰습니다" if on else "껐습니다"))
+
+    def _scope_root_toggled(self, on: bool) -> None:
+        """루트 전체를 처음 고르면 올라갈 파일 수·예시를 보여주고 확인 (§5)."""
+        if getattr(self, "_loading_autosync", False):
+            return
+        if on and self.settings is not None:
+            files = self._root_pending_files()
+            if files:
+                sample = ", ".join(files[:5])
+                box = QMessageBox(QMessageBox.Icon.Warning, "루트 전체 동기화",
+                                  f"지금 루트에 미커밋 파일 {len(files)}개가 있습니다 — 예: {sample}\n\n루트 전체를 켜면 이 파일들도 GitHub 에 올라갑니다. .gitignore 로 제외를 권장합니다. 계속할까요?",
+                                  parent=self)
+                ok = box.addButton("루트 전체 사용", QMessageBox.ButtonRole.AcceptRole)
+                cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+                box.setDefaultButton(cancel)
+                box.setEscapeButton(cancel)
+                box.exec()
+                if box.clickedButton() is not ok:
+                    self.scope_problem.setChecked(True)
+                    return
+        self._save_autosync()
+
+    def _root_pending_files(self) -> list[str]:
+        try:
+            repo = gitops.find_repo(self.settings.root)
+            if repo is None:
+                return []
+            out = gitops._ok(["status", "--porcelain", "--untracked-files=all"], repo.toplevel) or ""
+            return [ln[3:].strip().strip('"') for ln in out.splitlines() if ln.strip()]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _save_autosync(self) -> None:
+        if getattr(self, "_loading_autosync", False):
+            return
+        on = {m for m, w in (("pass", self.on_pass), ("check", self.on_check), ("save", self.on_save), ("watch", self.on_watch)) if w.isChecked()}
+        if not on:
+            on = {"pass"}
+        self.sync_on_close.setVisible(self.on_watch.isChecked())
+        service.set_env_values(
+            self.config_dir,
+            SWEA_AUTO_PUSH="1" if self.auto_push.isChecked() else "0",
+            SWEA_AUTO_PUSH_SCOPE="root" if self.scope_root.isChecked() else "problem",
+            SWEA_AUTO_PUSH_ON=",".join(sorted(on)),
+        )
         self.settings_changed.emit()
+
+    def _sync_now_clicked(self) -> None:
+        if self.settings is None or self._git_worker is not None:
+            return
+        self.sync_now_btn.setEnabled(False)
+        self.sync_now_btn.setText("동기화 중…")
+        self._git_worker = FuncWorker(lambda: service.sync_now(self.settings, reason="manual"), self)
+        self._git_worker.finished_ok.connect(self._on_sync_now)
+        self._git_worker.failed.connect(lambda t, h, d: self.banner.show_message("error", f"동기화 실패: {t}", h))
+        self._git_worker.finished.connect(self._sync_now_cleanup)
+        self._git_worker.start()
+
+    def _on_sync_now(self, result) -> None:
+        if result is None:
+            self.banner.show_message("info", "동기화할 수 없습니다", "git 저장소·origin 을 확인하세요 (README 'GitHub 자동 동기화')")
+        else:
+            state = "error" if result.failed else "success"
+            self.banner.show_message(state, f"동기화: {result.note}", result.output[-400:] if result.output else "")
+
+    def _sync_now_cleanup(self) -> None:
+        self._git_worker = None
+        self.sync_now_btn.setEnabled(True)
+        self.sync_now_btn.setText("지금 동기화")
 
     def show_first_run(self) -> None:
         self.banner.show_message("info", "처음 실행 — 계정 설정이 필요합니다",

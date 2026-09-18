@@ -255,15 +255,47 @@ git push -u origin main
 
 ![커밋 + 푸시 확인](docs/gui-screenshots/8b-push-dialog.png)
 
-**자동 모드 (옵트인)** — 설정 페이지 **"SWEA 제출 결과가 Pass 이면 자동으로 커밋 + 푸시"** 를 켜면 Pass 를 받을 때마다 확인 없이 올라갑니다. 켤 때 경고가 한 번 뜹니다. 로컬 검증 통과만으로는 절대 올라가지 않습니다. 잘못 올렸으면 [되돌리기](docs/troubleshooting.md#자동-푸시를-되돌리려면).
+### 자동 동기화 (옵트인)
 
-![자동 푸시됨](docs/gui-screenshots/10d-submit-pass-auto-pushed.png)
+설정 페이지 **"GitHub 자동 동기화 켜기"** → **범위** 와 **시점** 을 고르면 버튼 없이 알아서 커밋+푸시됩니다. 켤 때 경고가 한 번 뜨고, 로컬 검증 통과만으로는(그 시점을 안 골랐으면) 올라가지 않습니다.
 
-![GitHub 연동 설정](docs/gui-screenshots/9-settings-github.png)
+![자동 동기화 설정](docs/gui-screenshots/12-autosync-settings.png)
 
-커밋 메시지 템플릿은 기본 `solve: {num}. {title} ({topic})` — 변수 `{num}` `{title}` `{topic}` `{date}`.
+**범위**
+
+| 값 | 올라가는 것 |
+|---|---|
+| 문제 폴더만 (기본) | 변경된 `{주제}/{번호}/` 폴더들만. 루트의 다른 파일은 안 건드림 |
+| 루트 전체 | swea 폴더의 모든 변경 (`.gitignore` 제외). 풀이 외 파일도 포함되니 주의 — 처음 고르면 올라갈 파일 수·예시를 확인창으로 보여줍니다 |
+
+**시점** (여러 개 선택 가능)
+
+| 값 | 언제 |
+|---|---|
+| SWEA 제출 Pass (기본) | [SWEA 제출] 결과가 Pass 일 때 |
+| 로컬 검증 통과 | [실행] 이 통과할 때 |
+| 저장 직후 | 문제를 저장한 직후 |
+| **변경 감지** | **버튼 없이** — 앱이 켜져 있는 동안 파일이 바뀌면 90초 뒤 자동. 종료 시 남은 변경도 1회 동기화(옵션) |
+
+> 버튼 없이 쓰려면 **변경 감지** 를 켜고 앱(exe / `swea-fetch-gui`)을 실행해 두세요. 백그라운드 서비스는 만들지 않으므로 앱이 꺼져 있으면 동기화되지 않습니다.
+
+**루트 전체를 쓸 때** 는 `.gitignore` 로 잡파일을 빼두길 권장합니다:
+
+```
+.idea/
+__pycache__/
+*.pyc
+```
+
+상태바의 `⟳ 자동 동기화: 켜짐` 을 클릭하면 설정으로 갑니다. 반복 실패(충돌·인증)면 `⚠ 일시 중지` 로 바뀌고 도배하지 않습니다 → [문제 해결](docs/troubleshooting.md#자동-동기화가-일시-중지됐을-때). 잘못 올렸으면 [되돌리기](docs/troubleshooting.md#자동-푸시를-되돌리려면).
+
+커밋 메시지 템플릿은 기본 `solve: {num}. {title} ({topic})` — 변수 `{num}` `{title}` `{topic}` `{date}` (단일 문제 커밋에만 적용; 여러 문제·루트 범위는 `solve: 1225, 1226` / `sync: 날짜`).
 
 CLI:
+
+```powershell
+swea-fetch sync --scope root
+```
 
 ```powershell
 swea-fetch submit IM_test 25730 --push
@@ -273,7 +305,7 @@ swea-fetch submit IM_test 25730 --push
 swea-fetch push IM_test 25730 -m "solve: 25730"
 ```
 
-`submit` 은 확인 프롬프트 뒤 제출하고 결과를 출력합니다 (`-y` 로 생략). `--push` 는 **Pass 일 때만** 푸시. 오답은 종료 코드 8, git 실패는 7 → [문제 해결](docs/troubleshooting.md#swea-제출-종료-코드-8). `push --no-push` 는 커밋만.
+`submit` 은 확인 프롬프트 뒤 제출하고 결과를 출력합니다 (`-y` 로 생략). `--push` 는 **Pass 일 때만** 푸시. 오답은 종료 코드 8, git 실패는 7 → [문제 해결](docs/troubleshooting.md#swea-제출-종료-코드-8). `push --no-push` 는 커밋만. `swea-fetch sync [--scope problem|root] [--dry-run]` 는 자동 동기화를 수동 1회 실행(변경 감지는 GUI 전용 — 스케줄러로 `sync` 를 부르면 대체 가능). `fetch`/`check` 에 `--no-push` 로 이번만 해제.
 
 **공용 PC 주의** — Git Credential Manager 의 GitHub 로그인은 Windows 자격 증명 관리자에 남습니다 (`git:https://github.com` 항목). 자리를 떠날 때 `swea-fetch logout --all` 과 함께 그 항목도 지우세요 → [보안과 계정](#보안과-계정).
 

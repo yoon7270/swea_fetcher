@@ -245,8 +245,104 @@ def commit_and_push(
     """문제 폴더만 add → (변경 있으면) commit -- {rel} → push. 어떤 경우에도 예외 대신 GitResult."""
     problem_dir = Path(problem_dir)
     rel = problem_dir.resolve().relative_to(repo.toplevel).as_posix()
+    return _commit_push(repo, [rel], message, push=push, timeout=timeout)
+
+
+def changed_problem_dirs(repo: RepoInfo, root: Path) -> list[Path]:
+    """git status 에서 변경된 파일을 {topic..}/{num}/ 문제 폴더로 묶어 (root 기준) 절대경로 목록으로.
+
+    root 밖 변경, 그리고 숫자 폴더로 안 묶이는 변경(루트 바로 아래 파일 등)은 제외한다. 정렬·중복 제거.
+    """
+    root_r = Path(root).resolve()
+    status = _ok(["status", "--porcelain", "--untracked-files=all"], repo.toplevel)
+    if not status:
+        return []
+    dirs: set[Path] = set()
+    for line in status.splitlines():
+        raw = line[3:].split(" -> ")[-1].strip().strip('"')
+        if not raw:
+            continue
+        abspath = (repo.toplevel / raw).resolve()
+        try:
+            rel_parts = abspath.relative_to(root_r).parts
+        except ValueError:
+            continue  # root 밖
+        # rel_parts = (topic..., num, file) → num 세그먼트(숫자)를 찾아 그 상위까지가 문제 폴더
+        for i, seg in enumerate(rel_parts):
+            if seg.isdigit():
+                dirs.add(root_r.joinpath(*rel_parts[: i + 1]))
+                break
+    return sorted(dirs)
+
+
+def _scope_message(template: str, problem_dirs: list[Path], root: Path) -> str:
+    """범위 커밋 메시지. 문제 번호가 잡히면 `solve: 1225, 1226 (Queue)` (주제 하나일 때만 괄호), 아니면 `sync: {date}`."""
+    root_r = Path(root).resolve()
+    nums: list[int] = []
+    topics: set[str] = set()
+    for d in problem_dirs:
+        if d.name.isdigit():
+            nums.append(int(d.name))
+            try:
+                rel = d.resolve().relative_to(root_r).parts
+            except ValueError:
+                rel = ()
+            if len(rel) >= 2:
+                topics.add("/".join(rel[:-1]))
+    if nums:
+        nums_s = ", ".join(str(n) for n in sorted(set(nums)))
+        return f"solve: {nums_s}" + (f" ({next(iter(topics))})" if len(topics) == 1 else "")
+    return f"sync: {date.today().isoformat()}"
+
+
+def commit_and_push_scope(
+    repo: RepoInfo,
+    root: Path,
+    scope: str,
+    message_template: str = DEFAULT_COMMIT_TEMPLATE,
+    *,
+    push: bool = True,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> GitResult:
+    """범위별 커밋+푸시 (M11).
+
+    scope="problem": 변경된 문제 폴더들만 (각 폴더 pathspec) — 루트의 다른 변경은 안 건드림.
+    scope="root":    루트 서브트리 전체 (`git add -A -- {root}`), .gitignore 는 git 이 적용.
+    """
+    root_r = Path(root).resolve()
+    try:
+        root_rel = root_r.relative_to(repo.toplevel).as_posix() or "."
+    except ValueError:
+        root_rel = "."
+    problem_dirs = changed_problem_dirs(repo, root_r)
+    message = _scope_message(message_template, problem_dirs, root_r)
+    if scope == "root":
+        return _commit_push(repo, [root_rel], message, push=push, timeout=timeout, add_all=True)
+    # scope == "problem"
+    if not problem_dirs:
+        # 변경된 문제 폴더가 없어도, 이전에 커밋만 하고 못 민 게 있을 수 있어 push 는 시도
+        return _commit_push(repo, [], message, push=push, timeout=timeout, allow_empty_pathspec=True)
+    rels = [d.resolve().relative_to(repo.toplevel).as_posix() for d in problem_dirs]
+    return _commit_push(repo, rels, message, push=push, timeout=timeout)
+
+
+def _commit_push(
+    repo: RepoInfo,
+    pathspecs: list[str],
+    message: str,
+    *,
+    push: bool = True,
+    timeout: float = DEFAULT_TIMEOUT,
+    add_all: bool = False,
+    allow_empty_pathspec: bool = False,
+) -> GitResult:
+    """pathspecs 를 add → (변경 있으면) commit → push. 어떤 경우에도 예외 대신 GitResult.
+
+    add_all: `git add -A` (root 범위, 삭제 포함). allow_empty_pathspec: pathspecs 가 비어도 push 만 시도.
+    """
     log: list[str] = []
     cwd = repo.toplevel
+    no_paths = not pathspecs and allow_empty_pathspec
 
     def run(args: list[str], label: str) -> subprocess.CompletedProcess | None:
         log.append(f"$ git {' '.join(args)}")
@@ -266,21 +362,24 @@ def commit_and_push(
     def result(committed: bool, pushed: bool, commit_hash: str | None, note: str, failed: bool = False) -> GitResult:
         return GitResult(committed, pushed, commit_hash, message, "\n".join(log), note, failed)
 
-    # 1) 스테이징: 문제 폴더만
-    cp = run(["add", "--", rel], "git add")
-    if cp is None or cp.returncode != 0:
-        return result(False, False, None, "스테이징 실패 (로그 참고)", failed=True)
+    has_changes = False
+    if not no_paths:
+        # 1) 스테이징
+        add_args = (["add", "-A", "--"] if add_all else ["add", "--"]) + pathspecs
+        cp = run(add_args, "git add")
+        if cp is None or cp.returncode != 0:
+            return result(False, False, None, "스테이징 실패 (로그 참고)", failed=True)
 
-    # 2) 변경 여부
-    cp = run(["diff", "--cached", "--quiet", "--", rel], "git diff --cached")
-    if cp is None:
-        return result(False, False, None, "변경 확인 실패", failed=True)
-    has_changes = cp.returncode == 1
+        # 2) 변경 여부
+        cp = run(["diff", "--cached", "--quiet", "--", *pathspecs], "git diff --cached")
+        if cp is None:
+            return result(False, False, None, "변경 확인 실패", failed=True)
+        has_changes = cp.returncode == 1
     committed = False
     commit_hash: str | None = None
     if has_changes:
         # 3) 커밋: pathspec 을 붙여 다른 스테이징 변경이 섞이지 않게
-        cp = run(["commit", "-m", message, "--", rel], "git commit")
+        cp = run(["commit", "-m", message, "--", *pathspecs], "git commit")
         if cp is None or cp.returncode != 0:
             note = "커밋 실패 (로그 참고)"
             if cp is not None and "please tell me who you are" in (cp.stderr + cp.stdout).lower():

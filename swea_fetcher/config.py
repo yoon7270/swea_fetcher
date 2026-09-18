@@ -39,7 +39,10 @@ class Settings:
     config_dir: Path = CONFIG_DIR
     python: str | None = None  # 검증에 쓸 Python 실행 파일 (SWEA_PYTHON). None 이면 자동 탐색
     commit_template: str = "solve: {num}. {title} ({topic})"  # SWEA_COMMIT_TEMPLATE (M7)
-    auto_push_on_pass: bool = False  # SWEA_AUTO_PUSH=1: 검증 통과 시 확인 없이 커밋+푸시 (M7, 기본 꺼짐)
+    auto_push_on_pass: bool = False  # SWEA_AUTO_PUSH=1 이고 시점에 pass 포함 (M7 하위호환, load_settings 에서 계산)
+    auto_push: bool = False  # SWEA_AUTO_PUSH=1: 자동 동기화 켜짐 (M11)
+    auto_push_scope: str = "problem"  # SWEA_AUTO_PUSH_SCOPE: "problem" | "root" (M11)
+    auto_push_on: frozenset = field(default_factory=frozenset)  # SWEA_AUTO_PUSH_ON: {"pass","check","save","watch"} (M11)
     password_source: str = field(default="keyring", repr=False)  # "env" | "dotenv" | "keyring"
 
     @property
@@ -142,6 +145,35 @@ def _truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+AUTO_PUSH_SCOPES = ("problem", "root")
+AUTO_PUSH_MOMENTS = ("pass", "check", "save", "watch")
+
+
+def _auto_push_settings(raw_on: str, raw_scope: str, raw_moments: str) -> dict:
+    """SWEA_AUTO_PUSH / _SCOPE / _ON 을 파싱 (M11). 잘못된 값은 기본값 + WARNING.
+
+    하위호환: SWEA_AUTO_PUSH=1 만 있으면 scope=problem, on={pass} → auto_push_on_pass=True (M7 과 동일).
+    """
+    on = _truthy(raw_on)
+    scope = (raw_scope or "").strip().lower() or "problem"
+    if scope not in AUTO_PUSH_SCOPES:
+        log.warning("SWEA_AUTO_PUSH_SCOPE 값이 올바르지 않습니다: %r — 'problem' 으로 대체", raw_scope)
+        scope = "problem"
+    moments = {m.strip().lower() for m in (raw_moments or "").split(",") if m.strip()}
+    bad = moments - set(AUTO_PUSH_MOMENTS)
+    if bad:
+        log.warning("SWEA_AUTO_PUSH_ON 에 알 수 없는 시점: %s — 무시", ", ".join(sorted(bad)))
+    moments &= set(AUTO_PUSH_MOMENTS)
+    if not moments:
+        moments = {"pass"}  # 비어 있으면 기본 pass
+    return {
+        "auto_push": on,
+        "auto_push_scope": scope,
+        "auto_push_on": frozenset(moments),
+        "auto_push_on_pass": on and "pass" in moments,
+    }
+
+
 # --- 로드 -----------------------------------------------------------------------------
 
 
@@ -198,6 +230,6 @@ def load_settings(config_dir: Path | None = None) -> Settings:
         config_dir=config_dir,
         python=get("SWEA_PYTHON").strip() or None,
         commit_template=get("SWEA_COMMIT_TEMPLATE").strip() or Settings.commit_template,
-        auto_push_on_pass=_truthy(get("SWEA_AUTO_PUSH")),
         password_source=source,
+        **_auto_push_settings(get("SWEA_AUTO_PUSH"), get("SWEA_AUTO_PUSH_SCOPE"), get("SWEA_AUTO_PUSH_ON")),
     )

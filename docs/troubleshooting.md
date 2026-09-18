@@ -12,7 +12,7 @@ swea-fetch doctor
 출력 예:
 
 ```
-swea-fetch 0.6.4  (exe)
+swea-fetch 0.7.0  (exe)
 Python: 3.12.4  C:\Users\you\AppData\Local\Programs\Python\Python312\python.exe  (출처: PATH)
 OS: Windows 11 10.0.26200
 설정 폴더: C:\Users\you\.swea-fetch  (.env 있음 / session.json 있음 / login_state 실패 0회 / problem_index 12건)
@@ -21,7 +21,7 @@ OS: Windows 11 10.0.26200
 git: 2.45.1 / 저장소: C:\Users\you\Desktop\swea (main → origin/main)
 로그인 상태: 세션 유효
 keyring: 항목 있음
-최신 버전: 0.6.4 (현재와 같음)
+최신 버전: 0.7.0 (현재와 같음)
 ```
 
 ## 자주 나오는 오류
@@ -104,6 +104,18 @@ git push
 
 이미 공개 저장소에 올라간 내용은 revert 해도 히스토리에 남습니다. 자동 모드는 설정 페이지에서 언제든 끌 수 있습니다.
 
+### 자동 동기화가 일시 중지됐을 때
+
+상태바에 `⚠ 자동 동기화 일시 중지: …` 가 뜨면, 같은 오류가 반복돼 알림 도배를 막으려 멈춘 상태입니다 (1분마다 조용히 재시도). 사유별 조치:
+
+| 문구 | 원인 | 조치 |
+|---|---|---|
+| `원격에 새 커밋이 있습니다. git pull …` | 다른 PC/사람이 먼저 푸시 (non-fast-forward) | 루트에서 `git pull` (충돌 나면 해결) → 자동으로 재개되거나 상태바 클릭 → [지금 동기화] |
+| `GitHub 인증 실패 …` | 자격증명 만료 | 루트에서 직접 `git push` 한 번 해서 로그인 창을 띄우세요 |
+| `병합/리베이스 진행 중` · `detached HEAD` | git 상태가 커밋 불가 | `git status` 로 정리 (`--abort` 또는 `git switch main`) |
+
+일시 중지는 앱을 껐다 켜거나 설정에서 자동 동기화를 껐다 켜면 해제됩니다. 근본 원인(위 조치)을 먼저 해결하세요.
+
 ## 백신이 exe 를 차단할 때
 
 PyInstaller 로 만든 단일 exe 는 일부 백신이 오탐합니다. 순서대로:
@@ -151,6 +163,6 @@ py -3 -c "import sys; print(sys.executable)"
 | `problem_index.json` | 문제 번호 → ID 색인 캐시 | 지우면 다시 찾음 (조금 느려짐) |
 | `update_check.json` | 새 버전 확인 시각·결과·알림 끔 여부 | 지워도 됨 |
 
-`.env` 의 git 관련 키 (설정 페이지에서도 바꿀 수 있음): `SWEA_COMMIT_TEMPLATE` (커밋 메시지 템플릿), `SWEA_AUTO_PUSH=1` (SWEA 제출 Pass 시 자동 커밋+푸시, 기본 0 — CLI·GUI 모두 적용, CLI 는 `swea-fetch submit --no-push` 로 1회만 해제).
+`.env` 의 git 관련 키 (설정 페이지에서도 바꿀 수 있음): `SWEA_COMMIT_TEMPLATE` (커밋 메시지 템플릿), `SWEA_AUTO_PUSH=1` (자동 동기화 켜기), `SWEA_AUTO_PUSH_SCOPE=problem|root` (범위), `SWEA_AUTO_PUSH_ON=pass,check,save,watch` (시점, 쉼표 목록). CLI·GUI 공통. `fetch`/`check`/`submit --no-push` 로 1회 해제.
 
 비밀번호는 여기 없고 **Windows 자격 증명 관리자** (제어판 → 자격 증명 관리자 → Windows 자격 증명 → `swea-fetch`) 에 있습니다.

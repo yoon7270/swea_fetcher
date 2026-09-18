@@ -218,6 +218,12 @@ def fetch_problem(
     except ValueError as e:
         raise InvalidInput(str(e)) from e
     _emit(progress, "저장 완료")
+    # 저장 직후 자동 동기화 (M11, reason=save). skeleton-only 는 제외. 실패해도 저장 결과를 덮지 않는다
+    if not opts.skeleton_only and "save" in settings.auto_push_on and settings.auto_push:
+        try:
+            sync_now(settings, reason="save", problem_dir=result.problem_dir, progress=progress)
+        except Exception as e:  # noqa: BLE001
+            log.debug("자동 동기화(save) 실패: %s", e)
     return FetchOutcome(info, result, None, notices, topic)
 
 
@@ -376,6 +382,57 @@ def commit_message_for(settings: Settings, topic: str, num: int, problem_dir: Pa
     return gitops.render_message(settings.commit_template, RecentItem(num, title, topic, Path(problem_dir), datetime.now()), topic)
 
 
+def sync_now(
+    settings: Settings,
+    *,
+    reason: str = "manual",
+    problem_dir: Path | None = None,
+    scope: str | None = None,
+    dry_run: bool = False,
+    progress: ProgressCb | None = None,
+) -> GitResult | None:
+    """자동 동기화 1회 (M11). 예외를 던지지 않고 GitResult 로 반환 — 자동 경로 흐름을 끊지 않는다.
+
+    reason ∈ pass|check|save|watch|manual. manual 은 항상 실행, 그 외는 설정 auto_push_on 에 있어야 실행.
+    꺼짐/remote 없음/저장소 아님 → None. scope 기본은 settings.auto_push_scope.
+    problem_dir 가 주어지고 scope=problem 이고 reason 이 문제발 (pass/check/save) 이면 그 폴더만 커밋.
+    """
+    if reason != "manual":
+        if not settings.auto_push or reason not in settings.auto_push_on:
+            return None
+    if gitops.git_available() is None:
+        return None
+    repo = gitops.find_repo(settings.root)
+    if repo is None or not repo.remote:
+        return None
+    op = gitops.in_progress_operation(repo)
+    if op or not repo.branch:
+        return gitops.GitResult(False, False, None, "", "", f"{op or 'detached HEAD'} 상태라 자동 동기화를 건너뜁니다", failed=True)
+    scope = scope or settings.auto_push_scope
+    if dry_run:
+        dirs = gitops.changed_problem_dirs(repo, settings.root)
+        note = f"[미리보기] scope={scope}, 변경된 문제 폴더 {len(dirs)}개"
+        return gitops.GitResult(False, False, None, "", "\n".join(str(d) for d in dirs), note)
+    if scope == "problem" and problem_dir is not None and reason in ("pass", "check", "save"):
+        message = commit_message_for_dir(settings, problem_dir)
+        _emit(progress, f"자동 동기화: {problem_dir.name}")
+        return gitops.commit_and_push(repo, problem_dir, message, push=True)
+    _emit(progress, f"자동 동기화 ({scope})")
+    return gitops.commit_and_push_scope(repo, settings.root, scope, settings.commit_template, push=True)
+
+
+def commit_message_for_dir(settings: Settings, problem_dir: Path) -> str:
+    """problem_dir 기준 단일 문제 커밋 메시지 (템플릿 적용)."""
+    problem_dir = Path(problem_dir)
+    num = int(problem_dir.name) if problem_dir.name.isdigit() else 0
+    try:
+        topic = problem_dir.parent.resolve().relative_to(Path(settings.root).resolve()).as_posix()
+    except ValueError:
+        topic = problem_dir.parent.name
+    title = read_skeleton_title(problem_dir / f"{num}.py")
+    return gitops.render_message(settings.commit_template, RecentItem(num, title, topic, problem_dir, datetime.now()), topic)
+
+
 def push_problem(
     settings: Settings,
     topic: str,
@@ -483,7 +540,15 @@ def submit_problem(
     _save_last_submit(settings, num, cid, cat_type, cat_id, result)
     outcome = SubmitOutcome(result, None, notes, cid, cat_type, cat_id)
     if push and result.passed:
-        outcome.git = push_problem(settings, topic, num, message=message, push=True, progress=progress)
+        if settings.auto_push_scope == "root":
+            # 루트 전체 범위는 sync_now 로 (예외 없이 note 반환)
+            try:
+                pd = storage.resolve_problem_dir(settings.root, topic, num)
+                outcome.git = sync_now(settings, reason="pass", problem_dir=pd, scope="root", progress=progress)
+            except Exception as e:  # noqa: BLE001 — 자동 경로는 제출 결과를 덮지 않는다
+                log.debug("자동 동기화(root) 실패: %s", e)
+        else:
+            outcome.git = push_problem(settings, topic, num, message=message, push=True, progress=progress)
     return outcome
 
 

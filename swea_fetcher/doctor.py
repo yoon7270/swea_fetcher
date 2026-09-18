@@ -99,6 +99,14 @@ def _git_row(config_dir: Path) -> str:
     return f"{ver_s}{warn} / 저장소: {repo.toplevel} ({branch}{target})"
 
 
+def _autosync_row(settings: Settings | None) -> str:
+    """`켜짐 (root · pass,watch)` / `꺼짐`. (M11)"""
+    if settings is None or not settings.auto_push:
+        return "꺼짐"
+    on = ",".join(m for m in ("pass", "check", "save", "watch") if m in settings.auto_push_on)
+    return f"켜짐 ({settings.auto_push_scope} · {on})"
+
+
 def _settings_row(settings: Settings | None, err: ConfigMissing | None) -> str:
     if settings is not None:
         return f"정상 (비밀번호 출처: {settings.password_source})"
@@ -160,6 +168,7 @@ def collect(config_dir: Path | None = None, offline: bool = False) -> list[Row]:
         ("루트", _safe(_root_row, config_dir)),
         ("설정", _settings_row(settings, err)),
         ("git", _safe(_git_row, config_dir)),
+        ("자동 동기화", _safe(_autosync_row, settings)),
     ]
     if not offline:
         rows.append(("로그인 상태", _safe(_login_row, settings)))

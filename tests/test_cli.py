@@ -736,7 +736,7 @@ def no_http_probe(monkeypatch):
 def test_doctor_offline_rows_and_no_http(cfg, no_http_probe):
     rows = doctor.collect(cfg, offline=True)
     keys = [k for k, _ in rows]
-    assert keys == ["swea-fetch", "Python", "OS", "설정 폴더", "루트", "설정", "git", "keyring"]
+    assert keys == ["swea-fetch", "Python", "OS", "설정 폴더", "루트", "설정", "git", "자동 동기화", "keyring"]
     assert no_http_probe == {"update": 0, "login": 0}
     d = dict(rows)
     assert d["swea-fetch"].startswith(f"{doctor.__version__}  (source)")
@@ -748,7 +748,7 @@ def test_doctor_online_adds_login_and_latest(cfg, no_http_probe):
     (cfg / "session.json").write_text(_json.dumps({"SESSION": "tok"}), encoding="utf-8")
     keys = [k for k, _ in doctor.collect(cfg, offline=False)]
     assert "로그인 상태" in keys and "최신 버전" in keys
-    assert keys.index("로그인 상태") == keys.index("git") + 1 and keys[-1] == "최신 버전"
+    assert keys.index("로그인 상태") == keys.index("자동 동기화") + 1 and keys[-1] == "최신 버전"
     assert no_http_probe == {"update": 1, "login": 1}
 
 

@@ -42,6 +42,7 @@ class MainWindow(QMainWindow):
         self.qs = QSettings("swea-fetch", "gui")
         self.settings: Settings | None = None
         self._update_worker: FuncWorker | None = None
+        self.autosync = None  # AutoSyncController (M11) — _build 뒤 생성
         self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(*tokens.WINDOW_MIN)
         self.resize(*tokens.WINDOW_DEFAULT)
@@ -101,8 +102,15 @@ class MainWindow(QMainWindow):
         self.update_badge.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update_badge.hide()
         self.update_badge.clicked.connect(self._open_release)
+        self.autosync_badge = QPushButton("")  # 자동 동기화 상태 (M11): 클릭 → 설정
+        self.autosync_badge.setObjectName("AutoSyncBadge")
+        set_class(self.autosync_badge, "link")
+        self.autosync_badge.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.autosync_badge.hide()
+        self.autosync_badge.clicked.connect(lambda: self.goto("settings"))
         sb = self.statusBar()
         sb.addWidget(self.status_login)
+        sb.addWidget(self.autosync_badge)
         sb.addPermanentWidget(self.update_badge)
         sb.addPermanentWidget(self.status_root)
 
@@ -121,6 +129,11 @@ class MainWindow(QMainWindow):
         self.history_page.submit_requested.connect(self._goto_submit)
         self.fetch_page.saved.connect(lambda _oc: self.history_page.refresh())
         self.fetch_page.saved.connect(lambda _oc: self._update_status())
+
+        from .autosync import AutoSyncController
+        self.autosync = AutoSyncController(self)
+        self.autosync.status_changed.connect(self._on_autosync_status)
+        self.autosync.synced.connect(lambda r: self.check_page._show_git_log(f"[자동 동기화] {r.note}\n{r.output}"))
 
         for i in range(4):
             QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self, activated=lambda i=i: self.nav.setCurrentRow(i))
@@ -176,6 +189,8 @@ class MainWindow(QMainWindow):
             return
         for p in (self.fetch_page, self.check_page, self.history_page, self.settings_page):
             p.set_settings(self.settings)
+        if self.autosync is not None:
+            self.autosync.configure(self.settings)
         self._update_status()
         if first_run:
             row = int(self.qs.value("window/last_page", 0, type=int))
@@ -218,6 +233,10 @@ class MainWindow(QMainWindow):
         self.update_badge.setToolTip(f"클릭하면 Release 페이지를 엽니다\n{info.url}")
         self.update_badge.show()
 
+    def _on_autosync_status(self, text: str) -> None:
+        self.autosync_badge.setText(text)
+        self.autosync_badge.setVisible(bool(text))
+
     def _open_release(self) -> None:
         QDesktopServices.openUrl(QUrl(getattr(self, "_release_url", update.RELEASES_URL)))
 
@@ -234,6 +253,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e) -> None:  # noqa: N802
         self.qs.setValue("window/geometry", self.saveGeometry())
+        if self.autosync is not None:
+            self.autosync._timer.stop()
+            if self.settings is not None and self.qs.value("autosync/sync_on_close", True, type=bool):
+                self.autosync.sync_on_close()
         for p in (self.settings_page, self.check_page):  # 실행 중 QThread 가 파괴되지 않게
             p.wait_workers()
         if self._update_worker is not None and self._update_worker.isRunning():

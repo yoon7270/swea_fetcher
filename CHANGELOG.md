@@ -2,6 +2,17 @@
 
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/). 버전은 `swea_fetcher/__init__.py` 의 `__version__` 하나로 관리한다.
 
+## v0.7.0 — 2026-09-18 "GitHub 자동 동기화"
+
+### 추가
+- **자동 동기화** — 설정 "GitHub 자동 동기화 켜기" + **범위**(문제 폴더만 / 루트 전체) + **시점**(SWEA Pass / 로컬 검증 통과 / 저장 직후 / **변경 감지**) 선택. 변경 감지는 버튼 없이 앱이 켜져 있는 동안 파일이 바뀌면 90초 뒤 자동 커밋+푸시, 종료 시 남은 변경 1회(옵션)
+- 상태바 자동 동기화 배지(⟳ 켜짐 / ⚠ 일시 중지 — 반복 실패 시 도배 방지, 1분 재시도)
+- CLI `swea-fetch sync [--scope problem|root] [--dry-run]` (수동 1회), `fetch`/`check` 에 `--no-push`, `doctor` 에 자동 동기화 줄
+- 설정: `SWEA_AUTO_PUSH_SCOPE`, `SWEA_AUTO_PUSH_ON` (기존 `SWEA_AUTO_PUSH=1` 은 `problem`+`pass` 로 하위 호환)
+
+### 원칙 유지
+- force push·pull·rebase 자동 실행 없음, 자격증명 취급 없음. 루트 전체 첫 선택 시 올라갈 파일 수·예시 확인창
+
 ## v0.6.4 — 2026-09-18
 
 ### 수정

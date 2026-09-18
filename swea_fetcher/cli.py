@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import argparse
 import getpass
 import logging
@@ -21,7 +22,7 @@ from .service import FetchOptions, FetchOutcome
 
 log = logging.getLogger("swea_fetcher.cli")
 
-SUBCOMMANDS = ("fetch", "init", "logout", "check", "doctor", "push", "submit")
+SUBCOMMANDS = ("fetch", "init", "logout", "check", "doctor", "push", "submit", "sync")
 EXIT_UNEXPECTED = 10
 
 
@@ -48,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--skeleton-only", action="store_true", help="첨부를 받지 않고 폴더 + {번호}.py + 빈 input.txt 만 만듭니다 (샘플 첨부가 없는 문제용)")
     f.add_argument("--dry-run", action="store_true", help="저장하지 않고 무엇을 어디에 저장할지만 보여줍니다")
     f.add_argument("--refresh-index", action="store_true", help="번호 색인 캐시를 무시하고 다시 찾습니다 (클럽에 새 문제 상자가 추가됐는데 번호로 못 찾을 때)")
+    f.add_argument("--no-push", action="store_true", help="이번 저장에서는 자동 동기화하지 않습니다 (설정이 켜져 있어도)")
     f.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
 
     i = sub.add_parser("init", help="계정 설정 (.env + 비밀번호는 Windows 자격 증명 관리자) + 로그인 확인")
@@ -63,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("topic", help="주제 폴더 이름 (test/IM_test 처럼 중첩 가능)")
     c.add_argument("num", type=int, help="문제 번호")
     c.add_argument("--timeout", type=float, default=checker.DEFAULT_TIMEOUT, help="실행 제한 시간(초), 기본 10")
+    c.add_argument("--no-push", action="store_true", help="통과해도 이번엔 자동 동기화하지 않습니다 (설정이 켜져 있어도)")
     c.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
 
     s = sub.add_parser("submit", help="SWEA 에 제출하고 채점 결과를 받음 (제출 횟수 1회 소모). --push 면 Pass 일 때만 git 커밋 + 푸시")
@@ -86,7 +89,13 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--offline", action="store_true", help="네트워크 없이 로컬 정보만 (로그인 상태·최신 버전 생략)")
     d.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
 
-    for sp in (f, i, lo, c, d, g, s):
+    y = sub.add_parser("sync", help="변경된 문제 폴더(또는 루트 전체)를 git 커밋 + 푸시 (자동 동기화 1회 수동 실행)")
+    y.add_argument("--scope", choices=("problem", "root"), default=None, help="problem: 변경된 문제 폴더만 / root: 루트 전체 (기본: 설정값)")
+    y.add_argument("-m", "--message", default=None, help="(예약) 커밋 메시지")
+    y.add_argument("--dry-run", action="store_true", help="커밋될 파일 목록만 출력")
+    y.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
+
+    for sp in (f, i, lo, c, d, g, s, y):
         sp.add_argument("--no-update-check", action="store_true", help="이번 실행에서 새 버전 확인을 하지 않습니다")
     return p
 
@@ -126,6 +135,7 @@ def run_fetch(
     skeleton_only: bool = False,
     dry_run: bool = False,
     refresh_index: bool = False,
+    no_push: bool = False,
 ) -> int:
     """service.fetch_problem 호출 + 출력. 도메인 예외는 main 이 처리한다."""
     settings = config.load_settings()
@@ -135,6 +145,8 @@ def run_fetch(
         if msg.startswith("[알림]"):
             print(msg)
 
+    if no_push:  # 이번 저장은 자동 동기화 안 함 — settings 의 save 시점을 임시로 뺀다
+        settings = dataclasses.replace(settings, auto_push_on=frozenset(settings.auto_push_on - {"save"}))
     outcome = service.fetch_problem(settings, target, topic, opts, progress)
     if outcome.result is None:
         _print_dry_run(outcome, settings, force, skeleton_only)
@@ -294,8 +306,8 @@ def run_logout(all_: bool = False, config_dir: Path | None = None) -> int:
 # --- check --------------------------------------------------------------------------
 
 
-def run_check(topic: str, num: int, timeout: float) -> int:
-    """풀이 실행 → 비교 → 결과 출력. 실패면 CheckFailed (exit 6)."""
+def run_check(topic: str, num: int, timeout: float, no_push: bool = False) -> int:
+    """풀이 실행 → 비교 → 결과 출력. 실패면 CheckFailed (exit 6). 통과 시 설정에 따라 자동 동기화 (M11)."""
     settings = config.load_settings()
     from . import storage  # 지연 import — resolve_problem_dir 만 필요
 
@@ -319,6 +331,36 @@ def run_check(topic: str, num: int, timeout: float) -> int:
         print(checker.format_diff(res.diff) if res.diff else "(출력 없음)")
     if not res.passed:
         raise CheckFailed(f"{num} 검증 실패 ({status})", hint="")
+    if not no_push:
+        _auto_sync_after(settings, reason="check", problem_dir=problem_dir)
+    return 0
+
+
+def _auto_sync_after(settings: config.Settings, *, reason: str, problem_dir=None) -> None:
+    """check/fetch 통과·저장 후 자동 동기화 (설정 시점에 있을 때만). 실패해도 명령을 실패시키지 않는다."""
+    if reason not in settings.auto_push_on or not settings.auto_push:
+        return
+    try:
+        r = service.sync_now(settings, reason=reason, problem_dir=problem_dir, progress=lambda m: print(f"  {m}"))
+        if r is not None:
+            print(f"  [자동 동기화] {r.note}")
+    except Exception as e:  # noqa: BLE001
+        print(f"  [자동 동기화 실패] {e}", file=sys.stderr)
+
+
+def run_sync(scope: str | None, message: str | None, dry_run: bool) -> int:
+    """수동 자동 동기화 1회 (M11 §6). dry-run 은 대상만 출력."""
+    settings = config.load_settings()
+    r = service.sync_now(settings, reason="manual", scope=scope, dry_run=dry_run)
+    if r is None:
+        print("[알림] 자동 동기화를 실행할 수 없습니다 — git 저장소·origin 을 확인하세요 (README 'GitHub 자동 동기화')")
+        return 0
+    if dry_run:
+        print(r.note)
+        if r.output.strip():
+            print(r.output)
+        return 0
+    print(f"[{'OK' if not r.failed else '실패'}] {r.note}" + (f"  — {r.message}" if r.committed else ""))
     return 0
 
 
@@ -406,7 +448,9 @@ def _dispatch(args: argparse.Namespace, verbose: bool) -> int:
         if args.command == "logout":
             return run_logout(all_=args.all)
         if args.command == "check":
-            return run_check(args.topic, args.num, args.timeout)
+            return run_check(args.topic, args.num, args.timeout, no_push=args.no_push)
+        if args.command == "sync":
+            return run_sync(args.scope, args.message, args.dry_run)
         if args.command == "submit":
             return run_submit(args.topic, args.num, push=args.push, no_push=args.no_push,
                               message=args.message, yes=args.yes, refresh_index=args.refresh_index)
@@ -417,6 +461,7 @@ def _dispatch(args: argparse.Namespace, verbose: bool) -> int:
         return run_fetch(
             args.target, args.topic, args.num, args.force, verbose,
             skeleton_only=args.skeleton_only, dry_run=args.dry_run, refresh_index=args.refresh_index,
+            no_push=args.no_push,
         )
     except SweaFetchError as e:
         print(f"[오류] {e}", file=sys.stderr)
