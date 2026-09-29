@@ -18,6 +18,7 @@ from ...config import Settings
 from ...content_cache import CachedStatement
 from ...models import ProblemContent
 from ...service import FetchOutcome
+from ...storage import normalize_text
 from ..theme import tokens
 from ..widgets import Badge, Banner, ElidedLabel, EmptyState, editor_tooltip, open_in_editor, open_in_explorer, set_class
 
@@ -25,6 +26,27 @@ ZOOM_MIN, ZOOM_MAX = -3, 8
 _IMG_RE = re.compile(r'<img\b[^>]*?\bsrc="(swea-img:\d+)"[^>]*>')
 _RESIZE_DEBOUNCE_MS = 100
 _VIEWPORT_MARGIN = 32  # 문서 여백 + 스크롤바 여유
+SAMPLE_MAX_LINES = 30  # 입출력 예시는 앞부분만 (전체는 파일로)
+SAMPLE_MAX_BYTES = 64 * 1024  # 큰 테스트 입력도 이만큼만 읽는다
+
+
+def read_sample(path: Path) -> tuple[str, int] | None:
+    """입출력 파일 앞부분 (텍스트, 생략된 줄 수). 없거나 비었으면 None. 큰 파일은 앞 64KB 만 읽는다."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read(SAMPLE_MAX_BYTES + 1)
+    except OSError:
+        return None
+    truncated_bytes = len(data) > SAMPLE_MAX_BYTES
+    text = normalize_text(data[:SAMPLE_MAX_BYTES]).rstrip("\n")
+    if not text.strip():
+        return None
+    lines = text.split("\n")
+    if truncated_bytes:
+        lines = lines[:-1]  # 64KB 경계에서 잘린 마지막 줄은 버린다
+    shown = lines[:SAMPLE_MAX_LINES]
+    hidden = len(lines) - len(shown)
+    return "\n".join(shown), (hidden if not truncated_bytes else max(hidden, 1))
 
 
 class _StatementBrowser(QTextBrowser):
@@ -37,6 +59,7 @@ class _StatementBrowser(QTextBrowser):
         self.setOpenExternalLinks(False)
         self.setReadOnly(True)
         self._content: ProblemContent | None = None
+        self._samples: list[tuple[str, str, tuple[str, int] | None]] = []  # [(라벨, 파일명, read_sample 결과)] — 지문 아래 입력 | 출력
         self._qimages: dict[str, QImage] = {}
         self._failures: dict[str, str] = {}  # 토큰 → 자리표시 사유
         self._last_avail = 0
@@ -56,8 +79,9 @@ class _StatementBrowser(QTextBrowser):
         """이미지는 addResource 로 미리 넣어 둔다. 그 외 어떤 리소스(file/http/qrc …)도 읽지 않는다."""
         return None
 
-    def set_statement(self, content: ProblemContent | None) -> None:
+    def set_statement(self, content: ProblemContent | None, samples: list[tuple[str, str, tuple[str, int] | None]] | None = None) -> None:
         self._content = content
+        self._samples = [s for s in (samples or []) if s[2] is not None]
         self._qimages.clear()
         self._failures.clear()
         if content is None:
@@ -111,13 +135,28 @@ class _StatementBrowser(QTextBrowser):
         if c.limits_html:
             parts.append(f'<div class="limits">{c.limits_html}</div><hr/>')
         parts.append(c.body_html)
-        htm = self._fit_images("".join(parts), avail)
+        htm = self._fit_images("".join(parts), avail) + self._samples_html()
         self.setHtml(htm)
         # setHtml 이 리소스를 비울 수 있으므로 문서 생성 뒤에 등록하고 레이아웃을 갱신한다
         for token, img in self._qimages.items():
             doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl(token), img)
         if self._qimages:
             doc.markContentsDirty(0, doc.characterCount())
+
+    def _samples_html(self) -> str:
+        """SWEA 처럼 지문 아래에 입력 | 출력 을 나란히. 같은 문서에 붙여 지문이 짧아도 빈 공간이 생기지 않는다."""
+        if not self._samples:
+            return ""
+        heads, cells = [], []
+        for label, name, sample in self._samples:
+            text, hidden = sample  # type: ignore[misc]
+            heads.append(f"<th>{label} <span class='sample-more'>{html.escape(name)}</span></th>")
+            more = f"<p class='sample-more'>… 이하 {hidden}줄 생략 (전체는 {html.escape(name)})</p>" if hidden else ""
+            cells.append(f"<td width='{100 // len(self._samples)}%'><pre class='sample'>{html.escape(text)}</pre>{more}</td>")
+        return (
+            "<hr/><table class='samples' width='100%' cellspacing='0'>"
+            f"<tr>{''.join(heads)}</tr><tr>{''.join(cells)}</tr></table>"
+        )
 
     def _rerender_if_needed(self) -> None:
         if self._content is None or not self._qimages or self._avail_width() == self._last_avail:
@@ -256,27 +295,35 @@ class ProblemPage(QWidget):
         saved = outcome.result is not None
         self.badge.set_state("저장됨" if saved else "미리보기 — 저장 안 됨", "success" if saved else "idle")
         where = str(outcome.result.problem_dir) if saved else str((outcome.preview or {}).get("problem_dir", ""))
-        self._show(f"{info.num}. {info.title}", outcome.topic, where, outcome.content)
-        self._set_problem_dir(outcome.result.problem_dir if saved else None)
+        pdir = outcome.result.problem_dir if saved else None
+        self._show(f"{info.num}. {info.title}", outcome.topic, where, outcome.content, pdir)
+        self._set_problem_dir(pdir)
 
     def show_cached(self, cached: CachedStatement, problem_dir: Path | None = None, badge: str = "캐시") -> None:
         """캐시(또는 최근 탭에서 방금 가져온) 지문 표시. problem_dir 가 있으면 폴더/에디터 열기를 켠다."""
         self._outcome = None
         self.badge.set_state(badge, "idle")
         where = str(problem_dir) if problem_dir is not None else f"캐시 · {cached.fetched_at}"
-        self._show(f"{cached.num}. {cached.title}", cached.topic, where, cached.content)
+        self._show(f"{cached.num}. {cached.title}", cached.topic, where, cached.content, problem_dir)
         self._set_problem_dir(problem_dir)
+
+    def _read_samples(self, problem_dir: Path | None) -> list[tuple[str, str, tuple[str, int] | None]]:
+        """문제 폴더의 input/output 파일 앞부분. 폴더가 없으면 빈 목록 (지문만 표시)."""
+        if problem_dir is None or not problem_dir.is_dir():
+            return []
+        names = (self.settings.input_name, self.settings.output_name) if self.settings else ("input.txt", "output.txt")
+        return [(label, n, read_sample(problem_dir / n)) for label, n in zip(("입력", "출력"), names)]
 
     def _set_problem_dir(self, d: Path | None) -> None:
         self._problem_dir = d if d is not None and d.is_dir() else None
         self.open_dir_btn.setVisible(self._problem_dir is not None)
         self.open_py_btn.setVisible(self._problem_dir is not None and (self._problem_dir / f"{self._problem_dir.name}.py").exists())
 
-    def _show(self, title: str, topic: str, where: str, content: ProblemContent | None) -> None:
+    def _show(self, title: str, topic: str, where: str, content: ProblemContent | None, problem_dir: Path | None = None) -> None:
         self.title.setText(title)
         self.meta.setText(" · ".join(x for x in (topic, where) if x))
         self.banner.hide()
-        self.browser.set_statement(content)
+        self.browser.set_statement(content, self._read_samples(problem_dir))
         if content is None:
             self.banner.show_message("warning", "지문 영역을 찾지 못했습니다", "사이트 구조가 바뀌었을 수 있습니다. 저장 결과에는 영향이 없습니다", [("fetch", "저장 탭으로")])
         elif self.browser.failure_count():

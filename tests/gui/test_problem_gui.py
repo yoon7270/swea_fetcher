@@ -436,3 +436,43 @@ def test_settings_toggles_persist_and_clear_cache(main_window, content):
     sp.cache_clear_btn.click()
     assert not content_cache.has(w.settings, 1)
     assert "지문 캐시를 지웠습니다" in sp.banner.title.text()
+
+
+# --- 지문 아래 입력 | 출력 (M15) ---------------------------------------------------------
+
+
+def test_read_sample_truncates_lines_and_bytes(tmp_path):
+    from swea_fetcher.gui.pages.problem_page import SAMPLE_MAX_BYTES, SAMPLE_MAX_LINES, read_sample
+
+    assert read_sample(tmp_path / "none.txt") is None
+    (tmp_path / "empty.txt").write_text("\n\n", encoding="utf-8")
+    assert read_sample(tmp_path / "empty.txt") is None
+    (tmp_path / "short.txt").write_bytes("3\r\n1 2\r\n".encode("cp949"))
+    assert read_sample(tmp_path / "short.txt") == ("3\n1 2", 0)
+    (tmp_path / "long.txt").write_text("\n".join(str(i) for i in range(100)) + "\n", encoding="utf-8")
+    text, hidden = read_sample(tmp_path / "long.txt")
+    assert text.split("\n") == [str(i) for i in range(SAMPLE_MAX_LINES)] and hidden == 100 - SAMPLE_MAX_LINES
+    (tmp_path / "huge.txt").write_text("1 2 3 4 5 6 7\n" * (SAMPLE_MAX_BYTES // 10), encoding="utf-8")
+    text, hidden = read_sample(tmp_path / "huge.txt")
+    assert len(text.split("\n")) == SAMPLE_MAX_LINES and hidden > 0
+
+
+def test_problem_tab_shows_samples_below_statement(main_window, qtbot, monkeypatch, problem_info, content):
+    w = main_window
+    oc = _outcome(w.settings.root, problem_info, content)
+    d = oc.result.problem_dir
+    (d / "input.txt").write_text("2\n<5>\n", encoding="utf-8")
+    (d / "output.txt").write_text("#1 7\n", encoding="utf-8")
+    _run_fetch(w, qtbot, monkeypatch, oc)
+    htm = w.problem_page.browser.toHtml()
+    text = w.problem_page.browser.toPlainText()
+    assert "&lt;5&gt;" in htm and "#1 7" in text  # HTML 이스케이프
+    assert text.rstrip().endswith("#1 7")  # 지문 뒤, 문서 맨 아래
+
+
+def test_problem_tab_no_samples_without_folder(main_window, content):
+    from swea_fetcher.content_cache import CachedStatement
+
+    pp = main_window.problem_page
+    pp.show_cached(CachedStatement(25730, "sim", "항아리 게임", "2026-09-29T00:00:00", content))
+    assert "samples" not in pp.browser.toHtml() and pp.browser._samples == []

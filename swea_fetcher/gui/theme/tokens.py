@@ -284,4 +284,9 @@ th {{ background-color: {p.surface_alt}; }}
 hr {{ background-color: {p.border}; }}
 .limits {{ color: {p.text_2}; }}
 .imgfail {{ color: {p.text_3}; }}
+table.samples {{ border-width: 0; margin-top: {SPACE}px; }}
+table.samples th {{ text-align: left; }}
+table.samples td {{ vertical-align: top; }}
+pre.sample {{ white-space: pre-wrap; margin-bottom: 0; }}
+.sample-more {{ color: {p.text_3}; }}
 """
