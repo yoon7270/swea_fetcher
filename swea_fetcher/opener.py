@@ -268,6 +268,52 @@ def _pycharm_other_desktop_only() -> bool:
     return bool(wins) and not any(_on_current_desktop(h) is True for h, _ in wins)
 
 
+def _explorer_window_here(folder_name: str) -> int | None:
+    """현재 가상 데스크톱에서 제목이 "{폴더명} - ..." 인 탐색기 창(CabinetWClass) hwnd. 없으면 None."""
+    import ctypes
+
+    user32 = ctypes.WinDLL("user32")
+    for hwnd, title in _windows_of(lambda image: image == "explorer.exe"):
+        cls = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(hwnd, cls, 64)
+        if cls.value == "CabinetWClass" and title.startswith(f"{folder_name} - ") and _on_current_desktop(hwnd) is True:
+            return hwnd
+    return None
+
+
+def _activate(hwnd: int) -> bool:
+    import ctypes
+
+    user32 = ctypes.WinDLL("user32")
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    return bool(user32.SetForegroundWindow(hwnd))
+
+
+def open_folder(path: Path) -> bool:
+    """폴더를 탐색기로 연다. 실패는 False.
+
+    os.startfile 은 Windows 11 에서 폴더를 기존 탐색기 창의 새 탭으로 열 수 있고, 그 창이 다른 가상 데스크톱에 있으면
+    화면이 전환된다. 현재 데스크톱에 같은 폴더 창이 있으면 그 창을 앞으로, 없으면 `explorer /n,` 으로 새 창을 연다
+    (실측: 새 창은 현재 데스크톱에 뜨고 전환 없음).
+    """
+    if sys.platform == "win32":
+        try:
+            hwnd = _explorer_window_here(path.name)
+            if hwnd and _activate(hwnd):
+                return True
+            subprocess.Popen(["explorer.exe", "/n,", str(path)])  # noqa: S603, S607 — shell=False
+            return True
+        except Exception as e:  # noqa: BLE001
+            log.debug("탐색기 새 창 열기 실패, os.startfile 로 폴백: %s", e)
+    try:
+        _startfile(path)
+        return True
+    except OSError as e:
+        log.debug("폴더 열기 실패: %s (%s)", path, e)
+        return False
+
+
 def _startfile(path: Path) -> None:
     if sys.platform == "win32":
         os.startfile(str(path))  # noqa: S606

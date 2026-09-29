@@ -207,3 +207,59 @@ def test_settings_editor_invalid_warns(root_dir, config_dir, caplog):
     with caplog.at_level("WARNING"):
         assert load_settings(config_dir).editor == "auto"
     assert "SWEA_EDITOR" in caplog.text
+
+
+# --- 폴더 열기 (탐색기) -------------------------------------------------------------------
+
+
+def test_folder_reuses_explorer_window_on_current_desktop(win, monkeypatch):
+    activated = []
+    monkeypatch.setattr(opener, "_explorer_window_here", lambda name: 42 if name == "1234" else None)
+    monkeypatch.setattr(opener, "_activate", lambda h: activated.append(h) or True)
+    assert opener.open_folder(PDIR) is True
+    assert activated == [42] and win["popen"] == [] and win["startfile"] == []
+
+
+def test_folder_opens_new_window_when_none_here(win, monkeypatch):
+    # startfile 은 다른 데스크톱의 탐색기 창에 탭으로 붙어 화면이 전환될 수 있다 → explorer /n, 로 새 창
+    monkeypatch.setattr(opener, "_explorer_window_here", lambda name: None)
+    assert opener.open_folder(PDIR) is True
+    args, kw = win["popen"][0]
+    assert args == ["explorer.exe", "/n,", str(PDIR)] and not kw.get("shell")
+    assert win["startfile"] == []
+
+
+def test_folder_activate_failure_opens_new_window(win, monkeypatch):
+    monkeypatch.setattr(opener, "_explorer_window_here", lambda name: 42)
+    monkeypatch.setattr(opener, "_activate", lambda h: False)
+    opener.open_folder(PDIR)
+    assert win["popen"][0][0][0] == "explorer.exe"
+
+
+def test_folder_enum_exception_falls_back_to_startfile(win, monkeypatch):
+    def boom(name):
+        raise OSError("enum")
+
+    monkeypatch.setattr(opener, "_explorer_window_here", boom)
+    assert opener.open_folder(PDIR) is True
+    assert win["startfile"] == [str(PDIR)] and win["popen"] == []
+
+
+def test_folder_startfile_failure_is_false(win, monkeypatch):
+    def boom(name):
+        raise OSError("enum")
+
+    def fail(p):
+        raise OSError("nope")
+
+    monkeypatch.setattr(opener, "_explorer_window_here", boom)
+    monkeypatch.setattr(opener.os, "startfile", fail, raising=False)
+    assert opener.open_folder(PDIR) is False
+
+
+def test_folder_non_windows_uses_xdg_open(monkeypatch):
+    calls = []
+    monkeypatch.setattr(opener.sys, "platform", "linux")
+    monkeypatch.setattr(opener.subprocess, "Popen", lambda args, **kw: calls.append(args))
+    assert opener.open_folder(PDIR) is True
+    assert calls == [["xdg-open", str(PDIR)]]

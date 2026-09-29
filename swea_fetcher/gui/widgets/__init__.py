@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...opener import OpenResult, editor_tooltip, open_in_editor  # noqa: F401 — 재노출 (M13)
+from ...opener import OpenResult, editor_tooltip, open_folder, open_in_editor  # noqa: F401 — 재노출 (M13)
 from ..theme import tokens
 
 ICON_DIR = Path(__file__).resolve().parent.parent / "theme" / "icons"
@@ -414,8 +414,8 @@ class DiffView(QTableWidget):
 
 
 def open_in_explorer(path: Path) -> bool:
-    """폴더 열기 (Windows: 탐색기). 실패는 False."""
-    return _start(path)
+    """폴더 열기 (Windows: 탐색기, 가상 데스크톱 전환 없이). 실패는 False."""
+    return open_folder(path)
 
 
 def open_with_default_app(path: Path) -> bool:
