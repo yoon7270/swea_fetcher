@@ -371,6 +371,27 @@ QWidget#Page  (QScrollArea 안에 — 최소 높이 480 에서 잘림 방지)
 
 ---
 
+### 6.5 문제 페이지 (ProblemPage, M12)
+
+**목적**: 가져온 문제의 제한사항·지문을 앱 안에서 읽는다. 내비 두 번째 항목 "문제"(`nav-problem`, Ctrl+2). 지문은 파일로 저장하지 않는다.
+
+```
+QWidget#Page (QStackedLayout: 빈 상태 | 본문)
+├─ 헤더 HBox: QLabel[class=title] "{번호}. {제목}" (stretch)  Badge(저장됨 success / 미리보기 — 저장 안 됨 idle / 캐시 idle)
+├─ ElidedLabel[class=hint] "{주제} · {저장 경로 | 캐시 · 시각}"
+├─ 배너 슬롯 (이미지 실패 info / 지문 영역 없음 warning + [저장 탭으로])
+├─ 버튼 줄: [폴더 열기] [PyCharm 에서 열기] (저장 성공 때만) ……… [글자 −] [글자 +]
+├─ QFrame[class=card] 안 _StatementBrowser (QTextBrowser, 자체 스크롤 — 이중 스크롤 금지, 제한사항 → hr → 본문)
+└─ QLabel[class=hint] "지문은 파일로 저장되지 않습니다 (앱 캐시 사용 시 ~/.swea-fetch/cache …)"
+빈 상태: EmptyState "아직 가져온 문제가 없습니다" / "저장 탭에서 문제를 가져오면 지문이 여기에 표시됩니다" + [저장 탭으로]
+```
+
+- 지문 CSS 는 `tokens.build_statement_css(palette)` 가 Palette 필드(`text` `text_2` `text_3` `border` `surface_alt`, `FONT_MONO`, `SPACE`)로만 만든다. 색 리터럴 금지. 본문 글자 크기는 지정하지 않는다 (위젯 폰트 + zoom, 범위 −3~+8, QSettings `problem/zoom`).
+- 표: 1px `border` 격자 + 셀 패딩 4×8, `th` 는 `surface_alt`. `pre/code` 는 `FONT_MONO` + `surface_alt`. 이미지는 뒤에 배경을 깔지 않는다 (다크 도입 시 투명 PNG 대비 재검토).
+- 이미지는 뷰포트 폭(−여백)보다 크면 축소, 리사이즈 시 100ms 디바운스로 다시 맞춤. 실패 이미지는 본문에 "[이미지 불러오기 실패: 사유]" (`text_3`).
+- 자동 전환: 저장·뼈대 성공 시 문제 탭으로 이동 (설정 "저장 후 문제 탭으로 이동", 기본 ON). 미리보기는 이동하지 않고 결과 카드에 [문제 보기]. 최근 페이지 우클릭 "문제 보기"(캐시 있을 때만 활성), "이미 저장된 문제" 배너의 [문제 보기]는 캐시만 읽는다.
+- 설정 페이지 "문제 지문" 카드: 자동 이동 체크박스, "지문 캐시 사용" 체크박스(기본 ON, 최근 50건), [캐시 지우기].
+
 ## 7. 다이얼로그 (2개)
 
 1. **폴더 찾아보기** — `QFileDialog.getExistingDirectory`, 네이티브. 커스텀 없음.
@@ -416,8 +437,8 @@ QWidget#Page  (QScrollArea 안에 — 최소 높이 480 에서 잘림 방지)
 
 ## 10. 키보드·접근성
 
-- 탭 순서(저장): 번호 → 주제 → 덮어쓰기 → 뼈대만 → 색인 → [저장] → [미리보기] → 결과 카드 버튼 → 로그 토글. 내비는 Ctrl+1~4 (Tab 순서에서는 맨 앞).
-- 단축키: Enter = 저장(번호·주제 입력에서), Ctrl+Enter = 미리보기, Esc(저장 페이지) = **배너가 보이면 배너 닫기, 아니면 로그 지우기** (배너는 포커스를 받지 않으므로 표시 여부로 판단), F5 = 최근 새로고침, Ctrl+, = 설정, Ctrl+1~4 = 페이지.
+- 탭 순서(저장): 번호 → 주제 → 덮어쓰기 → 뼈대만 → 색인 → [저장] → [미리보기] → 결과 카드 버튼 → 로그 토글. 내비는 Ctrl+1~5 (Tab 순서에서는 맨 앞).
+- 단축키: Enter = 저장(번호·주제 입력에서), Ctrl+Enter = 미리보기, Esc(저장 페이지) = **배너가 보이면 배너 닫기, 아니면 로그 지우기** (배너는 포커스를 받지 않으므로 표시 여부로 판단), F5 = 최근 새로고침, Ctrl+, = 설정, Ctrl+1~5 = 페이지.
 - 내비 `QListWidget#nav` 는 Fusion 기본 포커스 점선을 유지한다 (`outline: 0` 금지) — 키보드 포커스 위치가 보여야 함.
 - 모든 입력에 `setBuddy` 레이블 + `setAccessibleName`. 아이콘 전용 버튼(배너 ×)에 `setToolTip` + `setAccessibleName("닫기")`.
 - 포커스 링: 모든 포커스 가능 위젯에서 2px `primary` 가시. Qt 기본 점선 outline 은 QSS 로 제거하지 않는다(중복 허용).

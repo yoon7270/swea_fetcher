@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import config, doctor, gitops, service, update
+from ... import config, content_cache, doctor, gitops, service, update
 from ...config import Settings
 from ..theme import tokens
 from ..widgets import Banner, make_busy_bar, set_class, set_invalid
@@ -37,6 +37,7 @@ class SettingsPage(QWidget):
     settings_changed = Signal()  # 저장/삭제 후 MainWindow 가 load_settings 를 다시 시도
     status_message = Signal(str)
     timeout_changed = Signal(float)
+    cache_settings_changed = Signal()  # 지문 캐시 사용 토글 (문제 탭 안내문 갱신용)
 
     def __init__(self, qsettings: QSettings, config_dir: Path | None = None, parent=None) -> None:
         super().__init__(parent)
@@ -261,6 +262,30 @@ class SettingsPage(QWidget):
         g5.setColumnStretch(1, 1)
         root.addWidget(card5)
 
+        # --- 문제 지문 (M12)
+        sec6 = QLabel("문제 지문")
+        set_class(sec6, "section")
+        root.addWidget(sec6)
+        card6 = QFrame()
+        set_class(card6, "card")
+        g6 = QGridLayout(card6)
+        g6.setContentsMargins(tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2)
+        g6.setVerticalSpacing(tokens.SPACE)
+        self.auto_open_problem = QCheckBox("저장 후 문제 탭으로 이동")
+        self.auto_open_problem.setChecked(self.qs.value("fetch/auto_open_problem", True, type=bool))
+        self.cache_enabled = QCheckBox("지문 캐시 사용 (최근 50건을 다시 볼 수 있게 이 PC 에 보관)")
+        self.cache_enabled.setChecked(self.qs.value("problem/cache_enabled", True, type=bool))
+        cache_hint = QLabel("지문은 풀이 폴더에 저장되지 않으며 GitHub 로 올라가지 않습니다. 캐시는 설정 폴더(~/.swea-fetch/cache)에만 있습니다")
+        set_class(cache_hint, "hint")
+        cache_hint.setWordWrap(True)
+        self.cache_clear_btn = QPushButton("캐시 지우기")
+        g6.addWidget(self.auto_open_problem, 0, 0, 1, 2)
+        g6.addWidget(self.cache_enabled, 1, 0)
+        g6.addWidget(self.cache_clear_btn, 1, 1)
+        g6.addWidget(cache_hint, 2, 0, 1, 2)
+        g6.setColumnStretch(0, 1)
+        root.addWidget(card6)
+
         # --- 진단·업데이트 (M6 §3·§4)
         sec4 = QLabel("진단·업데이트")
         set_class(sec4, "section")
@@ -313,6 +338,9 @@ class SettingsPage(QWidget):
         self.logout_btn.clicked.connect(lambda: self._logout(False))
         self.logout_all_btn.clicked.connect(lambda: self._logout(True))
         self.doctor_btn.clicked.connect(self.copy_doctor)
+        self.auto_open_problem.toggled.connect(lambda on: self.qs.setValue("fetch/auto_open_problem", on))
+        self.cache_enabled.toggled.connect(self._cache_toggled)
+        self.cache_clear_btn.clicked.connect(self._clear_cache)
         self.update_check.toggled.connect(lambda on: update.set_disabled(self.config_dir, not on))
         self.commit_template.editingFinished.connect(self._save_template)
         self.auto_push.clicked.connect(self._auto_push_clicked)
@@ -635,6 +663,16 @@ class SettingsPage(QWidget):
         self.doctor_btn.setText("진단 정보 복사")
 
     # --- 삭제 -----------------------------------------------------------------------
+    def _cache_toggled(self, on: bool) -> None:
+        self.qs.setValue("problem/cache_enabled", on)
+        self.cache_settings_changed.emit()
+
+    def _clear_cache(self) -> None:
+        """앱 캐시(config_dir/cache/statements)의 지문을 모두 지운다. 풀이 폴더는 건드리지 않는다."""
+        n = content_cache.clear(self.config_dir / config.CACHE_DIR_NAME)
+        self.banner.show_message("success", "지문 캐시를 지웠습니다", f"{n}건 삭제" if n else "지울 항목 없음")
+        self.status_message.emit("지문 캐시를 지웠습니다")
+
     def _logout(self, all_: bool) -> None:
         if all_:
             box = QMessageBox(QMessageBox.Icon.Warning, "계정 정보 삭제",

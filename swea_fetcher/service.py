@@ -24,12 +24,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from . import auth, client, config, gitops, lookup, parser, storage, submit
+from . import auth, client, config, content_cache, gitops, lookup, parser, storage, submit
 from .config import Settings
-from .errors import GitError, InvalidInput
+from .errors import GitError, InvalidInput, SweaFetchError
 from .gitops import GitResult
 from .submit import SubmitResult
-from .models import ProblemInfo, SaveResult
+from .models import ImageRef, ProblemContent, ProblemInfo, SaveResult
 
 log = logging.getLogger("swea_fetcher.service")
 
@@ -50,6 +50,8 @@ class FetchOptions:
     dry_run: bool = False
     refresh_index: bool = False
     num_override: int | None = None
+    with_content: bool = False  # 지문 추출 (GUI 만 True, M12). False 면 지문 파싱·이미지 다운로드·캐시 쓰기 모두 없음
+    cache_content: bool = False  # with_content 이고 dry-run 이 아닐 때 지문을 앱 캐시(config_dir/cache)에 기록
 
 
 @dataclass
@@ -70,6 +72,7 @@ class FetchOutcome:
     preview: dict | None  # dry_run: {"problem_dir": Path, "files": [FilePlan], "needs_force": bool}
     notices: list[str] = field(default_factory=list)  # 주제 이름 안내 등
     topic: str = ""  # 실제 사용된 주제 폴더 이름
+    content: ProblemContent | None = None  # 지문 (with_content 일 때만, 추출 실패면 None)
 
 
 @dataclass
@@ -151,6 +154,48 @@ def _build_preview(
     }
 
 
+_IMG_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"BM")
+
+
+def _looks_like_image(data: bytes) -> bool:
+    return data.startswith(_IMG_MAGIC) or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+
+
+def _load_images(session, settings: Settings, content: ProblemContent, progress: ProgressCb | None = None) -> ProblemContent:
+    """url 만 있고 data 가 없는 이미지를 순차로 내려받는다. 개별 실패는 ImageRef.error 로 남기고 계속 (fetch 실패 아님)."""
+    todo = [t for t, r in content.images.items() if r.url and r.data is None and not r.error]
+    if not todo:
+        return content
+    images = dict(content.images)
+    for i, token in enumerate(todo, 1):
+        ref = images[token]
+        _emit(progress, f"지문 이미지 {i}/{len(todo)}")
+        try:
+            data = client.download(session, ref.url, settings)
+            if not _looks_like_image(data):
+                images[token] = ImageRef(url=ref.url, alt=ref.alt, error="이미지가 아닌 응답")
+            elif len(data) > parser.IMG_MAX_BYTES:
+                images[token] = ImageRef(url=ref.url, alt=ref.alt, error="이미지가 너무 큽니다 (5MB 초과)")
+            else:
+                images[token] = ImageRef(data=data, url=ref.url, alt=ref.alt)
+        except SweaFetchError as e:
+            log.debug("지문 이미지 다운로드 실패 (%s): %s", ref.url, e)
+            images[token] = ImageRef(url=ref.url, alt=ref.alt, error=f"다운로드 실패: {e}")
+    return dataclasses.replace(content, images=images)
+
+
+def _extract_content(session, settings: Settings, html: str, progress: ProgressCb | None) -> ProblemContent | None:
+    """지문 추출 + 이미지 다운로드. 어떤 실패도 fetch 를 중단시키지 않는다 (None 반환)."""
+    try:
+        content = parser.parse_content(html)
+        if content is not None:
+            content = _load_images(session, settings, content, progress)
+        return content
+    except Exception as e:  # noqa: BLE001 — 지문은 부가 기능
+        log.warning("지문 추출 실패: %s", e)
+        return None
+
+
 # --- 공개 API --------------------------------------------------------------------------
 
 
@@ -199,6 +244,13 @@ def fetch_problem(
     for n in notices:
         _emit(progress, f"[알림] {n}")
 
+    content = None
+    if opts.with_content:
+        content = _extract_content(session, settings, html, progress)
+        if content is None:
+            notices.append("지문 영역을 찾지 못했습니다")
+            _emit(progress, "[알림] 지문 영역을 찾지 못했습니다")
+
     in_bytes = out_bytes = None
     if not opts.skeleton_only:
         _emit(progress, "첨부 다운로드")
@@ -207,7 +259,11 @@ def fetch_problem(
 
     if opts.dry_run:
         _emit(progress, "미리보기 (저장하지 않음)")
-        return FetchOutcome(info, None, _build_preview(info, topic, settings, in_bytes, out_bytes, opts), notices, topic)
+        return FetchOutcome(info, None, _build_preview(info, topic, settings, in_bytes, out_bytes, opts), notices, topic, content)
+
+    # 지문 캐시는 저장 단계 전에 기록한다: "이미 저장된 파일" 충돌로 저장이 실패해도 지문은 다시 볼 수 있게
+    if content is not None and opts.cache_content:
+        content_cache.save(settings, info.num, topic, info.title, content)
 
     _emit(progress, "저장 중")
     try:
@@ -224,7 +280,7 @@ def fetch_problem(
             sync_now(settings, reason="save", problem_dir=result.problem_dir, progress=progress)
         except Exception as e:  # noqa: BLE001
             log.debug("자동 동기화(save) 실패: %s", e)
-    return FetchOutcome(info, result, None, notices, topic)
+    return FetchOutcome(info, result, None, notices, topic, content)
 
 
 def verify_login(settings: Settings, progress: ProgressCb | None = None) -> str:
@@ -577,6 +633,8 @@ def logout(config_dir: Path, all_: bool = False) -> list[str]:
     targets = [config_dir / config.SESSION_FILE_NAME, config_dir / config.LOGIN_STATE_FILE_NAME]
     if all_:
         targets.append(config_dir / config.ENV_FILE_NAME)
+        if content_cache.clear(config_dir / config.CACHE_DIR_NAME):
+            removed.append("지문 캐시")
     for path in targets:
         try:
             path.unlink()

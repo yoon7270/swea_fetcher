@@ -10,14 +10,16 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import logging
 import re
 from urllib.parse import parse_qs, urljoin, urlparse
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup, Comment, Tag
 
 from .errors import AttachmentNotFound, InvalidInput, ParseError
-from .models import ProblemInfo
+from .models import ImageRef, ProblemContent, ProblemInfo
 
 log = logging.getLogger("swea_fetcher.parser")
 
@@ -27,12 +29,32 @@ BASE = "https://swexpertacademy.com"
 SEL_SOLVER_TITLE = "h3.problem_title"
 SEL_CLUB_TITLE = "p.problem_title"  # detail 페이지도 같은 요소
 SEL_ATTACH = 'div.down_area a[href*="contestProbDown.do"]'
+SEL_LIMITS = "div.box3"  # 지문: 시간/메모리 제한 (M12)
+SEL_BODY = "div.box4"  # 지문: 본문
 
 TITLE_RE = re.compile(r"^(\d+)\.\s*(?:\[\d+\]\s*)?(.+)$")  # "25730. [07] 항아리 게임"
 CLUB_TITLE_RE = re.compile(r"^\[(\d+)\]\s*(.+)$")  # "[07] 항아리 게임"
 CONTEST_PROB_ID_RE = re.compile(r"[A-Za-z0-9_-]{16}")
 
 PAGE_KINDS = ("solver", "club", "detail")
+
+# --- 지문 sanitize 상수 (M12, 허용 목록 방식) ---
+IMG_TOKEN_PREFIX = "swea-img:"
+_DROP_TAGS = (
+    "script", "style", "iframe", "object", "embed", "form", "input", "button", "select", "textarea",
+    "link", "meta", "svg", "canvas", "video", "audio", "noscript",
+)  # fmt: skip
+_ALLOWED_TAGS = frozenset(
+    "p br div span b strong i em u s sub sup ul ol li table thead tbody tfoot tr th td caption pre code "
+    "blockquote hr h1 h2 h3 h4 h5 h6 img".split()
+)
+_KEEP_ATTRS = {"td": ("colspan", "rowspan"), "th": ("colspan", "rowspan")}
+_DATA_IMG_RE = re.compile(r"^data:image/(png|jpeg|gif|webp|bmp);base64,(.*)$", re.IGNORECASE | re.DOTALL)
+IMG_MAX_BYTES = 5 * 1024 * 1024  # 개당
+IMG_MAX_TOTAL = 20 * 1024 * 1024  # 지문 합계
+IMG_MAX_COUNT = 30
+REMOTE_IMG_MAX = 10  # 다운로드가 필요한 원격 이미지 개수 상한 (fetch 지연 방지)
+_ALLOWED_IMG_HOSTS = {"swexpertacademy.com", "www.swexpertacademy.com"}  # client.ALLOWED_HOSTS 와 동일
 
 
 # --- 입력 해석 ------------------------------------------------------------------
@@ -196,3 +218,110 @@ def parse(html: str, page_kind: str, contest_prob_id: str, require_attachments: 
         output_filename=out_name,
         page_kind=page_kind,
     )
+
+
+# --- 지문 추출 (M12) --------------------------------------------------------------
+
+
+def _classify_image(src: str, alt: str, images: dict[str, ImageRef], total: list[int]) -> ImageRef:
+    """img src 하나를 ImageRef 로 (네트워크 없음). total[0] = 지금까지 디코드한 바이트 합."""
+    src = (src or "").strip()
+    if not src:
+        return ImageRef(alt=alt, error="이미지 주소 없음")
+    if len(images) >= IMG_MAX_COUNT:
+        return ImageRef(alt=alt, error=f"이미지 개수 상한({IMG_MAX_COUNT}) 초과")
+    if src.lower().startswith("data:"):
+        m = _DATA_IMG_RE.match(src)
+        if not m:
+            return ImageRef(alt=alt, error="지원하지 않는 이미지 형식")
+        try:
+            data = base64.b64decode(re.sub(r"\s+", "", m.group(2)), validate=True)
+        except (binascii.Error, ValueError):
+            return ImageRef(alt=alt, error="이미지 디코드 실패")
+        if len(data) > IMG_MAX_BYTES:
+            return ImageRef(alt=alt, error="이미지가 너무 큽니다 (5MB 초과)")
+        if total[0] + len(data) > IMG_MAX_TOTAL:
+            return ImageRef(alt=alt, error="이미지 합계 용량 상한 초과")
+        total[0] += len(data)
+        return ImageRef(data=data, alt=alt)
+    scheme = urlparse(src).scheme.lower()
+    if scheme not in ("", "http", "https"):
+        return ImageRef(alt=alt, error="지원하지 않는 이미지 주소")
+    url = urljoin(BASE, src)
+    if (urlparse(url).hostname or "").lower() not in _ALLOWED_IMG_HOSTS:
+        return ImageRef(alt=alt, error="외부 이미지 생략")  # 외부 서버로는 요청하지 않는다
+    if sum(1 for r in images.values() if r.url) >= REMOTE_IMG_MAX:
+        return ImageRef(alt=alt, error=f"원격 이미지 개수 상한({REMOTE_IMG_MAX}) 초과")
+    return ImageRef(url=url, alt=alt)
+
+
+def _sanitize(root: Tag, images: dict[str, ImageRef]) -> None:
+    """root 내부를 허용 목록으로 정리한다 (제자리 수정). 이미지는 swea-img:N 토큰으로 치환·등록."""
+    for el in root.find_all(_DROP_TAGS):
+        el.decompose()
+    for c in root.find_all(string=lambda s: isinstance(s, Comment)):
+        c.extract()
+    for el in root.find_all(class_="hide"):
+        if not getattr(el, "decomposed", False):
+            el.decompose()
+
+    total = [0]
+    for el in list(root.find_all(True)):
+        if el.name not in _ALLOWED_TAGS:  # a 포함: 텍스트만 남긴다
+            el.unwrap()
+            continue
+        if el.name == "img":
+            alt = " ".join(str(el.get("alt") or "").split())[:100]
+            n = len(images)
+            ref = _classify_image(str(el.get("src") or ""), alt or f"이미지 {n + 1}", images, total)
+            token = f"{IMG_TOKEN_PREFIX}{n}"
+            images[token] = ref
+            el.attrs = {"src": token, "alt": ref.alt}
+            continue
+        keep = _KEEP_ATTRS.get(el.name, ())
+        el.attrs = {k: v for k, v in el.attrs.items() if k in keep and str(v).isdigit()}
+
+    # 빈 <p> 제거, 연속 <br> 3개 이상 → 2개
+    for p in reversed(root.find_all("p")):
+        if not p.get_text(strip=True) and p.find("img") is None:
+            p.decompose()
+    for br in root.find_all("br"):
+        prev = br.previous_sibling
+        while prev is not None and isinstance(prev, str) and not prev.strip():
+            prev = prev.previous_sibling
+        prev2 = getattr(prev, "previous_sibling", None)
+        while prev2 is not None and isinstance(prev2, str) and not prev2.strip():
+            prev2 = prev2.previous_sibling
+        if getattr(prev, "name", None) == "br" and getattr(prev2, "name", None) == "br":
+            br.decompose()
+
+
+def parse_content(html: str) -> ProblemContent | None:
+    """문제 페이지에서 지문(제한사항 box3 + 본문 box4)을 sanitize 해 꺼낸다. 순수 함수 (네트워크 없음).
+
+    본문 영역이 없거나 정리 후 비면 None (예외 아님 — 저장 파이프라인은 지문 실패로 중단하지 않는다).
+    """
+    soup = BeautifulSoup(html, "lxml")
+    body = soup.select_one(SEL_BODY)
+    if body is None:
+        return None
+    if len(soup.select(SEL_BODY)) > 1:
+        log.warning("지문 영역(%s)이 여러 개입니다. 첫 번째만 사용", SEL_BODY)
+    images: dict[str, ImageRef] = {}
+    _sanitize(body, images)
+    body_html = body.decode_contents().strip()
+
+    limits_html = ""
+    limits = soup.select_one(SEL_LIMITS)
+    if limits is not None:
+        # 이미지 토큰 번호가 본문과 겹치지 않도록 같은 images 를 공유한다
+        _sanitize(limits, images)
+        limits_html = limits.decode_contents().strip()
+
+    if not body.get_text(strip=True) and not _tokens_in(body_html):
+        return None
+    return ProblemContent(limits_html=limits_html, body_html=body_html, images=images)
+
+
+def _tokens_in(html: str) -> list[str]:
+    return re.findall(rf'src="({re.escape(IMG_TOKEN_PREFIX)}\d+)"', html)

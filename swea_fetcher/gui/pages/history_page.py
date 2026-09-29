@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import service
+from ... import content_cache, service
 from ...config import Settings
 from ..theme import tokens
 from ..widgets import Banner, EmptyState, open_in_explorer, open_with_default_app, set_class
@@ -29,6 +29,7 @@ class HistoryPage(QWidget):
     check_requested = Signal(str, int)  # topic, num
     push_requested = Signal(str, int)  # topic, num — 검증 페이지의 확인 다이얼로그로 (M7)
     submit_requested = Signal(str, int)  # topic, num — 검증 페이지의 [SWEA 제출] 흐름으로 (M8)
+    problem_requested = Signal(str, int)  # topic, num — 앱 캐시의 지문을 문제 탭으로 (M12)
     goto_requested = Signal(str)
     status_message = Signal(str)
 
@@ -59,7 +60,7 @@ class HistoryPage(QWidget):
         root.addLayout(head)
         self.banner = Banner()
         root.addWidget(self.banner)
-        hint = QLabel("더블클릭 = 검증 · 우클릭 = 폴더 열기")
+        hint = QLabel("더블클릭 = 검증 · 우클릭 = 폴더 열기·문제 보기")
         set_class(hint, "hint")
         root.addWidget(hint)
 
@@ -142,6 +143,12 @@ class HistoryPage(QWidget):
         menu = QMenu(self)
         menu.addAction("폴더 열기", lambda: open_in_explorer(it.path) and self.status_message.emit("폴더를 열었습니다"))
         menu.addAction("PyCharm 에서 열기", lambda: open_with_default_app(it.path / f"{it.num}.py"))
+        cached = self.settings is not None and content_cache.has(self.settings, it.num)
+        view = menu.addAction("문제 보기", lambda: self.problem_requested.emit(it.topic, it.num))
+        view.setEnabled(cached)  # 캐시만 읽는다 (지문은 폴더에 없음)
+        if not cached:
+            view.setToolTip("저장 탭에서 다시 가져오면 볼 수 있습니다")
+            menu.setToolTipsVisible(True)
         menu.addAction("검증하기", lambda: self.check_requested.emit(it.topic, it.num))
         menu.addAction("SWEA 제출…", lambda: self.submit_requested.emit(it.topic, it.num))
         menu.addAction("커밋 + 푸시…", lambda: self.push_requested.emit(it.topic, it.num))

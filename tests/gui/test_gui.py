@@ -36,7 +36,7 @@ def _saved_outcome(root: Path, info) -> FetchOutcome:
 def test_window_builds_with_settings(main_window):
     w = main_window
     assert w.settings is not None and w.settings.user_id == DUMMY_ID
-    assert w.stack.count() == 4 and w.nav.count() == 4
+    assert w.stack.count() == 5 and w.nav.count() == 5
     assert w.status_login.text() == "○ 세션 없음"
     assert str(w.settings.root) in w.status_root.toolTip()
     assert w.nav.currentRow() == 0 and w.stack.currentIndex() == 0
@@ -45,7 +45,7 @@ def test_window_builds_with_settings(main_window):
 def test_window_without_settings_goes_to_settings_page(main_window_no_config):
     w = main_window_no_config
     assert w.settings is None
-    assert w.nav.currentRow() == 3 and w.stack.currentIndex() == 3
+    assert w.nav.currentRow() == 4 and w.stack.currentIndex() == 4
     assert w.status_login.text() == "○ 설정 없음"
     assert w.settings_page.banner.isVisibleTo(w) and "처음 실행" in w.settings_page.banner.title.text()
 
@@ -53,10 +53,10 @@ def test_window_without_settings_goes_to_settings_page(main_window_no_config):
 def test_nav_switches_pages_and_persists_last_page(main_window, qtbot):
     w = main_window
     w.goto("history")
-    assert w.stack.currentIndex() == 2
-    assert int(w.qs.value("window/last_page", -1, type=int)) == 2
+    assert w.stack.currentWidget() is w.history_page
+    assert w.qs.value("window/last_page_key", "", type=str) == "history"
     w.goto("check")
-    assert w.stack.currentIndex() == 1
+    assert w.stack.currentWidget() is w.check_page
 
 
 def test_status_shows_logged_in_when_session_cached(qtbot, valid_config):
@@ -71,7 +71,7 @@ def test_status_shows_logged_in_when_session_cached(qtbot, valid_config):
 def test_history_check_request_routes_to_check_page(main_window):
     w = main_window
     w.history_page.check_requested.emit("BFS", 4014)
-    assert w.stack.currentIndex() == 1
+    assert w.stack.currentWidget() is w.check_page
     assert w.check_page.topic.currentText() == "BFS" and w.check_page.num.text() == "4014"
 
 
@@ -307,7 +307,7 @@ def test_settings_save_only_writes_env_and_keyring(main_window_no_config, qtbot,
     assert "저장했습니다" in sp.banner.title.text()
     # MainWindow 가 다시 로드해 설정이 생김 (stay=True 라 페이지 이동 없음)
     assert w.settings is not None and w.settings.user_id == DUMMY_ID
-    assert w.stack.currentIndex() == 3
+    assert w.stack.currentWidget() is w.settings_page
 
 
 def test_settings_save_without_pw_uses_saved_credential(main_window, qtbot, fake_keyring):

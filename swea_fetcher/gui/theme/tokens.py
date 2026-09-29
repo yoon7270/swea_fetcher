@@ -262,3 +262,26 @@ QListWidget#nav {{ border-right: none; }}
 QFrame[class="card"][state="drop"] {{ border: 2px solid {p.primary}; }}
 QLabel#preview {{ background: {p.surface_alt}; color: {p.text_2}; border-radius: {RADIUS_SM}px; }}
 """
+
+
+def build_statement_css(p: Palette = LIGHT) -> str:
+    """문제 지문(QTextBrowser 문서)용 스타일시트 (M12). Qt rich text 가 지원하는 CSS 부분집합만 쓴다.
+
+    본문 글자 크기는 지정하지 않는다 — 위젯 폰트를 따라야 확대/축소(zoom)가 먹는다.
+    """
+    return f"""
+body {{ color: {p.text}; }}
+p {{ margin-top: 0; margin-bottom: {SPACE}px; }}
+ul, ol {{ margin-top: 0; margin-bottom: {SPACE}px; }}
+li {{ margin-bottom: {SPACE // 2}px; }}
+h1, h2, h3, h4, h5, h6 {{ color: {p.text}; margin-top: {SPACE}px; margin-bottom: {SPACE // 2}px; }}
+pre, code {{ font-family: {FONT_MONO}; background-color: {p.surface_alt}; color: {p.text}; }}
+pre {{ margin-top: 0; margin-bottom: {SPACE}px; }}
+blockquote {{ color: {p.text_2}; }}
+table {{ border-collapse: collapse; border-width: 1px; border-style: solid; border-color: {p.border}; }}
+th, td {{ border-width: 1px; border-style: solid; border-color: {p.border}; padding: {SPACE // 2}px {SPACE}px; }}
+th {{ background-color: {p.surface_alt}; }}
+hr {{ background-color: {p.border}; }}
+.limits {{ color: {p.text_2}; }}
+.imgfail {{ color: {p.text_3}; }}
+"""

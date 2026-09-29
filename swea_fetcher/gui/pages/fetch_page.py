@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import service
+from ... import content_cache, service
 from ...config import Settings
 from ...service import FetchOptions, FetchOutcome
 from ..theme import tokens
@@ -31,6 +31,8 @@ class FetchPage(QWidget):
     saved = Signal(object)  # FetchOutcome — 최근 목록 갱신용
     status_message = Signal(str)
     goto_requested = Signal(str)  # 페이지 key
+    problem_ready = Signal(object)  # FetchOutcome — 지문이 있는 결과 (문제 탭용, M12)
+    cached_problem_requested = Signal(int)  # 문제 번호 — 앱 캐시의 지문 보기 (충돌 배너 조치)
 
     def __init__(self, qsettings: QSettings, parent=None) -> None:
         super().__init__(parent)
@@ -166,8 +168,11 @@ class FetchPage(QWidget):
         self.commit_btn = QPushButton("이대로 저장")
         set_class(self.commit_btn, "primary")
         self.commit_btn.setFixedHeight(tokens.CONTROL_H_SM)
+        self.view_btn = QPushButton("문제 보기")  # 미리보기 결과에서 문제 탭으로 (M12)
+        self.view_btn.hide()
         cb.addWidget(self.open_dir_btn)
         cb.addWidget(self.open_py_btn)
+        cb.addWidget(self.view_btn)
         cb.addWidget(self.commit_btn)
         cb.addStretch(1)
         cl.addLayout(cb)
@@ -188,6 +193,7 @@ class FetchPage(QWidget):
         self.open_dir_btn.clicked.connect(self._open_dir)
         self.open_py_btn.clicked.connect(self._open_py)
         self.commit_btn.clicked.connect(self._commit_preview)
+        self.view_btn.clicked.connect(lambda: self.goto_requested.emit("problem"))
         self.banner.action_clicked.connect(self._banner_action)
         self.target.textEdited.connect(lambda _t: self._clear_invalid())
         self.topic.lineEdit().textEdited.connect(lambda _t: self._clear_invalid())
@@ -251,6 +257,8 @@ class FetchPage(QWidget):
             skeleton_only=self.skeleton.isChecked(),
             dry_run=dry_run,
             refresh_index=self.refresh.isChecked(),
+            with_content=True,  # 지문은 GUI 만 추출한다 (M12)
+            cache_content=self._cache_enabled(),
         )
         self._last_args = (target, topic, opts)
         self.banner.hide()
@@ -263,6 +271,10 @@ class FetchPage(QWidget):
         self._worker.finished.connect(self._cleanup)
         self._set_busy(True)
         self._worker.start()
+
+    def _cache_enabled(self) -> bool:
+        """지문 디스크 캐시 사용 여부 (설정 페이지 토글, 기본 ON)."""
+        return bool(self.qs.value("problem/cache_enabled", True, type=bool))
 
     def _on_progress(self, msg: str) -> None:
         self.log.append(msg)
@@ -297,9 +309,21 @@ class FetchPage(QWidget):
             self._rerun()
         elif key == "settings":
             self.goto_requested.emit("settings")
+        elif key == "view":
+            num = self._cached_num()
+            if num is not None:
+                self.cached_problem_requested.emit(num)
         elif key == "log":
             self.log.toggle.setChecked(True)
             self.log.text.verticalScrollBar().setValue(self.log.text.verticalScrollBar().maximum())
+
+    def _cached_num(self) -> int | None:
+        """마지막 입력이 문제 번호이고 그 지문이 앱 캐시에 있으면 번호. (URL 입력은 번호를 알 수 없어 None)"""
+        if not self._last_args or self.settings is None or not self._cache_enabled():
+            return None
+        target, _topic, opts = self._last_args
+        num = opts.num_override if opts.num_override is not None else (int(target) if target.isdigit() else None)
+        return num if num is not None and content_cache.has(self.settings, num) else None
 
     def _commit_preview(self) -> None:
         if self._last_args:
@@ -353,6 +377,7 @@ class FetchPage(QWidget):
             self.open_dir_btn.show()
             self.open_py_btn.show()
             self.commit_btn.hide()
+            self.view_btn.hide()
             self.card.show()
             self.status_message.emit(f"저장 완료 · {info.num}")
             self.saved.emit(outcome)
@@ -376,8 +401,11 @@ class FetchPage(QWidget):
             self.open_py_btn.hide()
             self.commit_btn.setText("덮어쓰고 저장" if pv.get("needs_force") else "이대로 저장")
             self.commit_btn.show()
+            self.view_btn.setVisible(outcome.content is not None)
             self.card.show()
             self.status_message.emit("미리보기 — 저장하지 않았습니다")
+        if outcome.content is not None:  # 저장 결과 카드를 먼저 갱신한 뒤 문제 탭에 넘긴다 (자동 전환은 MainWindow 몫)
+            self.problem_ready.emit(outcome)
 
     def _on_failed(self, title: str, hint: str, detail: str) -> None:
         self.card.hide()
@@ -387,6 +415,8 @@ class FetchPage(QWidget):
         state, actions = "error", []
         if "이미 저장된 파일" in title:
             state, title, actions = "warning", "이미 저장된 문제입니다", [("force", "덮어쓰고 다시 저장")]
+            if self._cached_num() is not None:  # 저장 전에 지문이 캐시에 기록돼 있으므로 읽기만 할 수 있다
+                actions.append(("view", "문제 보기"))
         elif "첨부 링크가 없습니다" in title:
             state, title, actions = "warning", "샘플 첨부가 없는 문제입니다", [("skeleton", "뼈대만 저장")]
         elif "찾지 못했습니다" in title and "문제 번호" in title:

@@ -96,6 +96,12 @@ SWEA 에는 문제 관련 페이지가 **세 종류** 있고, 사용자의 실�
 - 헤더의 닉네임 `span.name` → `DUMMY_USER`, `userInformationPopup('...')` 의 사용자 키 → `DUMMY_USER_KEY`
 - `solveclubId` / `probBoxId` / `_menuId` 는 계정이 아닌 클럽·메뉴 식별자라 유지
 
+### 지문 영역 (M12, 픽스처 3종 확인)
+- 제한사항 `div.box3`, 본문 `div.box4` 가 solver / detail / club 픽스처 모두 정확히 1개씩 (`parser.SEL_LIMITS`, `SEL_BODY`). 오류 페이지에는 없음.
+- 일반 문제(4014 픽스처)의 지문 이미지는 대부분 `data:image/png;base64,...` 로 HTML 에 인라인 (본문 img 11개 전부). 상대 URL 이미지는 실측 전 (M12-c).
+- 수식 span(`span.math-inline`)의 `data-math` LaTeX 는 화면 텍스트와 다를 수 있다 (`4 \le N \le 500` vs 화면 `4 <= N <= 20`) → 화면 텍스트를 쓴다.
+- 지문은 삼성 저작물이라 풀이 폴더에 파일로 쓰지 않는다. 앱 캐시 `~/.swea-fetch/cache/statements/{num}.json` 에만 둔다 (최근 50건).
+
 ## 요청 조건
 
 - `User-Agent` 없이도 로그인 페이지 200 (61KB). 단 브라우저 UA 를 붙여 두는 편이 안전

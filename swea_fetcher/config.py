@@ -23,6 +23,7 @@ CONFIG_DIR = Path.home() / ".swea-fetch"
 ENV_FILE_NAME = ".env"
 SESSION_FILE_NAME = "session.json"
 LOGIN_STATE_FILE_NAME = "login_state.json"
+CACHE_DIR_NAME = "cache"
 
 REQUIRED_KEYS = ("SWEA_ROOT", "SWEA_ID")  # SWEA_PW 는 별도 검사 (keyring)
 PASSWORD_KEY = "SWEA_PW"
@@ -52,6 +53,11 @@ class Settings:
     @property
     def login_state_file(self) -> Path:
         return self.config_dir / LOGIN_STATE_FILE_NAME
+
+    @property
+    def cache_dir(self) -> Path:
+        """앱 캐시 위치 (M12 지문 캐시 등). 루트 폴더 밖 config_dir 아래."""
+        return self.config_dir / CACHE_DIR_NAME
 
     def __repr__(self) -> str:  # 비밀번호 마스킹
         return (

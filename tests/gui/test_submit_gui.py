@@ -309,7 +309,7 @@ def test_history_context_menu_submit_routes_to_check_page(main_window, solved, s
     assert "SWEA 제출…" in labels
     next(a for a in shown[0].actions() if a.text() == "SWEA 제출…").trigger()
 
-    assert w.stack.currentIndex() == 1  # 검증 페이지로 이동
+    assert w.stack.currentWidget() is w.check_page  # 검증 페이지로 이동
     assert w.check_page.topic.currentText() == "sim" and w.check_page.num.text() == "1234"
     assert len(fake_msgbox.instances) == 1 and "1회 감소" in fake_msgbox.instances[0].body
     assert submit_stub["calls"] == []

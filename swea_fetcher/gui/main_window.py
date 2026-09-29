@@ -19,18 +19,25 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import config, service, update
+from .. import config, content_cache, service, update
 from ..config import Settings
 from ..errors import ConfigMissing
 from .pages.check_page import CheckPage
 from .pages.fetch_page import FetchPage
 from .pages.history_page import HistoryPage
+from .pages.problem_page import ProblemPage
 from .pages.settings_page import SettingsPage
 from .theme import tokens
 from .widgets import nav_icon, set_class
 from .workers import FuncWorker
 
-PAGES = (("저장", "fetch", "nav-fetch"), ("검증", "check", "nav-check"), ("최근", "history", "nav-history"), ("설정", "settings", "nav-settings"))
+PAGES = (
+    ("저장", "fetch", "nav-fetch"),
+    ("문제", "problem", "nav-problem"),
+    ("검증", "check", "nav-check"),
+    ("최근", "history", "nav-history"),
+    ("설정", "settings", "nav-settings"),
+)
 APP_TITLE = "SWEA Fetch"
 UPDATE_CHECK_DELAY_MS = 1500  # 창이 뜬 뒤에 조회 (시작 속도에 영향 없게). app.main() 이 사용
 
@@ -81,10 +88,11 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget()
         self.fetch_page = FetchPage(self.qs)
+        self.problem_page = ProblemPage(self.qs)
         self.check_page = CheckPage(self.qs)
         self.history_page = HistoryPage()
         self.settings_page = SettingsPage(self.qs, self.config_dir)
-        for p in (self.fetch_page, self.check_page, self.history_page, self.settings_page):
+        for p in (self.fetch_page, self.problem_page, self.check_page, self.history_page, self.settings_page):  # PAGES 순서
             self.stack.addWidget(p)
         lay.addWidget(self.stack, 1)
         self.setCentralWidget(central)
@@ -118,10 +126,14 @@ class MainWindow(QMainWindow):
         self.nav.currentRowChanged.connect(self._page_changed)
         for p in (self.fetch_page, self.check_page, self.settings_page):
             p.busy_changed.connect(self._set_busy)
-        for p in (self.fetch_page, self.check_page, self.history_page, self.settings_page):
+        for p in (self.fetch_page, self.problem_page, self.check_page, self.history_page, self.settings_page):
             p.status_message.connect(self.flash)
-        for p in (self.fetch_page, self.check_page, self.history_page):
+        for p in (self.fetch_page, self.problem_page, self.check_page, self.history_page):
             p.goto_requested.connect(self.goto)
+        self.fetch_page.problem_ready.connect(self._on_problem_ready)
+        self.fetch_page.cached_problem_requested.connect(self._show_cached_problem)
+        self.history_page.problem_requested.connect(lambda _topic, num: self._show_cached_problem(num))
+        self.settings_page.cache_settings_changed.connect(self.problem_page.refresh_footer)
         self.settings_page.settings_changed.connect(lambda: self.reload_settings(stay=True))
         self.settings_page.timeout_changed.connect(lambda _v: self.check_page.refresh_hint())
         self.history_page.check_requested.connect(self._goto_check)
@@ -135,17 +147,36 @@ class MainWindow(QMainWindow):
         self.autosync.status_changed.connect(self._on_autosync_status)
         self.autosync.synced.connect(lambda r: self.check_page._show_git_log(f"[자동 동기화] {r.note}\n{r.output}"))
 
-        for i in range(4):
+        for i in range(len(PAGES)):
             QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self, activated=lambda i=i: self.nav.setCurrentRow(i))
         QShortcut(QKeySequence("Ctrl+,"), self, activated=lambda: self.goto("settings"))
 
     def _page_changed(self, row: int) -> None:
         self.stack.setCurrentIndex(row)
-        self.qs.setValue("window/last_page", row)
+        # 행 번호는 내비 순서가 바뀌면 어긋나므로 key 로 저장한다 (옛 window/last_page 는 무시)
+        self.qs.setValue("window/last_page_key", PAGES[row][1])
         if PAGES[row][1] == "history":
             self.history_page.refresh()
         elif PAGES[row][1] == "fetch":
             self.fetch_page.target.setFocus()
+        elif PAGES[row][1] == "problem":
+            self.problem_page.focus_browser()  # 키보드 스크롤
+
+    # --- 문제 탭 (M12) ---------------------------------------------------------------
+    def _on_problem_ready(self, outcome) -> None:
+        """fetch 결과의 지문을 문제 탭에 싣는다. 저장/뼈대 성공이고 토글이 켜져 있으면 탭도 전환 (미리보기는 전환 안 함)."""
+        self.problem_page.show_outcome(outcome)
+        if outcome.result is not None and self.qs.value("fetch/auto_open_problem", True, type=bool):
+            self.goto("problem")
+
+    def _show_cached_problem(self, num: int) -> None:
+        """앱 캐시에서 지문을 읽어 문제 탭으로 (네트워크 없음)."""
+        cached = content_cache.load(self.settings, num) if self.settings is not None else None
+        if cached is None:
+            self.flash("저장된 지문이 없습니다. 저장 탭에서 다시 가져오면 볼 수 있습니다")
+            return
+        self.problem_page.show_cached(cached)
+        self.goto("problem")
 
     def goto(self, key: str) -> None:
         for i, (_label, k, _icon) in enumerate(PAGES):
@@ -180,21 +211,24 @@ class MainWindow(QMainWindow):
             self.settings = config.load_settings(self.config_dir)
         except ConfigMissing:
             self.settings = None
-            for p in (self.fetch_page, self.check_page, self.history_page, self.settings_page):
+            for p in (self.fetch_page, self.problem_page, self.check_page, self.history_page, self.settings_page):
                 p.set_settings(None)
             self._update_status()
             if not stay:
                 self.settings_page.show_first_run()
                 self.goto("settings")
             return
-        for p in (self.fetch_page, self.check_page, self.history_page, self.settings_page):
+        for p in (self.fetch_page, self.problem_page, self.check_page, self.history_page, self.settings_page):
             p.set_settings(self.settings)
         if self.autosync is not None:
             self.autosync.configure(self.settings)
         self._update_status()
         if first_run:
-            row = int(self.qs.value("window/last_page", 0, type=int))
-            self.nav.setCurrentRow(row if 0 <= row < len(PAGES) else 0)
+            key = str(self.qs.value("window/last_page_key", "fetch", type=str))
+            row = next((i for i, (_l, k, _ic) in enumerate(PAGES) if k == key), 0)
+            if key == "problem" and not self.problem_page.has_content():
+                row = 0  # 앱을 다시 켜면 문제 탭은 비어 있으므로 저장 탭으로
+            self.nav.setCurrentRow(row)
             self.stack.setCurrentIndex(self.nav.currentRow())
         # stay=True (설정 페이지에서 저장): 자동 이동 없음 — 결과를 확인할 시간을 준다 (§4.1)
 
