@@ -8,7 +8,7 @@ SWEA(SW Expert Academy) **문제 번호 하나**로 샘플 입력·출력과 풀
 - 문제 번호(예: `25730`) + 주제 폴더 → `swea\{주제}\{번호}\` 에 `input.txt`, `output.txt`, `{번호}.py` 뼈대 생성
 - `{번호}.py` 를 `input.txt` 로 실행해 `output.txt` 와 줄 단위로 비교 (검증)
 - 로그인·세션·문제 찾기를 알아서 처리. 비밀번호는 Windows 자격 증명 관리자에만 저장
-- (선택) **AI 앱(Claude Code 등)에서 "1231번 DFS1 에 받아줘"** 로 저장 → [AI 앱에서 쓰기](#ai-앱에서-쓰기-mcp-선택)
+- (선택) **AI 앱(Codex, Claude Code 등)에서 "1231번 DFS1 에 받아줘"** 로 저장 → [AI 앱에서 쓰기](#ai-앱에서-쓰기-mcp-선택)
 - **SWEA 에 제출**해 채점 결과를 받고, **Pass 면 그 문제 폴더만 git 커밋 + 푸시** (루트가 git 저장소일 때, 옵트인)
 
 **하지 않는 일**
@@ -314,7 +314,7 @@ swea-fetch push IM_test 25730 -m "solve: 25730"
 
 ## AI 앱에서 쓰기 (MCP, 선택)
 
-Claude Code / Claude Desktop / Cursor 같은 AI 앱에서 "1231번 DFS1 에 받아줘" 로 저장할 수 있습니다. **Python 이 있는 Windows 사용자용**이며, exe 버전에는 들어 있지 않습니다. 이 PC 에서만 동작하는 로컬 서버입니다 (별도 서버·비용 없음).
+Codex / Claude Code / Claude Desktop / Cursor 같은 AI 앱에서 "1231번 DFS1 에 받아줘" 로 저장할 수 있습니다. 표준 MCP(stdio) 서버라 MCP 를 지원하는 앱이면 어디서나 됩니다. **Python 이 있는 Windows 사용자용**이며, exe 버전에는 들어 있지 않습니다. 이 PC 에서만 동작하는 로컬 서버입니다 (별도 서버·비용 없음).
 
 1. 전용 가상환경 만들기:
 
@@ -334,7 +334,19 @@ py -3 -m venv $env:USERPROFILE\swea-fetch-venv
 & $env:USERPROFILE\swea-fetch-venv\Scripts\swea-fetch init
 ```
 
-4. AI 앱에 등록합니다. 실행 파일은 `C:/Users/<내이름>/swea-fetch-venv/Scripts/swea-fetch-mcp.exe` (JSON 에서는 백슬래시 대신 `/` 를 쓰거나 `\\` 로 이스케이프):
+4. AI 앱에 등록합니다. 실행 파일은 `C:/Users/<내이름>/swea-fetch-venv/Scripts/swea-fetch-mcp.exe` (설정 파일에서는 백슬래시 대신 `/` 를 쓰세요):
+   - **Codex** (CLI · IDE 확장 · 앱 공통): `%USERPROFILE%\.codex\config.toml` 에 아래 블록을 추가하고 Codex 를 다시 시작합니다. 첫 번호 조회는 문제 색인을 만드느라 1분을 넘길 수 있어 `tool_timeout_sec` 을 늘려 둡니다 (기본 60초)
+
+```toml
+[mcp_servers.swea]
+command = "C:/Users/<내이름>/swea-fetch-venv/Scripts/swea-fetch-mcp.exe"
+args = []
+startup_timeout_sec = 30
+tool_timeout_sec = 180
+```
+
+   Codex 에서 `/mcp` 를 입력해 `swea` 와 도구 5개가 보이면 연결된 것입니다. (CLI 로 등록하려면 `codex mcp add swea -- C:/Users/<내이름>/swea-fetch-venv/Scripts/swea-fetch-mcp.exe` 후 위 두 timeout 줄만 config.toml 에 추가)
+
    - **Claude Code**:
 
 ```powershell
@@ -359,7 +371,7 @@ claude mcp add --scope user swea -- C:/Users/<내이름>/swea-fetch-venv/Scripts
 
 도구는 5개입니다: `swea_fetch`(저장), `swea_preview`(미리보기), `swea_list_topics`, `swea_list_recent`, `swea_status`.
 
-**업데이트**: 2번 명령에 `--upgrade` 를 붙여 다시 실행하고 AI 앱을 재시작합니다. **제거**: AI 앱에서 서버 삭제 (`claude mcp remove swea`) 후 `%USERPROFILE%\swea-fetch-venv` 폴더 삭제. 공용 PC 라면 `swea-fetch logout --all` 도 실행하세요.
+**업데이트**: 2번 명령에 `--upgrade` 를 붙여 다시 실행하고 AI 앱을 재시작합니다. **제거**: AI 앱에서 서버 삭제 (Codex: config.toml 의 `[mcp_servers.swea]` 블록 삭제 / Claude Code: `claude mcp remove swea`) 후 `%USERPROFILE%\swea-fetch-venv` 폴더 삭제. 공용 PC 라면 `swea-fetch logout --all` 도 실행하세요.
 
 **알아 두세요**
 - 비밀번호는 MCP 를 거치지 않습니다 (`swea-fetch init` 이 자격 증명 관리자에 저장). ID 는 앞 2글자만 보이게 가려서 전달됩니다

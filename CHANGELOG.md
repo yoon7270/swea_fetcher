@@ -5,7 +5,7 @@
 ## v0.9.0 — 2026-09-29 "MCP 서버"
 
 ### 추가
-- **MCP 서버** `swea-fetch-mcp` (로컬 stdio, 선택 설치 `pip install "swea-fetcher[mcp]"`): AI 앱(Claude Code / Claude Desktop / Cursor)에서 "1231번 DFS1 에 받아줘". 도구 5개: `swea_fetch`, `swea_preview`, `swea_list_topics`, `swea_list_recent`, `swea_status`. 설치·등록은 README "AI 앱에서 쓰기"
+- **MCP 서버** `swea-fetch-mcp` (로컬 stdio, 선택 설치 `pip install "swea-fetcher[mcp]"`): AI 앱(Codex / Claude Code / Claude Desktop / Cursor)에서 "1231번 DFS1 에 받아줘". 도구 5개: `swea_fetch`, `swea_preview`, `swea_list_topics`, `swea_list_recent`, `swea_status`. 설치·등록은 README "AI 앱에서 쓰기"
 - 도구 로직(`mcp_tools.py`)은 SDK 와 분리 (SDK 없이 테스트). SDK 는 `mcp>=2.2,<3`
 
 ### 원칙

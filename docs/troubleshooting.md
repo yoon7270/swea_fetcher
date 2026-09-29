@@ -162,7 +162,10 @@ py -3 -c "import sys; print(sys.executable)"
 - 터미널에서 그 exe 를 직접 실행해 보세요. 아무 출력 없이 대기하면 정상 (Ctrl+C 로 종료). "mcp 패키지가 없습니다" 가 나오면 설치 시 `[mcp]` 를 빠뜨린 것
 - Claude Code: `claude mcp list` 로 상태 확인. Claude Desktop / Cursor: 설정 저장 후 앱을 **완전히 종료**했다가 재실행
 - `SWEA_MCP_DEBUG=1` 환경변수를 서버 실행 환경에 주면 INFO 로그가 stderr 로 나옵니다 (비밀번호·쿠키는 로그에 남지 않음)
-- 첫 문제 번호 조회는 색인을 만드느라 오래 걸릴 수 있습니다. 클라이언트가 도구 시간 초과로 끊으면 Claude Code 의 `MCP_TOOL_TIMEOUT` (밀리초) 환경변수를 늘려 보세요 (이름·단위는 Claude Code 문서로 확인)
+- 첫 문제 번호 조회는 색인을 만드느라 오래 걸릴 수 있습니다. 도구 시간 초과로 끊기면:
+  - **Codex**: `config.toml` 의 `[mcp_servers.swea]` 에 `tool_timeout_sec = 180` (기본 60초). 서버가 늦게 떠서 연결 실패로 나오면 `startup_timeout_sec = 30` (기본 10초)
+  - **Claude Code**: `MCP_TOOL_TIMEOUT` (밀리초) 환경변수를 늘려 보세요 (이름·단위는 Claude Code 문서로 확인)
+  - 한 번 색인이 만들어지면 다음부터는 빠릅니다. 문제 URL 로 요청하면 색인이 필요 없습니다
 
 **오류 코드** (AI 가 그대로 전달합니다)
 
