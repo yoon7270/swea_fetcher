@@ -467,7 +467,7 @@ def test_check_page_drop_unrelated_file_warns(main_window):
 # =============================================================================
 
 
-def test_history_page_lists_and_double_click_requests_check(main_window, qtbot):
+def test_history_page_lists_and_click_requests_problem(main_window, qtbot):
     w = main_window
     d = w.settings.root / "DP" / "42"
     d.mkdir(parents=True)
@@ -477,8 +477,8 @@ def test_history_page_lists_and_double_click_requests_check(main_window, qtbot):
     assert hp.table.rowCount() == 1
     assert [hp.table.item(0, c).text() for c in range(3)] == ["42", "제목", "DP"]
     assert hp.stack.currentIndex() == 0
-    with qtbot.waitSignal(hp.check_requested, timeout=WAIT) as sig:
-        hp._double_clicked(0, 0)
+    with qtbot.waitSignal(hp.problem_requested, timeout=WAIT) as sig:
+        hp._clicked(0, 0)
     assert sig.args == ["DP", 42]
 
 

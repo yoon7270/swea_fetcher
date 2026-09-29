@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import content_cache, service
+from ... import service
 from ...config import Settings
 from ..theme import tokens
 from ..widgets import Banner, EmptyState, open_in_editor, open_in_explorer, editor_tooltip, set_class
@@ -60,7 +60,7 @@ class HistoryPage(QWidget):
         root.addLayout(head)
         self.banner = Banner()
         root.addWidget(self.banner)
-        hint = QLabel("더블클릭 = 검증 · 우클릭 = 폴더 열기·문제 보기")
+        hint = QLabel("클릭 = 문제 보기 · 우클릭 = 에디터·폴더 열기·검증")
         set_class(hint, "hint")
         root.addWidget(hint)
 
@@ -89,8 +89,8 @@ class HistoryPage(QWidget):
 
         self.refresh_btn.clicked.connect(self.refresh)
         QShortcut(QKeySequence(Qt.Key.Key_F5), self, activated=self.refresh)
-        self.table.cellDoubleClicked.connect(self._double_clicked)
-        self.table.cellActivated.connect(self._double_clicked)  # Enter
+        self.table.cellClicked.connect(self._clicked)
+        self.table.cellActivated.connect(self._clicked)  # Enter
         self.table.customContextMenuRequested.connect(self._context_menu)
         if self.empty.button:
             self.empty.button.clicked.connect(lambda: self.goto_requested.emit("fetch"))
@@ -130,10 +130,10 @@ class HistoryPage(QWidget):
         self.stack.setCurrentIndex(0 if items else 1)
         self.count_label.setVisible(len(items) >= LIMIT)
 
-    def _double_clicked(self, row: int, _col: int) -> None:
+    def _clicked(self, row: int, _col: int) -> None:
         if 0 <= row < len(self._items):
             it = self._items[row]
-            self.check_requested.emit(it.topic, it.num)
+            self.problem_requested.emit(it.topic, it.num)
 
     def _open_editor(self, problem_dir, py, editor: str) -> None:
         res = open_in_editor(problem_dir, py, editor)
@@ -150,12 +150,7 @@ class HistoryPage(QWidget):
         editor = self.settings.editor if self.settings else "auto"
         open_act = menu.addAction("에디터에서 열기", lambda: self._open_editor(it.path, it.path / f"{it.num}.py", editor))
         open_act.setToolTip(editor_tooltip(editor))
-        cached = self.settings is not None and content_cache.has(self.settings, it.num)
-        view = menu.addAction("문제 보기", lambda: self.problem_requested.emit(it.topic, it.num))
-        view.setEnabled(cached)  # 캐시만 읽는다 (지문은 폴더에 없음)
-        if not cached:
-            view.setToolTip("저장 탭에서 다시 가져오면 볼 수 있습니다")
-            menu.setToolTipsVisible(True)
+        menu.addAction("문제 보기", lambda: self.problem_requested.emit(it.topic, it.num))  # 캐시에 없으면 지문만 새로 가져온다
         menu.addAction("검증하기", lambda: self.check_requested.emit(it.topic, it.num))
         menu.addAction("SWEA 제출…", lambda: self.submit_requested.emit(it.topic, it.num))
         menu.addAction("커밋 + 푸시…", lambda: self.push_requested.emit(it.topic, it.num))

@@ -283,11 +283,63 @@ def test_history_context_menu_view_enabled_only_when_cached(main_window, problem
     assert not w.problem_page.open_dir_btn.isVisibleTo(w.problem_page)
 
 
-def test_view_missing_cache_stays_and_flashes(main_window):
+def _statement_outcome(problem_info, content, topic="sim"):
+    return service.FetchOutcome(problem_info, None, {}, [], topic, content)
+
+
+def test_recent_view_without_cache_fetches_statement_only(main_window, qtbot, monkeypatch, problem_info, content):
+    """캐시에 없으면 지문만 가져온다: dry_run + skeleton_only (저장·첨부 없음), 결과는 캐시에 기록 후 문제 탭."""
     w = main_window
+    d = w.settings.root / "sim" / str(problem_info.num)
+    d.mkdir(parents=True)
+    (d / f"{problem_info.num}.py").write_text("", encoding="utf-8")
+    calls = []
+
+    def fake(settings, target, topic, opts, progress):
+        calls.append((target, topic, opts))
+        return _statement_outcome(problem_info, content)
+
+    monkeypatch.setattr(service, "fetch_problem", fake)
+    w.history_page.problem_requested.emit("sim", problem_info.num)
+    qtbot.waitUntil(lambda: w._stmt_worker is None, timeout=WAIT)
+    (target, topic, opts), = calls
+    assert target == str(problem_info.num) and topic == "sim"
+    assert opts.dry_run and opts.skeleton_only and opts.with_content and not opts.force
+    assert w.stack.currentWidget() is w.problem_page and w.problem_page.badge.text() == "최신"
+    assert content_cache.has(w.settings, problem_info.num)
+    assert not w.problem_page.open_py_btn.isHidden() and not w.problem_page.open_dir_btn.isHidden()
+    assert sorted(p.name for p in d.iterdir()) == [f"{problem_info.num}.py"]  # 폴더에 아무것도 안 씀
+
+
+def test_recent_view_cached_skips_network(main_window, qtbot, monkeypatch, content):
+    w = main_window
+    content_cache.save(w.settings, 25730, "sim", "항아리 게임", content)
+    monkeypatch.setattr(service, "fetch_problem", lambda *a, **k: pytest.fail("캐시가 있으면 네트워크를 쓰지 않아야 함"))
+    w.history_page.problem_requested.emit("sim", 25730)
+    assert w._stmt_worker is None
+    assert w.stack.currentWidget() is w.problem_page and w.problem_page.badge.text() == "캐시"
+    assert w.problem_page.open_py_btn.isHidden()  # 폴더가 없으면 열기 버튼 숨김
+
+
+def test_recent_view_fetch_failure_flashes_and_stays(main_window, qtbot, monkeypatch):
+    from swea_fetcher.errors import NetworkError
+
+    w = main_window
+    monkeypatch.setattr(service, "fetch_problem", lambda *a, **k: (_ for _ in ()).throw(NetworkError("네트워크 오류")))
     w.history_page.problem_requested.emit("sim", 999)
+    qtbot.waitUntil(lambda: w._stmt_worker is None, timeout=WAIT)
     assert w.stack.currentWidget() is w.fetch_page
-    assert "저장된 지문이 없습니다" in w.statusBar().currentMessage()
+    assert "지문을 가져오지 못했습니다" in w.statusBar().currentMessage()
+
+
+def test_recent_view_cache_off_does_not_write(main_window, qtbot, monkeypatch, problem_info, content):
+    w = main_window
+    w.qs.setValue("problem/cache_enabled", False)
+    monkeypatch.setattr(service, "fetch_problem", lambda *a, **k: _statement_outcome(problem_info, content))
+    w.history_page.problem_requested.emit("sim", problem_info.num)
+    qtbot.waitUntil(lambda: w._stmt_worker is None, timeout=WAIT)
+    assert w.stack.currentWidget() is w.problem_page
+    assert not content_cache.has(w.settings, problem_info.num)
 
 
 def test_conflict_banner_offers_view_when_cached(main_window, qtbot, monkeypatch, content):

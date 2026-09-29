@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl
@@ -19,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import config, content_cache, service, update
+from .. import config, content_cache, service, storage, update
 from ..config import Settings
 from ..errors import ConfigMissing
 from .pages.check_page import CheckPage
@@ -29,7 +30,7 @@ from .pages.problem_page import ProblemPage
 from .pages.settings_page import SettingsPage
 from .theme import tokens
 from .widgets import nav_icon, set_class
-from .workers import FuncWorker
+from .workers import FetchWorker, FuncWorker
 
 PAGES = (
     ("저장", "fetch", "nav-fetch"),
@@ -49,6 +50,7 @@ class MainWindow(QMainWindow):
         self.qs = QSettings("swea-fetch", "gui")
         self.settings: Settings | None = None
         self._update_worker: FuncWorker | None = None
+        self._stmt_worker: FetchWorker | None = None  # 최근 탭 "문제 보기" 의 지문만 가져오기 (M14)
         self.autosync = None  # AutoSyncController (M11) — _build 뒤 생성
         self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(*tokens.WINDOW_MIN)
@@ -132,7 +134,7 @@ class MainWindow(QMainWindow):
             p.goto_requested.connect(self.goto)
         self.fetch_page.problem_ready.connect(self._on_problem_ready)
         self.fetch_page.cached_problem_requested.connect(self._show_cached_problem)
-        self.history_page.problem_requested.connect(lambda _topic, num: self._show_cached_problem(num))
+        self.history_page.problem_requested.connect(self._open_recent_problem)
         self.settings_page.cache_settings_changed.connect(self.problem_page.refresh_footer)
         self.settings_page.settings_changed.connect(lambda: self.reload_settings(stay=True))
         self.settings_page.timeout_changed.connect(lambda _v: self.check_page.refresh_hint())
@@ -177,6 +179,45 @@ class MainWindow(QMainWindow):
             return
         self.problem_page.show_cached(cached)
         self.goto("problem")
+
+    def _open_recent_problem(self, topic: str, num: int) -> None:
+        """최근 탭에서 고른 문제의 지문을 문제 탭으로. 캐시에 있으면 바로, 없으면 지문만 가져온다 (저장·덮어쓰기 없음)."""
+        if self.settings is None:
+            return
+        try:
+            problem_dir: Path | None = storage.resolve_problem_dir(self.settings.root, topic, num)
+        except ValueError:
+            problem_dir = None
+        cached = content_cache.load(self.settings, num)
+        if cached is not None:
+            self.problem_page.show_cached(cached, problem_dir)
+            self.goto("problem")
+            return
+        if self._stmt_worker is not None:  # 클릭·Enter 중복 방지
+            return
+        opts = service.FetchOptions(dry_run=True, skeleton_only=True, with_content=True)  # 첨부·저장 없이 페이지만
+        w = FetchWorker(self.settings, str(num), topic, opts, self)
+        w.finished_ok.connect(lambda oc, d=problem_dir: self._on_statement_fetched(oc, d))
+        w.failed.connect(lambda title, _hint, _detail: self.flash(f"지문을 가져오지 못했습니다: {title}", 8000))
+        w.finished.connect(self._clear_stmt_worker)
+        self._stmt_worker = w
+        self.statusBar().showMessage(f"{num} 지문 가져오는 중…")
+        w.start()
+
+    def _on_statement_fetched(self, outcome, problem_dir: Path | None) -> None:
+        self.statusBar().clearMessage()
+        info = outcome.info
+        num = info.num if info.num is not None else 0
+        if outcome.content is not None and self.settings is not None and self.qs.value("problem/cache_enabled", True, type=bool):
+            content_cache.save(self.settings, num, outcome.topic, info.title, outcome.content)
+        cached = content_cache.CachedStatement(num, outcome.topic, info.title, datetime.now().isoformat(timespec="seconds"), outcome.content)
+        self.problem_page.show_cached(cached, problem_dir, badge="최신")
+        self.goto("problem")
+
+    def _clear_stmt_worker(self) -> None:
+        if self._stmt_worker is not None:
+            self._stmt_worker.deleteLater()
+        self._stmt_worker = None
 
     def goto(self, key: str) -> None:
         for i, (_label, k, _icon) in enumerate(PAGES):
@@ -291,6 +332,8 @@ class MainWindow(QMainWindow):
             self.autosync._timer.stop()
             if self.settings is not None and self.qs.value("autosync/sync_on_close", True, type=bool):
                 self.autosync.sync_on_close()
+        if self._stmt_worker is not None:
+            self._stmt_worker.wait(5000)
         for p in (self.settings_page, self.check_page):  # 실행 중 QThread 가 파괴되지 않게
             p.wait_workers()
         if self._update_worker is not None and self._update_worker.isRunning():

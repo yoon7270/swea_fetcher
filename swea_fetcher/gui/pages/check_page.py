@@ -147,7 +147,7 @@ class CheckPage(QWidget):
 
         holder = QWidget()
         self.stack = QStackedLayout(holder)
-        self.empty = EmptyState("실행하면 결과가 여기에 표시됩니다", "최근 페이지에서 문제를 더블클릭해도 됩니다")
+        self.empty = EmptyState("실행하면 결과가 여기에 표시됩니다", "최근 페이지에서 문제를 우클릭 → 검증하기 로도 됩니다")
         self.tabs = QTabWidget()
         self.diff = DiffView()
         self.stderr = QPlainTextEdit()

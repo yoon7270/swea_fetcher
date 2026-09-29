@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import re
+from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QImage, QKeySequence, QShortcut, QTextDocument
@@ -141,6 +142,7 @@ class ProblemPage(QWidget):
         self.qs = qsettings
         self.settings: Settings | None = None
         self._outcome: FetchOutcome | None = None
+        self._problem_dir: Path | None = None  # [폴더 열기]·[에디터에서 열기] 대상 (없으면 버튼 숨김)
         self._zoom = 0
         self._build()
         z = int(self.qs.value("problem/zoom", 0, type=int))
@@ -255,16 +257,20 @@ class ProblemPage(QWidget):
         self.badge.set_state("저장됨" if saved else "미리보기 — 저장 안 됨", "success" if saved else "idle")
         where = str(outcome.result.problem_dir) if saved else str((outcome.preview or {}).get("problem_dir", ""))
         self._show(f"{info.num}. {info.title}", outcome.topic, where, outcome.content)
-        self.open_dir_btn.setVisible(saved)
-        self.open_py_btn.setVisible(saved)
+        self._set_problem_dir(outcome.result.problem_dir if saved else None)
 
-    def show_cached(self, cached: CachedStatement) -> None:
-        """앱 캐시에서 읽은 지문 표시 (네트워크·저장 폴더 없음)."""
+    def show_cached(self, cached: CachedStatement, problem_dir: Path | None = None, badge: str = "캐시") -> None:
+        """캐시(또는 최근 탭에서 방금 가져온) 지문 표시. problem_dir 가 있으면 폴더/에디터 열기를 켠다."""
         self._outcome = None
-        self.badge.set_state("캐시", "idle")
-        self._show(f"{cached.num}. {cached.title}", cached.topic, f"캐시 · {cached.fetched_at}", cached.content)
-        self.open_dir_btn.hide()
-        self.open_py_btn.hide()
+        self.badge.set_state(badge, "idle")
+        where = str(problem_dir) if problem_dir is not None else f"캐시 · {cached.fetched_at}"
+        self._show(f"{cached.num}. {cached.title}", cached.topic, where, cached.content)
+        self._set_problem_dir(problem_dir)
+
+    def _set_problem_dir(self, d: Path | None) -> None:
+        self._problem_dir = d if d is not None and d.is_dir() else None
+        self.open_dir_btn.setVisible(self._problem_dir is not None)
+        self.open_py_btn.setVisible(self._problem_dir is not None and (self._problem_dir / f"{self._problem_dir.name}.py").exists())
 
     def _show(self, title: str, topic: str, where: str, content: ProblemContent | None) -> None:
         self.title.setText(title)
@@ -284,14 +290,14 @@ class ProblemPage(QWidget):
 
     # --- 동작 -----------------------------------------------------------------------
     def _open_dir(self) -> None:
-        if self._outcome and self._outcome.result and open_in_explorer(self._outcome.result.problem_dir):
+        if self._problem_dir is not None and open_in_explorer(self._problem_dir):
             self.status_message.emit("폴더를 열었습니다")
 
     def _open_py(self) -> None:
-        oc = self._outcome
-        if oc and oc.result:
-            py = oc.result.problem_dir / f"{oc.info.num}.py"
+        d = self._problem_dir
+        if d is not None:
+            py = d / f"{d.name}.py"
             if py.exists():
-                res = open_in_editor(oc.result.problem_dir, py, self.settings.editor if self.settings else "auto")
+                res = open_in_editor(d, py, self.settings.editor if self.settings else "auto")
                 if res.ok:
                     self.status_message.emit(res.note or f"{py.name} 을 열었습니다")
