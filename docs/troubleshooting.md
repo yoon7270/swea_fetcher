@@ -153,6 +153,33 @@ SWEA_PYTHON=C:\Users\you\AppData\Local\Programs\Python\Python312\python.exe
 py -3 -c "import sys; print(sys.executable)"
 ```
 
+## MCP 서버 (AI 앱 연동)
+
+설치·등록 방법은 README "AI 앱에서 쓰기 (MCP, 선택)".
+
+**서버가 AI 앱 목록에 없거나 연결 실패**
+- 등록한 경로가 실제 파일인지 확인: `C:/Users/<내이름>/swea-fetch-venv/Scripts/swea-fetch-mcp.exe` (경로 오타, JSON 백슬래시 이스케이프)
+- 터미널에서 그 exe 를 직접 실행해 보세요. 아무 출력 없이 대기하면 정상 (Ctrl+C 로 종료). "mcp 패키지가 없습니다" 가 나오면 설치 시 `[mcp]` 를 빠뜨린 것
+- Claude Code: `claude mcp list` 로 상태 확인. Claude Desktop / Cursor: 설정 저장 후 앱을 **완전히 종료**했다가 재실행
+- `SWEA_MCP_DEBUG=1` 환경변수를 서버 실행 환경에 주면 INFO 로그가 stderr 로 나옵니다 (비밀번호·쿠키는 로그에 남지 않음)
+- 첫 문제 번호 조회는 색인을 만드느라 오래 걸릴 수 있습니다. 클라이언트가 도구 시간 초과로 끊으면 Claude Code 의 `MCP_TOOL_TIMEOUT` (밀리초) 환경변수를 늘려 보세요 (이름·단위는 Claude Code 문서로 확인)
+
+**오류 코드** (AI 가 그대로 전달합니다)
+
+| code | 뜻 | 할 일 |
+|---|---|---|
+| `config_missing` | 설정·비밀번호 없음 | 터미널에서 `swea-fetch init` (재시작 불필요) |
+| `login_failed` / `login_guard` / `mfa_required` / `login_locked` | 로그인 문제 | **재시도 금지**. `swea-fetch init` 으로 확인, 잠금은 위 "자주 나오는 오류" 참고 |
+| `session_expired`, `network_error`, `busy` | 일시적 | 잠시 후 다시 |
+| `invalid_input` | 번호·URL·주제 폴더 이름 오류 | 입력 확인 |
+| `problem_not_found` | 접근 권한·ID 문제 | 문제 접근 권한 확인 |
+| `attachment_not_found` | 샘플 첨부 없음 | `skeleton_only=true` 로 다시 |
+| `already_exists` (status=`exists`) | 이미 저장됨 | 덮어써도 되면 사용자 승인 후 `force=true` |
+| `parse_error` | SWEA 페이지 구조 변경 | 저장소 이슈로 제보 |
+| `internal_error` | 서버 내부 오류 (타입명만 표시) | 서버 stderr 로그 확인 |
+
+**고급: uv 로 실행** — `uvx --from "swea-fetcher[mcp] @ git+https://github.com/yoon7270/swea_fetcher.git" swea-fetch-mcp`. 첫 실행 때 설치하느라 시작이 늦어 AI 앱의 시작 제한 시간에 걸릴 수 있어 권장하지 않습니다.
+
 ## 새 버전 알림이 안 뜨거나, 끄고 싶을 때
 
 - 하루 1회만 GitHub 에 물어봅니다. 오프라인이거나 실패하면 조용히 넘어갑니다

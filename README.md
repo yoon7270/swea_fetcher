@@ -8,6 +8,7 @@ SWEA(SW Expert Academy) **문제 번호 하나**로 샘플 입력·출력과 풀
 - 문제 번호(예: `25730`) + 주제 폴더 → `swea\{주제}\{번호}\` 에 `input.txt`, `output.txt`, `{번호}.py` 뼈대 생성
 - `{번호}.py` 를 `input.txt` 로 실행해 `output.txt` 와 줄 단위로 비교 (검증)
 - 로그인·세션·문제 찾기를 알아서 처리. 비밀번호는 Windows 자격 증명 관리자에만 저장
+- (선택) **AI 앱(Claude Code 등)에서 "1231번 DFS1 에 받아줘"** 로 저장 → [AI 앱에서 쓰기](#ai-앱에서-쓰기-mcp-선택)
 - **SWEA 에 제출**해 채점 결과를 받고, **Pass 면 그 문제 폴더만 git 커밋 + 푸시** (루트가 git 저장소일 때, 옵트인)
 
 **하지 않는 일**
@@ -308,6 +309,67 @@ swea-fetch push IM_test 25730 -m "solve: 25730"
 `submit` 은 확인 프롬프트 뒤 제출하고 결과를 출력합니다 (`-y` 로 생략). `--push` 는 **Pass 일 때만** 푸시. 오답은 종료 코드 8, git 실패는 7 → [문제 해결](docs/troubleshooting.md#swea-제출-종료-코드-8). `push --no-push` 는 커밋만. `swea-fetch sync [--scope problem|root] [--dry-run]` 는 자동 동기화를 수동 1회 실행(변경 감지는 GUI 전용 — 스케줄러로 `sync` 를 부르면 대체 가능). `fetch`/`check` 에 `--no-push` 로 이번만 해제.
 
 **공용 PC 주의** — Git Credential Manager 의 GitHub 로그인은 Windows 자격 증명 관리자에 남습니다 (`git:https://github.com` 항목). 자리를 떠날 때 `swea-fetch logout --all` 과 함께 그 항목도 지우세요 → [보안과 계정](#보안과-계정).
+
+---
+
+## AI 앱에서 쓰기 (MCP, 선택)
+
+Claude Code / Claude Desktop / Cursor 같은 AI 앱에서 "1231번 DFS1 에 받아줘" 로 저장할 수 있습니다. **Python 이 있는 Windows 사용자용**이며, exe 버전에는 들어 있지 않습니다. 이 PC 에서만 동작하는 로컬 서버입니다 (별도 서버·비용 없음).
+
+1. 전용 가상환경 만들기:
+
+```powershell
+py -3 -m venv $env:USERPROFILE\swea-fetch-venv
+```
+
+2. 설치 (git 필요):
+
+```powershell
+& $env:USERPROFILE\swea-fetch-venv\Scripts\pip install "swea-fetcher[mcp] @ git+https://github.com/yoon7270/swea_fetcher.git"
+```
+
+3. 계정 설정 — **터미널에서 직접 입력하세요. AI 채팅창에 비밀번호를 적지 마세요**:
+
+```powershell
+& $env:USERPROFILE\swea-fetch-venv\Scripts\swea-fetch init
+```
+
+4. AI 앱에 등록합니다. 실행 파일은 `C:/Users/<내이름>/swea-fetch-venv/Scripts/swea-fetch-mcp.exe` (JSON 에서는 백슬래시 대신 `/` 를 쓰거나 `\\` 로 이스케이프):
+   - **Claude Code**:
+
+```powershell
+claude mcp add --scope user swea -- C:/Users/<내이름>/swea-fetch-venv/Scripts/swea-fetch-mcp.exe
+```
+
+   - **Claude Desktop**: 설정 → 개발자 → 구성 편집 (`claude_desktop_config.json`, 보통 `%APPDATA%\Claude\`) 에 아래를 넣고 저장한 뒤 앱을 완전히 종료했다가 다시 실행
+   - **Cursor**: `%USERPROFILE%\.cursor\mcp.json` 에 같은 블록
+
+```json
+{
+  "mcpServers": {
+    "swea": {
+      "command": "C:/Users/<내이름>/swea-fetch-venv/Scripts/swea-fetch-mcp.exe",
+      "args": []
+    }
+  }
+}
+```
+
+5. 사용 예: "1231번 DFS1 에 받아줘", "먼저 미리보기만 해줘", "최근에 받은 문제 5개", "SWEA 설정 상태 확인해줘".
+
+도구는 5개입니다: `swea_fetch`(저장), `swea_preview`(미리보기), `swea_list_topics`, `swea_list_recent`, `swea_status`.
+
+**업데이트**: 2번 명령에 `--upgrade` 를 붙여 다시 실행하고 AI 앱을 재시작합니다. **제거**: AI 앱에서 서버 삭제 (`claude mcp remove swea`) 후 `%USERPROFILE%\swea-fetch-venv` 폴더 삭제. 공용 PC 라면 `swea-fetch logout --all` 도 실행하세요.
+
+**알아 두세요**
+- 비밀번호는 MCP 를 거치지 않습니다 (`swea-fetch init` 이 자격 증명 관리자에 저장). ID 는 앞 2글자만 보이게 가려서 전달됩니다
+- 저장만 하고 **git push 는 하지 않습니다** (자동 동기화 설정이 켜져 있어도 MCP 저장에서는 꺼짐). 필요하면 GUI/CLI 로 동기화하세요
+- 문제 지문은 AI 에게 전달하지 않습니다. 폴더 경로·문제 제목·저장 결과는 AI 앱(과 그 서비스)에 전달됩니다
+- 이미 있는 파일은 덮어쓰지 않고, 사용자가 허락한 경우에만 덮어씁니다 (`{번호}.py` 는 어떤 경우에도 유지)
+- 여러 AI 앱이나 GUI 를 동시에 쓰지 마세요 (같은 캐시 파일을 함께 쓰면 꼬일 수 있음)
+- 로그인 관련 오류가 나면 AI 가 재시도하지 않고 알려 주는 것이 정상입니다 (계정 잠금 방지)
+
+문제가 생기면 → [문제 해결: MCP](docs/troubleshooting.md#mcp-서버-ai-앱-연동).
 
 ---
 

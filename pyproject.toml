@@ -18,10 +18,12 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "pytest-qt"]
 gui = ["PySide6"]
+mcp = ["mcp>=2.2,<3"]
 
 [project.scripts]
 swea-fetch = "swea_fetcher.cli:main"
 swea-fetch-gui = "swea_fetcher.gui.app:main"
+swea-fetch-mcp = "swea_fetcher.mcp_server:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "swea_fetcher.__version__"}

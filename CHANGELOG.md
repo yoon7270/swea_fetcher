@@ -2,6 +2,17 @@
 
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/). 버전은 `swea_fetcher/__init__.py` 의 `__version__` 하나로 관리한다.
 
+## 미출시 — "MCP 서버" (M16)
+
+### 추가
+- **MCP 서버** `swea-fetch-mcp` (로컬 stdio, 선택 설치 `pip install "swea-fetcher[mcp]"`): AI 앱(Claude Code / Claude Desktop / Cursor)에서 "1231번 DFS1 에 받아줘". 도구 5개: `swea_fetch`, `swea_preview`, `swea_list_topics`, `swea_list_recent`, `swea_status`. 설치·등록은 README "AI 앱에서 쓰기"
+- 도구 로직(`mcp_tools.py`)은 SDK 와 분리 (SDK 없이 테스트). SDK 는 `mcp>=2.2,<3`
+
+### 원칙
+- 자격증명은 도구 인자·결과에 없음 (`swea-fetch init` 선행, 설정 없으면 `config_missing` 안내). 결과의 ID 는 마스킹, 비밀번호·쿠키는 가림
+- MCP 저장은 자동 push 를 항상 끔 (결과 `auto_sync=disabled_in_mcp`). 지문은 반환하지 않음. 이미 있는 파일은 `exists` 로 알리고 `force` 는 사용자 승인 후에만
+- 모든 호출은 전역 락으로 직렬화, 오류는 코드·hint 가 있는 구조화 결과로 (예외·트레이스백 미노출)
+
 ## v0.8.0 — 2026-09-29 "문제 탭"
 
 ### 추가
