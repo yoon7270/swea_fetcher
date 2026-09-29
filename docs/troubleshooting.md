@@ -129,6 +129,13 @@ Get-FileHash .\swea-fetch-gui.exe -Algorithm SHA256
 2. 백신 예외 목록에 exe 를 추가하거나, 회사·학교 PC 라서 불가능하면 **소스로 설치**해 `swea-fetch-gui` 명령으로 실행 ([README §5분 시작 (소스/CLI)](../README.md#5분-시작-소스cli)).
 3. 직접 빌드할 수 있다면 `packaging\swea-fetch-gui.spec` 의 `ONEFILE = False` 로 폴더형 빌드 — 오탐이 훨씬 적습니다 ([development.md](development.md)).
 
+## 에디터에서 열기와 가상 데스크톱
+
+"에디터에서 열기" 는 `.py` 의 기본 앱(툴팁에 표시)으로 풀이 파일을 엽니다. `%USERPROFILE%\.swea-fetch\.env` 의 `SWEA_EDITOR` = `auto`(기본) / `vscode` / `pycharm` / `default` 로 고정할 수 있습니다.
+
+- **VS Code**: 현재 가상 데스크톱에 그 문제 폴더 창이 있으면 거기에, 없으면 새 창으로 열어 **화면 전환이 일어나지 않습니다**. 창 제목으로 찾으므로 못 찾으면 새 창이 하나 더 생길 수 있습니다.
+- **PyCharm / 기타 기본 앱**: 창 위치를 제어할 방법이 없어 다른 가상 데스크톱의 창으로 전환될 수 있습니다. 전환을 피하려면 `SWEA_EDITOR=vscode` 를 쓰거나 PyCharm 을 현재 데스크톱에서 실행하세요.
+
 ## 검증에 쓸 Python 지정
 
 exe 는 자기 안에 Python 을 품고 있지만 **풀이 실행에는 PC 의 Python** 을 씁니다 (exe 자신을 실행하면 창이 복제됩니다). 찾는 순서: 설정 `SWEA_PYTHON` → 환경변수 `SWEA_PYTHON` → PATH 의 `python` / `python3` / `py`.

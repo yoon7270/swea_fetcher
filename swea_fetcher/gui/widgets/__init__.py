@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...opener import OpenResult, editor_tooltip, open_in_editor  # noqa: F401 — 재노출 (M13)
 from ..theme import tokens
 
 ICON_DIR = Path(__file__).resolve().parent.parent / "theme" / "icons"

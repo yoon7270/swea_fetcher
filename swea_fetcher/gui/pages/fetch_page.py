@@ -22,7 +22,7 @@ from ... import content_cache, service
 from ...config import Settings
 from ...service import FetchOptions, FetchOutcome
 from ..theme import tokens
-from ..widgets import Badge, Banner, ElidedLabel, LogView, make_busy_bar, open_in_explorer, open_with_default_app, set_class, set_invalid, svg_icon
+from ..widgets import Badge, Banner, ElidedLabel, LogView, make_busy_bar, open_in_editor, open_in_explorer, editor_tooltip, set_class, set_invalid, svg_icon
 from ..workers import FetchWorker
 
 
@@ -164,7 +164,7 @@ class FetchPage(QWidget):
         cl.addWidget(self.card_note)
         cb = QHBoxLayout()
         self.open_dir_btn = QPushButton("폴더 열기")
-        self.open_py_btn = QPushButton("PyCharm 에서 열기")
+        self.open_py_btn = QPushButton("에디터에서 열기")
         self.commit_btn = QPushButton("이대로 저장")
         set_class(self.commit_btn, "primary")
         self.commit_btn.setFixedHeight(tokens.CONTROL_H_SM)
@@ -201,6 +201,7 @@ class FetchPage(QWidget):
     # --- 상태 -----------------------------------------------------------------------
     def set_settings(self, settings: Settings | None) -> None:
         self.settings = settings
+        self.open_py_btn.setToolTip(editor_tooltip(settings.editor if settings else "auto"))
         self.topic.clear()
         if settings is not None:
             self.topic.addItems(service.list_topics(settings))
@@ -441,8 +442,10 @@ class FetchPage(QWidget):
         oc = self._last_outcome
         if oc and oc.result:
             py = oc.result.problem_dir / f"{oc.info.num}.py"
-            if py.exists() and open_with_default_app(py):
-                self.status_message.emit(f"{py.name} 을 열었습니다")
+            if py.exists():
+                res = open_in_editor(oc.result.problem_dir, py, self.settings.editor if self.settings else "auto")
+                if res.ok:
+                    self.status_message.emit(res.note or f"{py.name} 을 열었습니다")
 
 
 class _FileRows(QWidget):

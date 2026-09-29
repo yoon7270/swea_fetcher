@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 from ... import content_cache, service
 from ...config import Settings
 from ..theme import tokens
-from ..widgets import Banner, EmptyState, open_in_explorer, open_with_default_app, set_class
+from ..widgets import Banner, EmptyState, open_in_editor, open_in_explorer, editor_tooltip, set_class
 
 LIMIT = 20
 
@@ -135,6 +135,11 @@ class HistoryPage(QWidget):
             it = self._items[row]
             self.check_requested.emit(it.topic, it.num)
 
+    def _open_editor(self, problem_dir, py, editor: str) -> None:
+        res = open_in_editor(problem_dir, py, editor)
+        if res.ok and res.note:
+            self.status_message.emit(res.note)
+
     def _context_menu(self, pos: QPoint) -> None:
         row = self.table.rowAt(pos.y())
         if not (0 <= row < len(self._items)):
@@ -142,7 +147,9 @@ class HistoryPage(QWidget):
         it = self._items[row]
         menu = QMenu(self)
         menu.addAction("폴더 열기", lambda: open_in_explorer(it.path) and self.status_message.emit("폴더를 열었습니다"))
-        menu.addAction("PyCharm 에서 열기", lambda: open_with_default_app(it.path / f"{it.num}.py"))
+        editor = self.settings.editor if self.settings else "auto"
+        open_act = menu.addAction("에디터에서 열기", lambda: self._open_editor(it.path, it.path / f"{it.num}.py", editor))
+        open_act.setToolTip(editor_tooltip(editor))
         cached = self.settings is not None and content_cache.has(self.settings, it.num)
         view = menu.addAction("문제 보기", lambda: self.problem_requested.emit(it.topic, it.num))
         view.setEnabled(cached)  # 캐시만 읽는다 (지문은 폴더에 없음)

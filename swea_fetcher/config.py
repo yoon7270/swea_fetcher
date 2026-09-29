@@ -1,6 +1,6 @@
 """설정 로드. 계정 정보는 프로젝트 밖 `~/.swea-fetch/.env` + Windows 자격 증명 관리자(keyring).
 
-.env 키: SWEA_ROOT (풀이 저장소 경로), SWEA_ID, 선택: SWEA_INPUT_NAME, SWEA_OUTPUT_NAME, SWEA_PYTHON(검증용 인터프리터).
+.env 키: SWEA_ROOT (풀이 저장소 경로), SWEA_ID, 선택: SWEA_INPUT_NAME, SWEA_OUTPUT_NAME, SWEA_PYTHON(검증용 인터프리터), SWEA_EDITOR(auto|vscode|pycharm|default).
 비밀번호는 keyring 에 저장한다 (서비스 "swea-fetch", 사용자명 = SWEA_ID).
 결정 순서: 환경변수 SWEA_PW → .env 의 SWEA_PW (경고, 이관 권장) → keyring → 없으면 ConfigMissing.
 """
@@ -16,6 +16,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 from .errors import ConfigMissing
+from .opener import EDITOR_CHOICES
 
 log = logging.getLogger("swea_fetcher.config")
 
@@ -44,6 +45,7 @@ class Settings:
     auto_push: bool = False  # SWEA_AUTO_PUSH=1: 자동 동기화 켜짐 (M11)
     auto_push_scope: str = "problem"  # SWEA_AUTO_PUSH_SCOPE: "problem" | "root" (M11)
     auto_push_on: frozenset = field(default_factory=frozenset)  # SWEA_AUTO_PUSH_ON: {"pass","check","save","watch"} (M11)
+    editor: str = "auto"  # SWEA_EDITOR: "auto" | "vscode" | "pycharm" | "default" (M13)
     password_source: str = field(default="keyring", repr=False)  # "env" | "dotenv" | "keyring"
 
     @property
@@ -155,6 +157,15 @@ AUTO_PUSH_SCOPES = ("problem", "root")
 AUTO_PUSH_MOMENTS = ("pass", "check", "save", "watch")
 
 
+def _editor_setting(raw: str) -> str:
+    """SWEA_EDITOR 파싱 (M13). 허용값 외는 auto + WARNING."""
+    value = (raw or "").strip().lower() or "auto"
+    if value not in EDITOR_CHOICES:
+        log.warning("SWEA_EDITOR 값이 올바르지 않습니다: %r — 'auto' 로 대체", raw)
+        return "auto"
+    return value
+
+
 def _auto_push_settings(raw_on: str, raw_scope: str, raw_moments: str) -> dict:
     """SWEA_AUTO_PUSH / _SCOPE / _ON 을 파싱 (M11). 잘못된 값은 기본값 + WARNING.
 
@@ -237,5 +248,6 @@ def load_settings(config_dir: Path | None = None) -> Settings:
         python=get("SWEA_PYTHON").strip() or None,
         commit_template=get("SWEA_COMMIT_TEMPLATE").strip() or Settings.commit_template,
         password_source=source,
+        editor=_editor_setting(get("SWEA_EDITOR")),
         **_auto_push_settings(get("SWEA_AUTO_PUSH"), get("SWEA_AUTO_PUSH_SCOPE"), get("SWEA_AUTO_PUSH_ON")),
     )
