@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -18,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import content_cache, service
+from ... import content_cache, service, storage
 from ...config import Settings
 from ...service import FetchOptions, FetchOutcome
 from ..theme import tokens
@@ -42,6 +44,7 @@ class FetchPage(QWidget):
         self._worker: FetchWorker | None = None
         self._last_outcome: FetchOutcome | None = None
         self._last_args: tuple[str, str, FetchOptions] | None = None
+        self._existing_dir: Path | None = None  # "이미 저장된 문제" 배너의 에디터/폴더 열기 대상
         self._build()
 
     # --- UI -----------------------------------------------------------------------
@@ -310,6 +313,8 @@ class FetchPage(QWidget):
             self._rerun()
         elif key == "settings":
             self.goto_requested.emit("settings")
+        elif key == "editor" and self._existing_dir is not None:
+            self._open_editor_at(self._existing_dir)
         elif key == "view":
             num = self._cached_num()
             if num is not None:
@@ -415,9 +420,15 @@ class FetchPage(QWidget):
             self.log.append(detail, error=True)
         state, actions = "error", []
         if "이미 저장된 파일" in title:
-            state, title, actions = "warning", "이미 저장된 문제입니다", [("force", "덮어쓰고 다시 저장")]
+            state, actions = "warning", []
+            self._existing_dir = self._find_existing_dir(title)
+            d = self._existing_dir
+            if d is not None and (d / f"{d.name}.py").exists():
+                actions.append(("editor", "에디터에서 열기"))
             if self._cached_num() is not None:  # 저장 전에 지문이 캐시에 기록돼 있으므로 읽기만 할 수 있다
                 actions.append(("view", "문제 보기"))
+            actions.append(("force", "덮어쓰고 다시 저장"))
+            title = "이미 저장된 문제입니다"
         elif "첨부 링크가 없습니다" in title:
             state, title, actions = "warning", "샘플 첨부가 없는 문제입니다", [("skeleton", "뼈대만 저장")]
         elif "찾지 못했습니다" in title and "문제 번호" in title:
@@ -431,7 +442,7 @@ class FetchPage(QWidget):
             actions = [("log", "로그 보기")]
         elif "contestProbId" in title or "입력" in title:
             self.target.setFocus()
-        self.banner.show_message(state, title, hint, actions)
+        self.banner.show_message(state, title, hint, actions, max_actions=3 if state == "warning" and "이미 저장된" in title else 2)
 
     def _open_dir(self) -> None:
         if self._last_outcome and self._last_outcome.result:
@@ -441,11 +452,30 @@ class FetchPage(QWidget):
     def _open_py(self) -> None:
         oc = self._last_outcome
         if oc and oc.result:
-            py = oc.result.problem_dir / f"{oc.info.num}.py"
-            if py.exists():
-                res = open_in_editor(oc.result.problem_dir, py, self.settings.editor if self.settings else "auto")
-                if res.ok:
-                    self.status_message.emit(res.note or f"{py.name} 을 열었습니다")
+            self._open_editor_at(oc.result.problem_dir)
+
+    def _open_editor_at(self, problem_dir: Path) -> None:
+        py = problem_dir / f"{problem_dir.name}.py"
+        if py.exists():
+            res = open_in_editor(problem_dir, py, self.settings.editor if self.settings else "auto")
+            if res.ok:
+                self.status_message.emit(res.note or f"{py.name} 을 열었습니다")
+
+    def _find_existing_dir(self, message: str) -> Path | None:
+        """이미 저장된 문제의 폴더. 번호 입력이면 저장 규칙으로 계산, 아니면 오류 메시지의 첫 경로에서. 없으면 None."""
+        if self._last_args and self.settings is not None:
+            target, topic, opts = self._last_args
+            num = opts.num_override if opts.num_override is not None else (int(target) if target.isdigit() else None)
+            if num is not None:
+                try:
+                    d = storage.resolve_problem_dir(self.settings.root, service.resolve_topic(self.settings.root, topic)[0], num)
+                except ValueError:
+                    d = None
+                if d is not None and d.is_dir():
+                    return d
+        head = message.split(": ", 1)[-1].split(" (", 1)[0]  # "이미 저장된 파일이 있습니다: {p1}, {p2} (덮어쓰려면 --force)"
+        first = Path(head.split(", ")[0].strip())
+        return first.parent if first.name and first.parent.is_dir() else None
 
 
 class _FileRows(QWidget):

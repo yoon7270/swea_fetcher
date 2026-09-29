@@ -7,6 +7,8 @@ import dataclasses
 from pathlib import Path
 
 import pytest
+
+from swea_fetcher.opener import OpenResult
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QImage, QTextDocument
 
@@ -304,8 +306,8 @@ def test_conflict_banner_offers_view_when_cached(main_window, qtbot, monkeypatch
     fp.start(dry_run=False)
     qtbot.waitUntil(lambda: fp._worker is None, timeout=WAIT)
     labels = [b.text() for b in fp.banner._buttons]
-    assert labels == ["덮어쓰고 다시 저장", "문제 보기"]
-    fp.banner._buttons[1].click()
+    assert labels == ["문제 보기", "덮어쓰고 다시 저장"]
+    fp.banner._buttons[0].click()
     assert w.stack.currentWidget() is w.problem_page and w.problem_page.badge.text() == "캐시"
 
 
@@ -321,6 +323,48 @@ def test_conflict_banner_has_no_view_when_cache_off(main_window, qtbot, monkeypa
     fp.topic.setCurrentText("sim")
     fp.start(dry_run=False)
     qtbot.waitUntil(lambda: fp._worker is None, timeout=WAIT)
+    assert [b.text() for b in fp.banner._buttons] == ["덮어쓰고 다시 저장"]
+
+
+def _conflict_in_saved_dir(w, qtbot, monkeypatch, target="25730", with_py=True):
+    """sim/25730 에 저장된 문제가 있는 상태에서 다시 저장 → 충돌 배너."""
+    from swea_fetcher.errors import AlreadyExists
+
+    d = w.settings.root / "sim" / "25730"
+    d.mkdir(parents=True)
+    (d / "input.txt").write_text("1\n", encoding="utf-8")
+    if with_py:
+        (d / "25730.py").write_text("", encoding="utf-8")
+    msg = f"이미 저장된 파일이 있습니다: {d / 'input.txt'} (덮어쓰려면 --force)"
+    monkeypatch.setattr(service, "fetch_problem", lambda *a, **k: (_ for _ in ()).throw(AlreadyExists(msg, existing=[d / "input.txt"])))
+    fp = w.fetch_page
+    fp.target.setText(target)
+    fp.topic.setCurrentText("sim")
+    fp.start(dry_run=False)
+    qtbot.waitUntil(lambda: fp._worker is None, timeout=WAIT)
+    return fp, d
+
+
+def test_conflict_banner_offers_editor(main_window, qtbot, monkeypatch, content):
+    from swea_fetcher.gui.pages import fetch_page as fp_mod
+
+    opened = []
+    monkeypatch.setattr(fp_mod, "open_in_editor", lambda d, py, setting: opened.append((d, py)) or OpenResult(True, "vscode"))
+    content_cache.save(main_window.settings, 25730, "sim", "항아리 게임", content)
+    fp, d = _conflict_in_saved_dir(main_window, qtbot, monkeypatch)
+    assert [b.text() for b in fp.banner._buttons] == ["에디터에서 열기", "문제 보기", "덮어쓰고 다시 저장"]
+    fp.banner._buttons[0].click()
+    assert opened == [(d.resolve(), d.resolve() / "25730.py")]
+
+
+def test_conflict_banner_url_input_uses_path_from_message(main_window, qtbot, monkeypatch):
+    fp, d = _conflict_in_saved_dir(main_window, qtbot, monkeypatch, target="AV140YnqAIECFAYD")
+    assert fp._existing_dir == d
+    assert [b.text() for b in fp.banner._buttons][0] == "에디터에서 열기"
+
+
+def test_conflict_banner_no_editor_without_py(main_window, qtbot, monkeypatch):
+    fp, _d = _conflict_in_saved_dir(main_window, qtbot, monkeypatch, with_py=False)
     assert [b.text() for b in fp.banner._buttons] == ["덮어쓰고 다시 저장"]
 
 

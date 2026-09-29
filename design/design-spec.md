@@ -431,7 +431,7 @@ QWidget#Page (QStackedLayout: 빈 상태 | 본문)
 
 `AlreadyExists`·`AttachmentNotFound` 는 "실패"가 아니라 "선택이 필요한 상황"이므로 warning 이다. 배너의 재실행 버튼은 폼의 체크박스 상태도 함께 바꾼다 (덮어쓰기 체크 on) — 사용자가 무엇이 달라졌는지 보게.
 
-조치 버튼 키 (구현 `Banner.action_clicked(key)`): `force` 덮어쓰고 다시 저장 · `skeleton` 뼈대만 저장 · `refresh` 색인 새로고침 후 재시도 · `retry` 다시 시도 · `settings` 설정으로 이동 · `fetch` 저장 페이지로 · `log` 로그 보기. 배너당 최대 2개, 본문 아래 오른쪽 정렬 행.
+조치 버튼 키 (구현 `Banner.action_clicked(key)`): `force` 덮어쓰고 다시 저장 · `skeleton` 뼈대만 저장 · `refresh` 색인 새로고침 후 재시도 · `retry` 다시 시도 · `settings` 설정으로 이동 · `fetch` 저장 페이지로 · `log` 로그 보기. 배너당 최대 2개 ("이미 저장된 문제" 만 [에디터에서 열기]·[문제 보기]·[덮어쓰고 다시 저장] 3개, `editor`·`view` 키), 본문 아래 오른쪽 정렬 행.
 
 ---
 

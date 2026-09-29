@@ -148,8 +148,10 @@ class Banner(QFrame):
         outer.addLayout(self.btn_row)
         self.hide()
 
-    def show_message(self, state: str, title: str, body: str = "", actions: list[tuple[str, str]] | None = None) -> None:
-        """actions: [(key, label), ...] 최대 2개. 클릭 시 action_clicked(key)."""
+    def show_message(
+        self, state: str, title: str, body: str = "", actions: list[tuple[str, str]] | None = None, max_actions: int = 2
+    ) -> None:
+        """actions: [(key, label), ...] 기본 최대 2개 (스펙 §8, "이미 저장된 문제" 만 3개). 클릭 시 action_clicked(key)."""
         set_class(self, "banner", state)
         set_class(self.title, "banner-title")
         icon_name = self._ICONS.get(state)
@@ -165,7 +167,7 @@ class Banner(QFrame):
             self.btn_row.removeWidget(b)
             b.deleteLater()
         self._buttons = []
-        for key, label in (actions or [])[:2]:
+        for key, label in (actions or [])[:max_actions]:
             b = QPushButton(label)
             set_class(b, "sm")
             b.clicked.connect(lambda _=False, k=key: self.action_clicked.emit(k))
