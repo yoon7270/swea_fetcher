@@ -230,7 +230,7 @@ def fetch_problem(
 def verify_login(settings: Settings, progress: ProgressCb | None = None) -> str:
     """세션을 확보한다. 성공 시 표시용 메시지. 예외는 그대로 전파."""
     _emit(progress, "로그인 확인 중")
-    auth.get_session(settings)
+    auth.get_session(settings, explicit=True)  # 사용자 명시 확인: 지문 가드 우회
     msg = f"로그인 확인 완료 ({settings.user_id}). 세션 저장됨"
     _emit(progress, msg)
     return msg

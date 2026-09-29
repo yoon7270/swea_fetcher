@@ -41,6 +41,7 @@
 - [swea_fetcher/storage.py:127-139](../swea_fetcher/storage.py#L127-L139) `_rollback` 은 "이번에 쓴 파일 삭제" 이므로 force 로 기존 `input.txt` 를 덮다가 `output.txt` 에서 실패하면 옛 `input.txt` 도 사라짐. 임시 파일에 쓴 뒤 `os.replace` 로 교체하거나, force 시 백업 후 복원하는 방식을 고려. (assert 로 고정하지 않고 관찰만 기록)
 
 **S3. 프로세스당 로그인 1회 가드와 세션 만료 재로그인의 충돌**
+- 해소됨: docs/handoff-planner-login-guard.md
 - `auth.get_session` 이 이번 실행에서 새로 로그인한 뒤 곧바로 세션이 만료되면 `client._with_relogin` → `auth.login` 이 `LoginFailed("이 실행에서 이미 로그인을 시도했습니다")` 로 끝남. 설계 의도(잠금 방지)와 맞다면 그대로 두되, 사용자 메시지에 "다시 실행하세요" 안내를 붙이는 것을 제안. M2 E2E 에서 실제 발생 여부 확인 필요.
 
 **S4. `load_settings` 가 `load_dotenv` 로 `os.environ` 을 프로세스 전역에 오염**

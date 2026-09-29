@@ -630,3 +630,30 @@ def test_check_page_cancel_when_idle_is_noop(main_window):
     cp = main_window.check_page
     cp.cancel()
     assert cp._worker is None
+
+
+def test_settings_verify_after_failure_can_retry_with_new_password(main_window, qtbot, monkeypatch, fake_keyring):
+    """auth 레벨 스텁: 1차 비밀번호 오류 후 설정을 고쳐 2차 확인하면 로그인이 실제로 시도되고 성공한다."""
+    from swea_fetcher import auth
+    from tests.conftest import FakeResponse, FakeSession
+
+    def page():
+        return FakeResponse(200, text="<html>login</html>")
+
+    bad = FakeSession([page(), FakeResponse(200, json_data={"success": False, "message": "LoginIdPwdFail"})])
+    good = FakeSession([page(), FakeResponse(200, json_data={"success": True, "message": "", "returnPath": "/"})])
+    sessions = [bad, good]
+    monkeypatch.setattr(auth.requests, "Session", lambda: sessions.pop(0))
+
+    sp = main_window.settings_page
+    with qtbot.waitSignal(sp.settings_changed, timeout=WAIT):
+        sp.save(check=True)
+    qtbot.waitUntil(lambda: sp._worker is None, timeout=WAIT)
+    assert "로그인 확인 완료" not in sp.banner.title.text()
+
+    sp.pw_edit.setText("fixed-pw")
+    with qtbot.waitSignal(sp.settings_changed, timeout=WAIT):
+        sp.save(check=True)
+    qtbot.waitUntil(lambda: sp._worker is None, timeout=WAIT)
+    assert "로그인 확인 완료" in sp.banner.title.text()
+    assert [c["method"] for c in good.calls] == ["GET", "POST"]

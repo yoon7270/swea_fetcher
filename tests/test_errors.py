@@ -95,3 +95,9 @@ def test_login_failed_subclasses_keep_code_and_own_hint():
     e = E.MfaRequired("m", code="mfa")
     assert e.code == "mfa" and "2단계" in e.hint
     assert "login_state.json" in E.LoginLocked("l").hint
+
+
+def test_login_failed_default_hint_mentions_gui_and_cli():
+    hint = E.LoginFailed("x").hint
+    assert "GUI" in hint and "swea-fetch init" in hint
+    assert "다시 실행하세요" not in hint

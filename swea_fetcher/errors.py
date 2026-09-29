@@ -47,11 +47,22 @@ class ConfigMissing(SweaFetchError):
     default_hint = "`swea-fetch init` 을 먼저 실행하세요 (GUI 에서는 설정 페이지)"
 
 
+# 같은 자격증명 자동 재시도 가드 (auth.login)
+GUARD_MSG = "직전 로그인이 같은 ID/비밀번호로 실패해 자동 재시도를 막았습니다 (계정 잠금 방지)"
+GUARD_HINT = (
+    "ID/비밀번호를 고친 뒤 다시 시도하세요 (GUI: 설정 페이지에서 저장 후 로그인 확인 / CLI: swea-fetch init). "
+    "고치지 않았다면 브라우저에서 로그인이 되는지 먼저 확인하세요"
+)
+
+
 class LoginFailed(SweaFetchError):
     """ID/PW 오류 등 로그인 실패. code 에 서버 message 코드를 보관."""
 
     exit_code = 1
-    default_hint = "SWEA_ID / 비밀번호를 확인하세요 (`swea-fetch init` 으로 재작성 가능). SWEA 는 5회 연속 실패 시 계정이 잠깁니다"
+    default_hint = (
+        "SWEA_ID / 비밀번호를 확인하세요 (GUI: 설정 페이지, CLI: swea-fetch init 으로 재작성). "
+        "SWEA 는 5회 연속 실패 시 계정이 잠깁니다"
+    )
 
     def __init__(self, message: str, code: str | None = None, *, hint: str | None = None) -> None:
         super().__init__(message, hint=hint)

@@ -328,7 +328,7 @@ def _fx(name: str) -> FakeResponse:
 def real_service_env(main_window, solved, monkeypatch):
     s = FakeSession()
     s.cookies.set("SESSION", COOKIE)
-    monkeypatch.setattr(service.auth, "get_session", lambda settings: s)
+    monkeypatch.setattr(service.auth, "get_session", lambda settings, **kw: s)
     monkeypatch.setattr(service.lookup, "find_category", lambda sess, settings, num: (ID, "BOX", BOX_ID, "모의/클럽 상자 · Queue"))
     solver = FakeResponse(200, text=f"<html><body><input name='categoryId' value='{BOX_ID}'><input name='categoryType' value='BOX'><h3 class='problem_title'>1234. A+B</h3></body></html>")
     s.queue(solver, _fx("compile_ok"), _fx("wrong"))

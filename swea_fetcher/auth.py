@@ -4,19 +4,22 @@ M0 조사 결과(docs/swea-page-notes.md):
 - POST /main/identity/anonymous/login.do  (form-urlencoded: id, pwd, lang, clientTimezone)
   → JSON {"success": bool, "message": str, "returnPath": str}
 - 세션 쿠키 이름은 SESSION. 비로그인 시 userInformation.do 가 302 → loginPage.do
-- 5회 실패 시 계정 잠금 → 도구는 프로세스당 1회 + 누적 3회에서 자동 중단
+- 5회 실패 시 계정 잠금 → 도구는 같은 자격증명 실패 후 재시도 차단 + 누적 3회에서 자동 중단
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
+import threading
 from pathlib import Path
 
 import requests
 
 from .config import Settings
-from .errors import LoginFailed, LoginLocked, MfaRequired, NetworkError
+from .errors import GUARD_HINT, GUARD_MSG, LoginFailed, LoginLocked, MfaRequired, NetworkError
 
 log = logging.getLogger("swea_fetcher.auth")
 
@@ -40,14 +43,22 @@ _FAIL_MESSAGES = {
     "DormancyAccount": "휴면 계정입니다 — 브라우저에서 로그인해 복구한 뒤 다시 시도하세요",
 }
 
-# 프로세스당 1회 가드
-_login_attempted = False
+# 직전 서버 실패 응답을 받은 자격증명 지문 (메모리 전용, 로그/예외/파일에 출력 금지)
+_failed_fp: str | None = None
+_FP_SALT = os.urandom(16)
+_login_lock = threading.Lock()
+
+
+def _fingerprint(settings: Settings) -> str:
+    """자격증명 지문. sha256(salt + id + NUL + pw). 프로세스 밖으로 내보내지 않는다."""
+    raw = _FP_SALT + settings.user_id.encode("utf-8") + b"\0" + settings.password.encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _reset_process_guard() -> None:
-    """테스트 전용. 프로세스당 1회 가드를 초기화한다."""
-    global _login_attempted
-    _login_attempted = False
+    """테스트 전용. 실패 지문 가드를 초기화한다."""
+    global _failed_fp
+    _failed_fp = None
 
 
 # --- 세션 캐시 ---------------------------------------------------------------
@@ -122,15 +133,23 @@ def is_logged_in(session: requests.Session) -> bool:
     raise NetworkError(f"세션 확인 중 예상 밖 응답: HTTP {r.status_code}")
 
 
-def login(session: requests.Session, settings: Settings) -> None:
+def login(session: requests.Session, settings: Settings, *, explicit: bool = False) -> None:
     """ID/PW 로 로그인한다. 성공 시 세션을 저장하고 실패 카운터를 리셋한다.
 
+    explicit=True 는 사용자가 직접 요청한 확인 경로로, 같은 자격증명 지문 차단을 우회한다
+    (누적 3회 LoginLocked 는 그대로 적용). 호출은 락으로 직렬화된다.
+
     LoginLocked  : 누적 실패 3회 (login_state.json)
-    LoginFailed  : 이 프로세스에서 이미 시도함 / 서버가 실패 응답 / 응답 형식 이상
+    LoginFailed  : 직전 실패와 같은 자격증명의 자동 재시도(code="guard") / 서버 실패 응답 / 응답 형식 이상
     MfaRequired  : 계정에 2단계 인증
     NetworkError : 연결 실패
     """
-    global _login_attempted
+    with _login_lock:
+        _login_locked(session, settings, explicit)
+
+
+def _login_locked(session: requests.Session, settings: Settings, explicit: bool) -> None:
+    global _failed_fp
 
     failures = _read_failures(settings.login_state_file)
     if failures >= MAX_CONSECUTIVE_FAILURES:
@@ -139,9 +158,9 @@ def login(session: requests.Session, settings: Settings) -> None:
             f"브라우저에서 로그인이 되는지 확인하고 .env 를 고친 뒤 "
             f"{settings.login_state_file} 을 삭제하세요"
         )
-    if _login_attempted:
-        raise LoginFailed("이 실행에서 이미 로그인을 시도했습니다 (계정 잠금 방지). 명령을 다시 실행하세요")
-    _login_attempted = True
+    fp = _fingerprint(settings)
+    if not explicit and _failed_fp == fp:
+        raise LoginFailed(GUARD_MSG, code="guard", hint=GUARD_HINT)
 
     log.info("로그인 시도 (ID: %s)", settings.user_id)
     try:
@@ -180,6 +199,7 @@ def login(session: requests.Session, settings: Settings) -> None:
                 code=code,
             )
         _write_failures(settings.login_state_file, 0)
+        _failed_fp = None
         save_session(session, settings)
         log.info("로그인 성공")
         return
@@ -187,6 +207,7 @@ def login(session: requests.Session, settings: Settings) -> None:
     code = str(ret.get("message", "") or "unknown")
     failures += 1
     _write_failures(settings.login_state_file, failures)
+    _failed_fp = fp
     if code in _FAIL_MESSAGES:
         message = _FAIL_MESSAGES[code].format(n=failures)
     else:
@@ -194,8 +215,11 @@ def login(session: requests.Session, settings: Settings) -> None:
     raise LoginFailed(message, code=code)
 
 
-def get_session(settings: Settings) -> requests.Session:
-    """공통 헤더가 설정된 로그인 세션을 돌려준다. 캐시가 유효하면 재사용, 아니면 1회 로그인."""
+def get_session(settings: Settings, *, explicit: bool = False) -> requests.Session:
+    """공통 헤더가 설정된 로그인 세션을 돌려준다. 캐시가 유효하면 재사용, 아니면 로그인.
+
+    explicit 는 login 에 그대로 전달된다 (사용자 명시 확인 경로 전용).
+    """
     session = requests.Session()
     session.headers.update({"User-Agent": USER_AGENT, "Accept-Language": "ko-KR,ko;q=0.9"})
 
@@ -204,5 +228,5 @@ def get_session(settings: Settings) -> requests.Session:
         return session
 
     session.cookies.clear()
-    login(session, settings)
+    login(session, settings, explicit=explicit)
     return session

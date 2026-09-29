@@ -232,26 +232,26 @@ def test_login_locked_check_precedes_process_guard(settings):
     auth._write_failures(settings.login_state_file, 5)
     with pytest.raises(LoginLocked):
         auth.login(FakeSession(), settings)
-    # 잠금으로 막힌 시도는 프로세스 가드를 소비하지 않는다
-    assert auth._login_attempted is False
+    # 잠금으로 막힌 시도는 지문 가드 상태를 바꾸지 않는다
+    assert auth._failed_fp is None
 
 
-def test_login_only_once_per_process(settings):
+def test_login_blocks_same_credentials_after_failure(settings):
     s = FakeSession([login_page(), fail_login("LoginIdPwdFail")])
     with pytest.raises(LoginFailed):
         auth.login(s, settings)
     s2 = FakeSession()
-    with pytest.raises(LoginFailed, match="이미"):
+    with pytest.raises(LoginFailed, match="같은 ID/비밀번호"):
         auth.login(s2, settings)
     assert s2.calls == []
     assert auth._read_failures(settings.login_state_file) == 1  # 두 번째는 카운트하지 않음
 
 
-def test_login_guard_is_set_even_after_success(settings):
-    s = FakeSession([login_page(), ok_login()])
-    auth.login(s, settings)
-    with pytest.raises(LoginFailed, match="이미"):
-        auth.login(FakeSession(), settings)
+def test_login_allowed_again_after_success(settings):
+    auth.login(FakeSession([login_page(), ok_login()]), settings)
+    s2 = FakeSession([login_page(), ok_login()])
+    auth.login(s2, settings)
+    assert [c["method"] for c in s2.calls] == ["GET", "POST"]
 
 
 def test_login_empty_body(settings):
@@ -309,7 +309,7 @@ def test_get_session_reuses_valid_cache(settings, monkeypatch):
     assert [c["url"] for c in fake.calls] == [auth.SESSION_CHECK_URL]
     assert fake.headers["User-Agent"] == auth.USER_AGENT
     assert "Accept-Language" in fake.headers
-    assert auth._login_attempted is False
+    assert auth._failed_fp is None
 
 
 def test_get_session_logs_in_when_no_cache(settings, monkeypatch):
@@ -347,4 +347,168 @@ def test_login_failure_unknown_code_with_braces_does_not_crash(settings):
     with pytest.raises(LoginFailed) as ei:
         auth.login(s, settings)
     assert "weird{code}" in str(ei.value)
+    assert auth._read_failures(settings.login_state_file) == 1
+
+
+# =============================================================================
+# 자격증명 지문 가드 (같은 자격증명 자동 재시도 차단)
+# =============================================================================
+
+
+def _fail_once(settings, code="LoginIdPwdFail"):
+    with pytest.raises(LoginFailed):
+        auth.login(FakeSession([login_page(), fail_login(code)]), settings)
+
+
+def test_login_allowed_with_changed_password_after_failure(settings):
+    from dataclasses import replace
+
+    _fail_once(settings)
+    s = FakeSession([login_page(), ok_login()])
+    auth.login(s, replace(settings, password="other-pw"))
+    assert [c["method"] for c in s.calls] == ["GET", "POST"]
+    assert auth._failed_fp is None
+
+
+def test_login_allowed_with_changed_user_id_after_failure(settings):
+    from dataclasses import replace
+
+    _fail_once(settings)
+    s = FakeSession([login_page(), ok_login()])
+    auth.login(s, replace(settings, user_id="other-id"))
+    assert [c["method"] for c in s.calls] == ["GET", "POST"]
+
+
+def test_login_explicit_bypasses_fingerprint_guard(settings):
+    _fail_once(settings)
+    s = FakeSession([login_page(), fail_login("LoginIdPwdFail")])
+    with pytest.raises(LoginFailed):
+        auth.login(s, settings, explicit=True)
+    assert [c["method"] for c in s.calls] == ["GET", "POST"]
+    assert auth._read_failures(settings.login_state_file) == 2
+
+
+def test_login_explicit_still_blocked_by_persistent_lock(settings):
+    auth._write_failures(settings.login_state_file, 3)
+    s = FakeSession()
+    with pytest.raises(LoginLocked):
+        auth.login(s, settings, explicit=True)
+    assert s.calls == []
+
+
+def test_login_success_clears_failed_fingerprint(settings):
+    from dataclasses import replace
+
+    _fail_once(settings)
+    assert auth._failed_fp is not None
+    auth.login(FakeSession([login_page(), ok_login()]), replace(settings, password="new-pw"))
+    assert auth._failed_fp is None
+    # 원래 실패 자격증명도 가드에 막히지 않고 시도된다
+    s = FakeSession([login_page(), fail_login("LoginIdPwdFail")])
+    with pytest.raises(LoginFailed) as ei:
+        auth.login(s, settings)
+    assert ei.value.code != "guard"
+    assert len(s.calls) == 2
+
+
+@pytest.mark.parametrize(
+    "responses",
+    [
+        [login_page(), ok_login("mfa")],
+        [login_page(), FakeResponse(200, text="  ")],
+        [login_page(), requests.ConnectionError("down")],
+    ],
+    ids=["mfa", "empty", "network"],
+)
+def test_login_mfa_empty_body_and_network_error_do_not_set_fingerprint(settings, responses):
+    with pytest.raises((LoginFailed, NetworkError)):
+        auth.login(FakeSession(responses), settings)
+    assert auth._failed_fp is None
+    s = FakeSession([login_page(), ok_login()])
+    auth.login(s, settings)  # 가드에 막히지 않음
+    assert len(s.calls) == 2
+
+
+def test_guard_error_has_code_and_gui_cli_hint(settings):
+    _fail_once(settings)
+    with pytest.raises(LoginFailed) as ei:
+        auth.login(FakeSession(), settings)
+    assert ei.value.code == "guard"
+    assert "GUI" in ei.value.hint and "swea-fetch init" in ei.value.hint
+    assert "다시 실행하세요" not in ei.value.hint
+    assert "다시 실행하세요" not in str(ei.value)
+
+
+def test_fingerprint_not_leaked(settings, caplog):
+    from dataclasses import replace
+
+    caplog.set_level(logging.DEBUG)
+    _fail_once(settings)
+    fp = auth._failed_fp
+    with pytest.raises(LoginFailed) as ei:
+        auth.login(FakeSession(), settings)
+    for text in (str(ei.value), ei.value.hint, caplog.text):
+        assert DUMMY_PW not in text
+        assert fp not in text
+    assert DUMMY_PW not in fp
+    assert auth._fingerprint(settings) == auth._fingerprint(replace(settings))
+    assert auth._fingerprint(settings) != auth._fingerprint(replace(settings, password="x"))
+    assert auth._fingerprint(settings) != auth._fingerprint(replace(settings, user_id="x"))
+
+
+def test_get_session_relogin_after_earlier_success(settings, monkeypatch):
+    _patch_session_factory(monkeypatch, FakeSession([login_page(), ok_login()]))
+    auth.get_session(settings)
+    # 세션 만료: 캐시가 사라져 다시 로그인이 필요한 상황
+    settings.session_file.unlink()
+    fake2 = FakeSession([login_page(), ok_login()])
+    _patch_session_factory(monkeypatch, fake2)
+    assert auth.get_session(settings) is fake2
+    assert [c["url"] for c in fake2.calls] == [auth.LOGIN_PAGE_URL, auth.LOGIN_URL]
+
+
+def test_get_session_blocked_after_failure_same_credentials_but_verify_allowed(settings, monkeypatch):
+    _patch_session_factory(monkeypatch, FakeSession([login_page(), fail_login("LoginIdPwdFail")]))
+    with pytest.raises(LoginFailed):
+        auth.get_session(settings)
+    _patch_session_factory(monkeypatch, FakeSession())
+    with pytest.raises(LoginFailed) as ei:
+        auth.get_session(settings)
+    assert ei.value.code == "guard"
+    ok = FakeSession([login_page(), ok_login()])
+    _patch_session_factory(monkeypatch, ok)
+    assert auth.get_session(settings, explicit=True) is ok
+
+
+def test_login_concurrent_calls_single_post(settings):
+    import threading
+    import time
+
+    posts = []
+
+    def slow(method, url, kw):
+        if method == "POST":
+            posts.append(url)
+            time.sleep(0.2)
+            return fail_login("LoginIdPwdFail")
+        return login_page()
+
+    s1, s2 = FakeSession(), FakeSession()
+    s1.handler = slow
+    s2.handler = slow
+    errors: list[LoginFailed] = []
+
+    def run(sess):
+        try:
+            auth.login(sess, settings)
+        except LoginFailed as e:
+            errors.append(e)
+
+    ts = [threading.Thread(target=run, args=(x,)) for x in (s1, s2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert len(posts) == 1
+    assert sorted(e.code for e in errors) == ["LoginIdPwdFail", "guard"]
     assert auth._read_failures(settings.login_state_file) == 1

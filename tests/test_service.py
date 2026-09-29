@@ -31,7 +31,8 @@ def stubs(monkeypatch, solver_html):
         "calls": [],
     }
 
-    def get_session(settings):
+    def get_session(settings, explicit=False):
+        st["explicit"] = explicit
         st["calls"].append("get_session")
         return st["session"]
 
@@ -282,7 +283,7 @@ def test_fetch_download_error_writes_nothing(settings, stubs):
 
 
 def test_fetch_login_error_propagates(settings, monkeypatch):
-    def bad(settings):
+    def bad(settings, explicit=False):
         raise LoginFailed("nope")
 
     monkeypatch.setattr(service.auth, "get_session", bad)
@@ -453,7 +454,7 @@ def submit_env(settings, monkeypatch):
     (d / "1234.py").write_text(SOLUTION, encoding="utf-8")
     st = {"session": FakeSession(), "category": (ID, "BOX", BOX_ID, "모의/클럽 상자 · Queue"), "git_calls": [], "problem_dir": d}
 
-    monkeypatch.setattr(service.auth, "get_session", lambda settings: st["session"])
+    monkeypatch.setattr(service.auth, "get_session", lambda settings, explicit=False: st["session"])
     monkeypatch.setattr(service.lookup, "find_category", lambda s, settings, num: st["category"])
 
     repo = RepoInfo(settings.root.resolve(), "main", "https://github.com/u/r.git", "origin/main", False, settings.root / ".git")
@@ -614,3 +615,13 @@ def test_submit_push_flag_ignores_auto_push_setting(settings, submit_env):
     submit_env["session"].queue(_solver(), _fx("compile_ok"), _fx("pass"))
     oc = service.submit_problem(auto, "sim", 1234)  # push 기본값 False
     assert oc.git is None and submit_env["git_calls"] == []
+
+
+def test_verify_login_passes_explicit_true(settings, stubs):
+    service.verify_login(settings)
+    assert stubs["explicit"] is True
+
+
+def test_other_service_calls_do_not_pass_explicit(settings, stubs):
+    service.fetch_problem(settings, ID, "sim")
+    assert stubs["explicit"] is False
