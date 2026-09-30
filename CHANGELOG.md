@@ -2,7 +2,7 @@
 
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/). 버전은 `swea_fetcher/__init__.py` 의 `__version__` 하나로 관리한다.
 
-## 미출시
+## v0.11.0 — 2026-09-30 "GPT & Claude · 성장 기록"
 
 ### 추가
 - **AI 코치 "GPT & Claude (둘 다)" 모드** (GUI 전용, M18): 설정의 엔진에 `GPT & Claude (둘 다)` 추가 (`.env` `SWEA_AI_ENGINE=both`, 기본값은 `auto` 그대로). 같은 요청(코드 평가·힌트·정답 풀이·연결 테스트)을 Codex 와 Claude Code 에 **동시에** 보내 답 2개를 좌우로 나란히 표시 (결과 영역이 560px 미만일 때만 위아래). 먼저 끝난 답부터 채워짐
