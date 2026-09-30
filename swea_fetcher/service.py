@@ -742,8 +742,14 @@ def _gather_statement(settings: Settings, topic: str, num: int, progress: Progre
     return "", "", ["지문 없이 코드만으로 답했습니다"]
 
 
+_HINT_TITLE_RE = re.compile(r"\A\s*#{1,6}[^\n]*힌트[^\n]*\n+")
+
+
 def _merge_hints(hints: list[dict]) -> str:
-    return "\n\n".join(f"### 힌트 {h.get('level', i)}단계\n\n{h['markdown']}" for i, h in enumerate(hints, 1))
+    """단계별 힌트 합본. AI 가 스스로 붙인 "# 힌트 1단계…" 제목은 앱 제목과 겹치므로 뺀다."""
+    return "\n\n".join(
+        f"### 힌트 {h.get('level', i)}단계\n\n{_HINT_TITLE_RE.sub('', h['markdown'], count=1)}" for i, h in enumerate(hints, 1)
+    )
 
 
 def ask_coach(

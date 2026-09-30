@@ -247,3 +247,9 @@ def test_logout_all_removes_coach_dir(settings, config_dir):
     removed = service.logout(config_dir, all_=True)
     assert "AI 코치 기록" in removed and not (config_dir / "coach").exists()
     assert service.clear_coach(config_dir) == 0
+
+
+def test_merge_hints_drops_ai_title():
+    merged = service._merge_hints([{"level": 1, "markdown": "# 힌트 1단계: 방향 잡기\n\n## 핵심\n본문"}, {"level": 2, "markdown": "## 위치\n본문2"}])
+    assert merged.count("힌트 1단계") == 1 and "방향 잡기" not in merged
+    assert merged.startswith("### 힌트 1단계\n\n## 핵심") and "### 힌트 2단계\n\n## 위치" in merged
