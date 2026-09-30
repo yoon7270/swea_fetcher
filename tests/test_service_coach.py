@@ -253,3 +253,12 @@ def test_merge_hints_drops_ai_title():
     merged = service._merge_hints([{"level": 1, "markdown": "# 힌트 1단계: 방향 잡기\n\n## 핵심\n본문"}, {"level": 2, "markdown": "## 위치\n본문2"}])
     assert merged.count("힌트 1단계") == 1 and "방향 잡기" not in merged
     assert merged.startswith("### 힌트 1단계\n\n## 핵심") and "### 힌트 2단계\n\n## 위치" in merged
+
+
+def test_prompt_code_excludes_lines_removed_on_submit(monkeypatch, tmp_path):
+    from swea_fetcher import submit
+
+    src = '# 1. t\nimport sys\nsys.stdin = open("input.txt", "r")\n\n\n\nT = int(input())\nx = sys.stdin.readline\n'
+    out = submit.strip_io_lines(src)
+    assert "import sys" not in out and "open(" not in out
+    assert "sys.stdin.readline" in out  # 제출이 거부되는 사용은 남겨 AI 가 지적하게 한다

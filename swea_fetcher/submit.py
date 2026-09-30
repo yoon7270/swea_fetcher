@@ -70,10 +70,15 @@ class SubmitResult:
 # --- 소스 변환 -------------------------------------------------------------------------
 
 
+def strip_io_lines(source: str) -> str:
+    """제출 때 자동으로 빼는 줄 (`import sys` 단독 줄, `sys.stdin = open(...)`) 을 뺀 소스."""
+    return _STRIP_LINE_RE.sub("", source)
+
+
 def prepare_source(source: str) -> tuple[str, list[str]]:
     """제출용 소스. (변환된 소스, 안내 목록). sys 사용이 남으면 SubmitError."""
     notes: list[str] = []
-    stripped = _STRIP_LINE_RE.sub("", source)
+    stripped = strip_io_lines(source)
     if stripped != source:
         notes.append("`import sys` / `sys.stdin = open(...)` 줄을 빼고 제출합니다 (SWEA 가 거부하는 구문)")
     if _SYS_USE_RE.search(stripped):

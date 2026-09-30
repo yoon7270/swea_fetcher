@@ -822,7 +822,7 @@ def ask_coach(
         statement=statement,
         sample_input=_read_sample(problem_dir / settings.input_name),
         sample_output=_read_sample(problem_dir / settings.output_name),
-        code=code,
+        code=re.sub(r"\n{3,}", "\n\n", submit.strip_io_lines(code)),  # 제출 때 빠지는 로컬 입력 줄은 AI 에게도 안 보낸다
         summary=submit_summary,
         run_error=run_error,
         execution_time=execution_time,

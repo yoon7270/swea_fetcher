@@ -237,6 +237,7 @@ def build_command(engine: EngineInfo, scratch: str) -> tuple[list[str], Path | N
             ("--color", "never"),
             ("--output-last-message", str(answer)),
             ("--ephemeral", None),
+            ("--config", "mcp_servers={}"),  # 사용자 Codex 설정의 MCP 서버 기동 생략 (실측 6.4s → 4.6s)
         ):
             if _supports(helptxt, opt):
                 argv += [opt] if val is None else [opt, val]
@@ -252,6 +253,8 @@ def build_command(engine: EngineInfo, scratch: str) -> tuple[list[str], Path | N
             argv += ["--disallowedTools", CLAUDE_BLOCKED_TOOLS]
         if _supports(helptxt, "--no-session-persistence"):
             argv += ["--no-session-persistence"]
+        if _supports(helptxt, "--strict-mcp-config"):
+            argv += ["--strict-mcp-config"]  # --mcp-config 없이 쓰면 MCP 서버 0개
         return argv, None
     raise AiRunFailed(f"알 수 없는 엔진입니다: {engine.name}")
 
