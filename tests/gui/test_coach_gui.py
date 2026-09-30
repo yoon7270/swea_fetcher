@@ -739,14 +739,14 @@ def test_dual_hint_bar_uses_min_and_dual_notice(qtbot, cp, fake):
     coach_widgets.set_consent(cp.qs, "claude")
     cp._coach_after_submit(_submit_result(False))
     bar = cp.coach_bar
-    assert "동시 요청" in bar.text.text() and "사용량 2배" in bar.text.text()
-    assert "사용량" in bar.review_btn.toolTip() or "사용량" in bar.hint_btn.toolTip()
-    assert "구독 사용량" in bar.hint_btn.toolTip() and "구독 사용량" in bar.solution_btn.toolTip()
+    assert "각각 1번씩 요청" in bar.text.text() and "2배" not in bar.text.text()
+    assert "각각 1번씩" in bar.review_btn.toolTip() or "각각 1번씩" in bar.hint_btn.toolTip()
+    assert "한 곳만 쓸 때와 같습니다" in bar.hint_btn.toolTip() and "한 곳만 쓸 때와 같습니다" in bar.solution_btn.toolTip()
     _click_and_wait(qtbot, cp, bar.hint_btn)
     assert bar.hint_btn.text() == "다음 힌트 (2/3)"  # 대상 엔진의 최소값 1 -> 다음은 2
     fake.engines = None  # 단일 모드로 돌아가면 고지 제거
     cp._refresh_coach_bar()
-    assert "동시 요청" not in bar.text.text() and "구독 사용량" not in bar.hint_btn.toolTip()
+    assert "각각 1번씩" not in bar.text.text() and "각각 1번씩" not in bar.hint_btn.toolTip()
 
 
 def test_dual_busy_disables_all_retry_buttons(qtbot, cp, fake):
@@ -807,8 +807,8 @@ def test_answer_browser_guard_in_both_panes(qtbot):
 
 def test_consent_text_lists_all_and_dual_notice():
     text = coach_widgets.consent_text(["GPT (Codex)", "Claude (Claude Code)"], dual=True)
-    assert "GPT (Codex), Claude (Claude Code)" in text and "구독 사용량이 각각 소모" in text
-    assert "구독 사용량" not in coach_widgets.consent_text("GPT (Codex)")
+    assert "GPT (Codex), Claude (Claude Code)" in text and "각각 1번씩 요청" in text
+    assert "각각 1번씩" not in coach_widgets.consent_text("GPT (Codex)")
 
 
 def test_coach_worker_cancel_kills_every_process_and_late_starts(qtbot, monkeypatch):
@@ -832,7 +832,7 @@ def test_settings_combo_has_four_items_and_both_hint(main_window, valid_config):
     assert [sp.ai_engine.itemText(i) for i in range(sp.ai_engine.count())] == ["자동 (Codex 우선)", "GPT (Codex)", "Claude (Claude Code)", "GPT & Claude (둘 다)"]
     assert not shown(sp.ai_both_hint)
     sp.ai_engine.setCurrentIndex(sp.ai_engine.findData("both"))
-    assert shown(sp.ai_both_hint) and "사용량" in sp.ai_both_hint.text()
+    assert shown(sp.ai_both_hint) and "각각 1번씩 요청" in sp.ai_both_hint.text()
     assert config.read_env_file(valid_config)["SWEA_AI_ENGINE"] == "both" and main_window.settings.ai_engine == "both"
     sp.ai_engine.setCurrentIndex(sp.ai_engine.findData("claude"))
     assert not shown(sp.ai_both_hint)

@@ -324,7 +324,7 @@ class SettingsPage(QWidget):
             ("both", "GPT & Claude (둘 다)"),
         ):
             self.ai_engine.addItem(text, value)
-        self.ai_both_hint = QLabel("요청 1건마다 GPT 와 Claude 구독 사용량이 각각 소모되고, 답이 2개 표시됩니다.")  # 둘 다 모드에서만
+        self.ai_both_hint = QLabel("GPT 와 Claude 에 각각 1번씩 요청하고 답 2개를 나란히 보여줍니다 (각 서비스에서 쓰는 양은 한 곳만 쓸 때와 같습니다).")  # 둘 다 모드에서만
         self.ai_both_hint.setObjectName("AiBothHint")
         set_class(self.ai_both_hint, "hint")
         self.ai_both_hint.setWordWrap(True)
@@ -799,7 +799,7 @@ class SettingsPage(QWidget):
         self.coach_settings_changed.emit()
 
     def _sync_ai_both_ui(self) -> None:
-        """둘 다 모드일 때만 사용량 2배 힌트를 보이고, 감지 상태 보조 문구를 다시 만든다."""
+        """둘 다 모드일 때만 "각각 1번씩 요청" 힌트를 보이고, 감지 상태 보조 문구를 다시 만든다."""
         self.ai_both_hint.setVisible(self.ai_engine.currentData() == "both")
         if self._last_ai_status is not None:
             self._show_ai_status(self._last_ai_status)

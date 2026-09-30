@@ -672,7 +672,7 @@ class CheckPage(QWidget):
                 local=self._coach_mode == "local",
                 solution_viewed=bool(rec and rec.solution_viewed_at),
             )
-        try:  # 대상 엔진이 2개(둘 다 모드)면 동시 요청·사용량 2배 고지 (경로 확인뿐이라 UI 스레드 허용)
+        try:  # 대상 엔진이 2개(둘 다 모드)면 "각각 1번씩 요청" 고지 (경로 확인뿐이라 UI 스레드 허용)
             sel = service.resolve_engines(self.settings)
             self.coach_bar.set_dual([e.short_label for e in sel.engines] if len(sel.engines) >= 2 else None)
         except AiError:

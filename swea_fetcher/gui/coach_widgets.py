@@ -41,11 +41,11 @@ def reset_consents(qs: QSettings) -> None:
         qs.remove(f"{CONSENT_PREFIX}{key}")
 
 
-DUAL_NOTE = "요청 1건마다 두 서비스의 구독 사용량이 각각 소모되며 답이 2개 표시됩니다."
+DUAL_NOTE = "GPT 와 Claude 에 각각 1번씩 요청하고 답 2개를 나란히 보여줍니다 (각 서비스에서 쓰는 양은 한 곳만 쓸 때와 같습니다)."
 
 
 def consent_text(engine_label: str | list[str], ping: bool = False, dual: bool = False) -> str:
-    """engine_label: 동의가 필요한 엔진 표시 이름 (여러 개면 한 다이얼로그에 모은다). dual: 이번 요청이 두 서비스 동시 요청이면 사용량 고지 추가."""
+    """engine_label: 동의가 필요한 엔진 표시 이름 (여러 개면 한 다이얼로그에 모은다). dual: 이번 요청이 두 서비스 동시 요청이면 "각각 1번씩 요청" 고지 추가."""
     names = engine_label if isinstance(engine_label, str) else ", ".join(engine_label)
     note = f"\n{DUAL_NOTE}" if dual else ""
     if ping:
@@ -163,7 +163,7 @@ class CoachBar(QFrame):
         self._render_dual()
 
     def set_dual(self, labels: list[str] | None) -> None:
-        """대상 엔진이 2개면 (둘 다 모드) 안내 문장과 버튼 툴팁에 동시 요청·사용량 2배 고지를 붙인다. None 이면 제거."""
+        """대상 엔진이 2개면 (둘 다 모드) 안내 문장과 버튼 툴팁에 "각각 1번씩 요청" 고지를 붙인다. None 이면 제거."""
         self._dual = list(labels) if labels and len(labels) >= 2 else None
         self._render_dual()
         self._refresh_hint_button()
@@ -172,7 +172,7 @@ class CoachBar(QFrame):
         return "\n" + DUAL_NOTE.replace("답이 2개 표시됩니다", "두 서비스에 동시에 요청합니다") if self._dual else ""
 
     def _render_dual(self) -> None:
-        suffix = f" · {' · '.join(self._dual)} 동시 요청 (사용량 2배)" if self._dual else ""
+        suffix = f" · {' · '.join(self._dual)} 에 각각 1번씩 요청" if self._dual else ""
         self.text.setText(self._base_text + suffix)
         self.review_btn.setToolTip(self._base_tips[0] + self._dual_tip())
         self.solution_btn.setToolTip(self._base_tips[1] + self._dual_tip())
