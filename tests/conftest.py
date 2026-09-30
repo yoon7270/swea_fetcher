@@ -278,6 +278,25 @@ def _no_network(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_ai_process(monkeypatch: pytest.MonkeyPatch):
+    """AI 코치(M17): 실제 codex/claude 를 절대 실행하지 않는다. 기본은 '엔진 없음' + 프로세스 기동 시 실패.
+
+    필요한 테스트가 ai_engine._which / _popen 을 명시적으로 대체한다.
+    """
+    from swea_fetcher import ai_engine
+
+    def blocked(*_a, **_k):
+        raise AssertionError("테스트에서는 실제 AI CLI 프로세스를 기동하지 않습니다 (ai_engine._popen 을 대체하세요)")
+
+    monkeypatch.setattr(ai_engine, "_which", lambda _name: None)
+    monkeypatch.setattr(ai_engine, "_popen", blocked)
+    monkeypatch.setattr(ai_engine, "_run_quiet", blocked)
+    ai_engine._HELP_CACHE.clear()
+    yield
+    ai_engine._HELP_CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch: pytest.MonkeyPatch):
     """client 의 재시도 대기를 없앤다."""
     from swea_fetcher import client

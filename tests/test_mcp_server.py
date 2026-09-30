@@ -67,14 +67,27 @@ def test_stdio_subprocess_smoke(tmp_path):
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
     ]
-    p = subprocess.run(
+    # 한 번에 보내고 stdin 을 닫으면 서버가 EOF 로 먼저 끝나 tools/list 응답을 놓칠 수 있다 (부하 시 간헐 실패)
+    # → 요청마다 응답을 읽은 뒤 다음을 보낸다
+    p = subprocess.Popen(
         [sys.executable, "-m", "swea_fetcher.mcp_server"],
-        input="".join(json.dumps(m) + "\n" for m in msgs).encode("utf-8"),
-        capture_output=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         env=env,
-        timeout=60,
     )
-    lines = [ln for ln in p.stdout.decode("utf-8").splitlines() if ln.strip()]
+    lines: list[str] = []
+    try:
+        for m in msgs:
+            p.stdin.write((json.dumps(m) + "\n").encode("utf-8"))
+            p.stdin.flush()
+            if "id" in m:
+                lines.append(p.stdout.readline().decode("utf-8"))
+    finally:
+        p.stdin.close()
+        rest, _err = p.communicate(timeout=60)
+    lines += rest.decode("utf-8").splitlines()
+    lines = [ln for ln in lines if ln.strip()]
     parsed = [json.loads(ln) for ln in lines]  # JSON 이 아니면 여기서 실패
     assert all(m.get("jsonrpc") == "2.0" for m in parsed)
     by_id = {m["id"]: m for m in parsed if "id" in m}

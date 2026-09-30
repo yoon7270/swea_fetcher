@@ -1,7 +1,7 @@
 """도메인 예외. 모든 예외는 SweaFetchError 를 상속하고 exit_code(cli) 와 hint(조치 문구) 를 가진다.
 
 exit code 규약 (project-plan 6절):
-    0 성공 / 1 로그인·설정 실패 / 2 입력·파싱 실패 / 3 저장 충돌 / 4 첨부 없음 / 5 네트워크 / 6 검증 실패 / 7 git 실패 / 8 제출 실패·오답
+    0 성공 / 1 로그인·설정 실패 / 2 입력·파싱 실패 / 3 저장 충돌 / 4 첨부 없음 / 5 네트워크 / 6 검증 실패 / 7 git 실패 / 8 제출 실패·오답 / 9 AI 코치 (GUI 전용, CLI 미노출)
 hint: 사용자가 다음에 할 일. cli 는 `→ {hint}` 로, GUI 는 배너에 표시한다.
      클래스 기본 문구를 두고, 발생 지점에서 hint= 로 덮어쓸 수 있다.
 """
@@ -190,3 +190,40 @@ class SubmitError(SweaFetchError):
 
     exit_code = 8
     default_hint = "코드를 고친 뒤 다시 제출하세요. 제출은 문제당 횟수 제한이 있습니다"
+
+
+# --- AI 코치 (exit 9, M17) --------------------------------------------------
+# GUI 전용 기능이라 CLI 는 이 종료 코드를 내지 않는다 (규약상 예약만).
+
+
+class AiError(SweaFetchError):
+    """AI 코치 실패의 공통 부모. code 는 GUI 가 배너 종류를 고르는 데 쓴다 (missing | failed | timeout)."""
+
+    exit_code = 9
+    code = "failed"
+
+
+class AiEngineMissing(AiError):
+    """Codex / Claude Code CLI 를 PATH 에서 찾지 못함 (또는 고정한 엔진이 없음)."""
+
+    code = "missing"
+    default_hint = "AI 코치 엔진(Codex CLI 또는 Claude Code CLI)을 설치·로그인한 뒤 앱을 다시 켜세요"
+
+
+class AiRunFailed(AiError):
+    """CLI 실행 실패 (비 0 종료, 빈 응답, 필수 옵션 미지원 등). argv(프롬프트 제외)와 stderr 끝부분을 보관."""
+
+    code = "failed"
+    default_hint = "설정 페이지의 [연결 테스트] 로 엔진 상태를 확인하세요"
+
+    def __init__(self, message: str, *, hint: str | None = None, argv: list[str] | None = None, stderr: str = "") -> None:
+        super().__init__(message, hint=hint)
+        self.argv: list[str] = list(argv or [])
+        self.stderr = stderr
+
+
+class AiTimeout(AiRunFailed):
+    """AI 응답이 제한 시간(기본 5분)을 넘김. 프로세스 트리는 종료된 상태."""
+
+    code = "timeout"
+    default_hint = "잠시 뒤 다시 시도하세요. 반복되면 터미널에서 CLI 가 직접 응답하는지 확인하세요"

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QRadioButton,
     QFileDialog,
     QFrame,
@@ -25,11 +26,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import config, content_cache, doctor, gitops, service, update
+from ... import ai_engine, config, content_cache, doctor, gitops, service, update
 from ...config import Settings
+from ...errors import AiError
+from ..coach_widgets import ask_consent, has_consent, reset_consents
 from ..theme import tokens
 from ..widgets import Banner, make_busy_bar, set_class, set_invalid
-from ..workers import FuncWorker, LoginWorker
+from ..workers import CoachWorker, FuncWorker, LoginWorker
 
 
 class SettingsPage(QWidget):
@@ -38,6 +41,7 @@ class SettingsPage(QWidget):
     status_message = Signal(str)
     timeout_changed = Signal(float)
     cache_settings_changed = Signal()  # 지문 캐시 사용 토글 (문제 탭 안내문 갱신용)
+    coach_settings_changed = Signal()  # AI 코치 설정·기록 변경 (엔진·오답 기준·복습일·기록 지우기) — 메인이 설정 객체·배지를 갱신
 
     def __init__(self, qsettings: QSettings, config_dir: Path | None = None, parent=None) -> None:
         super().__init__(parent)
@@ -48,6 +52,10 @@ class SettingsPage(QWidget):
         self._worker: LoginWorker | None = None
         self._doctor_worker: FuncWorker | None = None
         self._git_worker: FuncWorker | None = None
+        self._ai_detect_worker: FuncWorker | None = None
+        self._ai_ping_worker: CoachWorker | None = None
+        self._loading_ai = False
+        self._ai_status_stale = True
         self._build()
 
     def _build(self) -> None:
@@ -286,6 +294,88 @@ class SettingsPage(QWidget):
         g6.setColumnStretch(0, 1)
         root.addWidget(card6)
 
+        # --- AI 코치 (M17)
+        sec7 = QLabel("AI 코치")
+        set_class(sec7, "section")
+        root.addWidget(sec7)
+        card7 = QFrame()
+        set_class(card7, "card")
+        g7 = QGridLayout(card7)
+        g7.setContentsMargins(tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2)
+        g7.setVerticalSpacing(tokens.SPACE)
+        g7.setHorizontalSpacing(tokens.SPACE)
+        g7.setColumnMinimumWidth(0, 96)
+
+        def _label(text: str, buddy=None) -> QLabel:
+            lab = QLabel(text)
+            set_class(lab, "muted")
+            lab.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            if buddy is not None:
+                lab.setBuddy(buddy)
+            return lab
+
+        self.ai_engine = QComboBox()
+        self.ai_engine.setObjectName("AiEngineCombo")
+        for value, text in (("auto", "자동 (Codex 우선)"), ("codex", "Codex"), ("claude", "Claude Code")):
+            self.ai_engine.addItem(text, value)
+        self.ai_engine.setAccessibleName("AI 엔진")
+        self.ai_engine.setMinimumWidth(180)
+        self.ai_status = QLabel("확인 중…")
+        self.ai_status.setWordWrap(True)
+        self.ai_status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.ai_detect_btn = QPushButton("다시 감지")
+        self.ai_test_btn = QPushButton("연결 테스트")
+        self.ai_test_btn.setToolTip("테스트 문장만 보내 엔진이 응답하는지 확인합니다 (코드·지문은 보내지 않음)")
+        self.ai_note = QLabel()  # 환경변수 API 키 경고 / 설치 안내
+        set_class(self.ai_note, "hint")
+        self.ai_note.setWordWrap(True)
+        self.ai_note.hide()
+        self.ai_threshold = QSpinBox()
+        self.ai_threshold.setObjectName("AiThresholdSpin")
+        self.ai_threshold.setRange(*config.AI_WRONG_THRESHOLD_RANGE)
+        self.ai_threshold.setSuffix(" 회")
+        self.ai_threshold.setFixedWidth(96)
+        self.ai_threshold.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.review_days = QSpinBox()
+        self.review_days.setObjectName("ReviewDaysSpin")
+        self.review_days.setRange(*config.REVIEW_DAYS_RANGE)
+        self.review_days.setSuffix(" 일")
+        self.review_days.setFixedWidth(96)
+        self.review_days.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.ai_consent_reset_btn = QPushButton("AI 전송 동의 초기화")
+        self.ai_clear_btn = QPushButton("AI 기록 지우기")
+        self.ai_clear_btn.setToolTip("응답 캐시·오답 횟수·복습 일정을 지웁니다")
+        th_hint = QLabel("이 횟수 이상 틀리면 정답 풀이를 제안합니다")
+        rv_hint = QLabel("정답 풀이를 본 뒤 다시 풀기를 권유할 때까지의 일수")
+        for h in (th_hint, rv_hint):
+            set_class(h, "hint")
+            h.setWordWrap(True)
+        ai_hint = QLabel("버튼을 누를 때만 지문·코드가 AI 로 전송됩니다. 기록은 ~/.swea-fetch/coach 에만 있고 GitHub 로 올라가지 않습니다.")
+        set_class(ai_hint, "hint")
+        ai_hint.setWordWrap(True)
+        g7.addWidget(_label("엔진", self.ai_engine), 0, 0)
+        g7.addWidget(self.ai_engine, 0, 1, 1, 2, Qt.AlignmentFlag.AlignLeft)
+        g7.addWidget(_label("감지 상태"), 1, 0)
+        g7.addWidget(self.ai_status, 1, 1)
+        g7.addWidget(self.ai_detect_btn, 1, 2)
+        g7.addWidget(self.ai_note, 2, 1, 1, 2)
+        g7.addWidget(_label("연결"), 3, 0)
+        g7.addWidget(self.ai_test_btn, 3, 1, 1, 2, Qt.AlignmentFlag.AlignLeft)
+        g7.addWidget(_label("오답 기준", self.ai_threshold), 4, 0)
+        g7.addWidget(self.ai_threshold, 4, 1, Qt.AlignmentFlag.AlignLeft)
+        g7.addWidget(th_hint, 4, 2)
+        g7.addWidget(_label("복습", self.review_days), 5, 0)
+        g7.addWidget(self.review_days, 5, 1, Qt.AlignmentFlag.AlignLeft)
+        g7.addWidget(rv_hint, 5, 2)
+        ai_btns = QHBoxLayout()
+        ai_btns.addWidget(self.ai_consent_reset_btn)
+        ai_btns.addWidget(self.ai_clear_btn)
+        ai_btns.addStretch(1)
+        g7.addLayout(ai_btns, 6, 1, 1, 2)
+        g7.addWidget(ai_hint, 7, 1, 1, 2)
+        g7.setColumnStretch(1, 1)
+        root.addWidget(card7)
+
         # --- 진단·업데이트 (M6 §3·§4)
         sec4 = QLabel("진단·업데이트")
         set_class(sec4, "section")
@@ -342,6 +432,13 @@ class SettingsPage(QWidget):
         self.cache_enabled.toggled.connect(self._cache_toggled)
         self.cache_clear_btn.clicked.connect(self._clear_cache)
         self.update_check.toggled.connect(lambda on: update.set_disabled(self.config_dir, not on))
+        self.ai_engine.currentIndexChanged.connect(self._ai_engine_changed)
+        self.ai_threshold.editingFinished.connect(lambda: self._ai_number_saved("SWEA_AI_WRONG_THRESHOLD", self.ai_threshold.value(), "ai_wrong_threshold"))
+        self.review_days.editingFinished.connect(lambda: self._ai_number_saved("SWEA_REVIEW_DAYS", self.review_days.value(), "review_days"))
+        self.ai_detect_btn.clicked.connect(self._detect_ai)
+        self.ai_test_btn.clicked.connect(self._ai_ping)
+        self.ai_consent_reset_btn.clicked.connect(self._reset_ai_consent)
+        self.ai_clear_btn.clicked.connect(self._clear_ai_records)
         self.commit_template.editingFinished.connect(self._save_template)
         self.auto_push.clicked.connect(self._auto_push_clicked)
         self.scope_root.toggled.connect(self._scope_root_toggled)
@@ -385,6 +482,16 @@ class SettingsPage(QWidget):
         self.sync_on_close.setChecked(self.qs.value("autosync/sync_on_close", True, type=bool))
         self.sync_on_close.setVisible(self.on_watch.isChecked())
         self._loading_autosync = False
+        # AI 코치 (M17): 입력값 채우기 (저장 시그널이 돌지 않게 막고)
+        self._loading_ai = True
+        engine = settings.ai_engine if settings else (values.get("SWEA_AI_ENGINE") or "auto")
+        self.ai_engine.setCurrentIndex(max(0, self.ai_engine.findData(engine)))
+        self.ai_threshold.setValue(settings.ai_wrong_threshold if settings else 3)
+        self.review_days.setValue(settings.review_days if settings else 3)
+        self._loading_ai = False
+        self._ai_status_stale = True
+        if self.isVisible():
+            self._detect_ai()
         self._git_root = settings.root if settings else None
         self._git_status_stale = True
         if self.isVisible():
@@ -397,10 +504,14 @@ class SettingsPage(QWidget):
         super().showEvent(e)
         if getattr(self, "_git_status_stale", False):
             self.refresh_git_status(getattr(self, "_git_root", None))
+        if self._ai_status_stale:
+            self._detect_ai()
 
     def wait_workers(self, ms: int = 5000) -> None:
         """창 닫힐 때 워커가 살아 있으면 기다린다 (QThread 가 실행 중 파괴되면 abort)."""
-        for w in (self._git_worker, self._doctor_worker, self._worker):
+        if self._ai_ping_worker is not None and self._ai_ping_worker.isRunning():
+            self._ai_ping_worker.cancel()  # 최대 5분 대기 금지 — 프로세스 트리를 먼저 종료
+        for w in (self._git_worker, self._doctor_worker, self._worker, self._ai_detect_worker, self._ai_ping_worker):
             if w is not None and w.isRunning():
                 w.wait(ms)
 
@@ -661,6 +772,115 @@ class SettingsPage(QWidget):
         self._doctor_worker = None
         self.doctor_btn.setEnabled(True)
         self.doctor_btn.setText("진단 정보 복사")
+
+    # --- AI 코치 (M17) --------------------------------------------------------------------
+    def _ai_engine_changed(self, _idx: int) -> None:
+        if self._loading_ai:
+            return
+        value = str(self.ai_engine.currentData() or "auto")
+        service.set_env_values(self.config_dir, SWEA_AI_ENGINE=value)
+        self.status_message.emit("AI 엔진 설정을 저장했습니다")
+        self.coach_settings_changed.emit()
+
+    def _ai_number_saved(self, key: str, value: int, attr: str) -> None:
+        """오답 기준·복습일 저장 (editingFinished). 바뀌지 않았으면 쓰지 않는다."""
+        if self._loading_ai or (self.settings is not None and getattr(self.settings, attr) == value):
+            return
+        service.set_env_values(self.config_dir, **{key: str(value)})
+        self.status_message.emit("AI 코치 설정을 저장했습니다")
+        self.coach_settings_changed.emit()
+
+    def _detect_ai(self) -> None:
+        """설치된 엔진과 버전 감지 (--version 실행이라 워커에서)."""
+        if self._ai_detect_worker is not None:
+            return
+        self._ai_status_stale = False
+        self.ai_status.setText("감지 중…")
+        self.ai_detect_btn.setEnabled(False)
+        w = FuncWorker(lambda: service.detect_engines(self.settings), self)
+        w.finished_ok.connect(self._show_ai_status)
+        w.failed.connect(lambda t, _h, _d: self.ai_status.setText(f"감지 실패: {t}"))
+        w.finished.connect(self._ai_detect_cleanup)
+        self._ai_detect_worker = w
+        w.start()
+
+    def _ai_detect_cleanup(self) -> None:
+        self._ai_detect_worker = None
+        self.ai_detect_btn.setEnabled(True)
+
+    def _show_ai_status(self, status) -> None:
+        parts = []
+        for e in status.engines:
+            if not e.found:
+                parts.append(f"{e.label} 없음")
+            elif e.ok:
+                parts.append(f"{e.label} {e.version} 감지됨 ({e.path})")
+            else:
+                parts.append(f"{e.label} 실행 실패 ({e.path})")
+        self.ai_status.setText(" · ".join(parts))
+        notes = []
+        if status.api_keys:
+            notes.append(f"환경변수 {', '.join(status.api_keys)} 가 설정되어 있습니다 — CLI 가 구독 대신 API 과금으로 동작할 수 있습니다 (앱은 지우지 않습니다)")
+        if not any(e.found for e in status.engines):
+            notes.append(ai_engine.install_hint())
+        self.ai_note.setText("\n".join(notes))
+        self.ai_note.setVisible(bool(notes))
+
+    def _ai_ping(self) -> None:
+        """[연결 테스트]: 고정 문장 1건. 실패하면 실행 명령줄(프롬프트 제외)과 stderr 끝부분을 그대로 보여준다."""
+        if self._ai_ping_worker is not None:
+            return
+        if self.settings is None:
+            self.banner.show_message("warning", "설정을 먼저 저장하세요", "루트 폴더·SWEA ID·비밀번호를 저장한 뒤 테스트할 수 있습니다")
+            return
+        try:
+            engine = service.resolve_engine(self.settings)
+        except AiError as e:
+            self.banner.show_message("warning", "AI 엔진을 찾지 못했습니다", e.hint or str(e))
+            return
+        if not has_consent(self.qs, engine.name) and not ask_consent(self, engine.label, ping=True):
+            return  # 테스트 문장만 보내는 동의라 엔진 동의로는 저장하지 않는다 (코드 전송 동의는 첫 코치 사용 때)
+        w = CoachWorker(self.settings, "ping", parent=self)
+        w.finished_ok.connect(self._on_ping_done)
+        w.ai_failed.connect(lambda _c, title, hint: self.banner.show_message("error", title, hint))
+        w.failed.connect(lambda title, hint, detail: self.banner.show_message("error", title, hint or detail[-400:]))
+        w.finished.connect(self._ping_cleanup)
+        self._ai_ping_worker = w
+        self.ai_test_btn.setEnabled(False)
+        self.ai_test_btn.setText("테스트 중…")
+        self.busy.setVisible(True)
+        self.banner.hide()
+        w.start()
+
+    def _ping_cleanup(self) -> None:
+        self._ai_ping_worker = None
+        self.ai_test_btn.setEnabled(True)
+        self.ai_test_btn.setText("연결 테스트")
+        self.busy.setVisible(False)
+
+    def _on_ping_done(self, answer) -> None:
+        if answer.cancelled:
+            self.banner.show_message("info", "연결 테스트를 취소했습니다")
+            return
+        self.banner.show_message("success", f"{answer.engine} 연결됨 ({answer.elapsed:.1f}초)", f"응답: {answer.markdown[:80]}")
+
+    def _reset_ai_consent(self) -> None:
+        reset_consents(self.qs)
+        self.banner.show_message("success", "AI 전송 동의를 초기화했습니다", "다음에 AI 코치를 쓸 때 다시 확인합니다")
+
+    def _clear_ai_records(self) -> None:
+        box = QMessageBox(QMessageBox.Icon.Warning, "AI 기록 지우기", "AI 응답 캐시·오답 횟수·복습 일정이 모두 지워집니다.\n풀이 파일은 건드리지 않습니다.", parent=self)
+        delete = box.addButton("지우기", QMessageBox.ButtonRole.DestructiveRole)
+        set_class(delete, "danger")
+        cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel)
+        box.setEscapeButton(cancel)
+        box.exec()
+        if box.clickedButton() is not delete:
+            return
+        n = service.clear_coach(self.config_dir)
+        self.banner.show_message("success", "AI 기록을 지웠습니다", f"{n}개 파일 삭제" if n else "지울 항목 없음")
+        self.coach_settings_changed.emit()
 
     # --- 삭제 -----------------------------------------------------------------------
     def _cache_toggled(self, on: bool) -> None:

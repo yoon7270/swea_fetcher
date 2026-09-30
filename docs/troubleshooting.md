@@ -183,6 +183,16 @@ py -3 -c "import sys; print(sys.executable)"
 
 **고급: uv 로 실행** — `uvx --from "swea-fetcher[mcp] @ git+https://github.com/yoon7270/swea_fetcher.git" swea-fetch-mcp`. 첫 실행 때 설치하느라 시작이 늦어 AI 앱의 시작 제한 시간에 걸릴 수 있어 권장하지 않습니다.
 
+## AI 코치 (GUI)
+
+- **"AI 엔진을 찾지 못했습니다"**: Codex CLI 또는 Claude Code CLI 가 PATH 에 없습니다. 설치·로그인한 뒤 **앱을 다시 켜세요** (켠 채로 설치하면 PATH 가 갱신되지 않음). 엔진을 Codex/Claude 로 **고정**했다면 그 엔진만 찾습니다 — 다른 엔진으로 넘어가지 않으니 설정에서 '자동'으로 바꾸세요
+- **[연결 테스트] 실패**: 배너에 실행한 명령줄(프롬프트 제외)과 stderr 끝부분이 그대로 나옵니다. CLI 옵션명은 CLI 버전에 따라 다를 수 있어, 이 내용을 이슈로 제보하면 옵션을 맞춥니다. `CLI 버전이 오래됐습니다` 는 필요한 옵션(`--sandbox` 등)이 `--help` 에 없다는 뜻이니 CLI 를 업데이트하세요
+- **로그인/한도 오류**: 터미널에서 `codex login` / `claude` 로 먼저 로그인하세요. `구독 사용량 한도` 문구는 stderr 에 rate limit 류 글자가 있을 때의 추정입니다
+- **응답이 5분 넘게 없음**: 자동 중단됩니다 (프로세스 트리 종료). 취소 버튼으로 직접 중단해도 됩니다
+- **복습 알림을 없애고 싶을 때**: 최근 탭 "복습" 카드의 [✕]. 전체 삭제는 설정의 [AI 기록 지우기]
+- 기록 위치: `%USERPROFILE%\.swea-fetch\coach\` (`records.json` 오답 횟수·복습 일정, `answers\` 응답 캐시 최근 50문제). `records.json` 이 손상되면 `records.json.corrupt` 로 백업하고 새로 시작합니다
+- 종료 코드 9 는 AI 코치용으로 예약돼 있으나 CLI 는 AI 기능을 노출하지 않으므로 나오지 않습니다
+
 ## 새 버전 알림이 안 뜨거나, 끄고 싶을 때
 
 - 하루 1회만 GitHub 에 물어봅니다. 오프라인이거나 실패하면 조용히 넘어갑니다
@@ -200,6 +210,7 @@ py -3 -c "import sys; print(sys.executable)"
 | `login_state.json` | 연속 로그인 실패 횟수 | 잠금 해제용으로 지움 |
 | `problem_index.json` | 문제 번호 → ID 색인 캐시 | 지우면 다시 찾음 (조금 느려짐) |
 | `update_check.json` | 새 버전 확인 시각·결과·알림 끔 여부 | 지워도 됨 |
+| `coach\` | AI 코치 기록 (오답 횟수·복습 일정·응답 캐시) | 지우면 기록이 사라짐 (설정 [AI 기록 지우기], `logout --all`) |
 
 `.env` 의 git 관련 키 (설정 페이지에서도 바꿀 수 있음): `SWEA_COMMIT_TEMPLATE` (커밋 메시지 템플릿), `SWEA_AUTO_PUSH=1` (자동 동기화 켜기), `SWEA_AUTO_PUSH_SCOPE=problem|root` (범위), `SWEA_AUTO_PUSH_ON=pass,check,save,watch` (시점, 쉼표 목록). CLI·GUI 공통. `fetch`/`check`/`submit --no-push` 로 1회 해제.
 

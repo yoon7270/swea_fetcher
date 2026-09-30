@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QStackedLayout,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -23,6 +25,7 @@ from ..theme import tokens
 from ..widgets import Banner, EmptyState, open_in_editor, open_in_explorer, editor_tooltip, set_class
 
 LIMIT = 20
+REVIEW_MAX_ROWS = 5  # 복습 카드에 보여줄 최대 항목 (나머지는 "외 N개")
 
 
 class HistoryPage(QWidget):
@@ -32,6 +35,7 @@ class HistoryPage(QWidget):
     problem_requested = Signal(str, int)  # topic, num — 앱 캐시의 지문을 문제 탭으로 (M12)
     goto_requested = Signal(str)
     status_message = Signal(str)
+    reviews_changed = Signal()  # 복습 항목을 [✕] 로 지움 — 메인이 상태바 배지를 갱신 (M17)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -63,6 +67,16 @@ class HistoryPage(QWidget):
         hint = QLabel("클릭 = 문제 보기 · 우클릭 = 에디터·폴더 열기·검증")
         set_class(hint, "hint")
         root.addWidget(hint)
+
+        # 복습 카드 (M17): 항목이 있을 때만. 최근 20개 표와 별개로 조회한다 (표에 없는 문제도 보이게)
+        self.review_card = QFrame()
+        set_class(self.review_card, "card")
+        self.review_card.setObjectName("ReviewCard")
+        self._review_lay = QVBoxLayout(self.review_card)
+        self._review_lay.setContentsMargins(tokens.SPACE * 2, tokens.SPACE * 3 // 2, tokens.SPACE * 2, tokens.SPACE * 3 // 2)
+        self._review_lay.setSpacing(tokens.SPACE // 2)
+        self.review_card.hide()
+        root.addWidget(self.review_card)
 
         holder = QWidget()
         self.stack = QStackedLayout(holder)
@@ -101,6 +115,7 @@ class HistoryPage(QWidget):
 
     def refresh(self) -> None:
         """디스크 stat 20개 — 스펙 §6.3 에 따라 UI 스레드 허용."""
+        self._refresh_reviews()
         if self.settings is None:
             self._fill([])
             return
@@ -112,6 +127,60 @@ class HistoryPage(QWidget):
             return
         self.banner.hide()
         self._fill(items)
+
+    def _refresh_reviews(self) -> None:
+        """복습 예약 카드 (제목 + 항목 최대 5개 + 행 끝 [✕]). 상태는 색만이 아니라 글자로도 구분 (도래: 오늘 복습/N일 지남, 예정: N일 뒤)."""
+        while self._review_lay.count():
+            w = self._review_lay.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        items = service.review_items(self.settings) if self.settings is not None else []
+        if not items:
+            self.review_card.hide()
+            return
+        title = QLabel("복습")
+        set_class(title, "section")
+        self._review_lay.addWidget(title)
+        p = tokens.LIGHT
+        for it in items[:REVIEW_MAX_ROWS]:
+            row = QHBoxLayout()
+            btn = QPushButton(f"{it.num}. {it.title or '—'}")
+            set_class(btn, "link")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip("검증 탭에서 이 문제를 엽니다")
+            btn.clicked.connect(lambda _=False, i=it: self.check_requested.emit(i.topic, i.num))
+            if it.overdue_days > 0:
+                status, color = f"{it.overdue_days}일 지남", p.warning_text
+            elif it.overdue_days == 0:
+                status, color = "오늘 복습", p.warning_text
+            else:
+                status, color = f"{-it.overdue_days}일 뒤", p.text_3
+            lab = QLabel(f"· {status}")
+            lab.setStyleSheet(f"color: {color};")
+            close = QToolButton()
+            close.setText("✕")
+            close.setToolTip("복습 목록에서 지웁니다")
+            close.setAccessibleName(f"{it.num}번 복습 지우기")
+            close.clicked.connect(lambda _=False, i=it: self._dismiss_review(i.num))
+            row.addWidget(btn)
+            row.addWidget(lab)
+            row.addStretch(1)
+            row.addWidget(close)
+            holder = QWidget()
+            holder.setLayout(row)
+            self._review_lay.addWidget(holder)
+        if len(items) > REVIEW_MAX_ROWS:
+            more = QLabel(f"외 {len(items) - REVIEW_MAX_ROWS}개")
+            set_class(more, "hint")
+            self._review_lay.addWidget(more)
+        self.review_card.show()
+
+    def _dismiss_review(self, num: int) -> None:
+        if self.settings is None:
+            return
+        service.dismiss_review(self.settings, num)
+        self._refresh_reviews()
+        self.reviews_changed.emit()
 
     def _fill(self, items: list[service.RecentItem]) -> None:
         self._items = list(items)

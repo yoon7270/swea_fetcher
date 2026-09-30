@@ -12,9 +12,9 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QThread, Signal
 
-from .. import checker, config, service
+from .. import ai_engine, checker, config, service
 from ..config import Settings
-from ..errors import SweaFetchError
+from ..errors import AiError, SweaFetchError
 from ..service import FetchOptions
 
 
@@ -125,3 +125,48 @@ class FuncWorker(BaseWorker):
 
     def work(self) -> Any:
         return self.fn()
+
+
+class CoachWorker(BaseWorker):
+    """AI 코치 요청 1건 (M17). 취소 가능: 프로세스 트리를 종료하고 CoachAnswer.cancelled=True 로 끝난다.
+
+    AiError 는 ai_failed(code, title, hint) 로 나뉘어 나온다 (code = missing | failed | timeout) — 페이지가 배너 종류를 고른다.
+    호출 전 사용자 동의는 페이지 책임 (이 워커는 곧바로 service.ask_coach 를 부른다).
+    """
+
+    ai_failed = Signal(str, str, str)  # code, title, hint
+
+    def __init__(self, settings: Settings, kind: str, topic: str = "", num: int = 0, parent=None, **kwargs) -> None:
+        super().__init__(parent)
+        self.settings, self.kind, self.topic, self.num, self.kwargs = settings, kind, topic, num, kwargs
+        self._proc = None
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        """진행 중 프로세스를 죽인다. 아직 안 떴으면 뜨는 즉시(on_start) 죽인다."""
+        self._cancel_requested = True
+        if self._proc is not None:
+            ai_engine.kill_tree(self._proc)
+
+    def _on_start(self, proc) -> None:
+        self._proc = proc
+        if self._cancel_requested:
+            ai_engine.kill_tree(proc)
+
+    def work(self) -> service.CoachAnswer:
+        return service.ask_coach(
+            self.settings, self.kind, self.topic, self.num, progress=self.progress.emit,
+            on_start=self._on_start, is_cancelled=lambda: self._cancel_requested, **self.kwargs,
+        )
+
+    def run(self) -> None:  # QThread 진입점
+        try:
+            result = self.work()
+        except AiError as e:
+            self.ai_failed.emit(e.code, str(e), e.hint)
+        except SweaFetchError as e:
+            self.failed.emit(str(e), e.hint, "")
+        except Exception as e:  # noqa: BLE001
+            self.failed.emit(f"내부 오류: {type(e).__name__}: {e}", "다시 시도하거나 로그를 확인하세요", traceback.format_exc())
+        else:
+            self.finished_ok.emit(result)

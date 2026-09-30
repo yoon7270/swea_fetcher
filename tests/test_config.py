@@ -294,3 +294,47 @@ def test_python_from_env_file_and_env_var(root_dir, config_dir, fake_keyring, mo
     assert load_settings(config_dir).python == "C:/py/python.exe"
     monkeypatch.setenv("SWEA_PYTHON", "  D:/other/python.exe  ")
     assert load_settings(config_dir).python == "D:/other/python.exe"
+
+
+# =============================================================================
+# M17: AI 코치 설정 (SWEA_AI_ENGINE / SWEA_AI_WRONG_THRESHOLD / SWEA_REVIEW_DAYS)
+# =============================================================================
+
+
+def _load_ai(root_dir, config_dir, fake_keyring, **kv):
+    fake_keyring.store[(KEYRING_SERVICE, DUMMY_ID)] = DUMMY_PW
+    _write_env(config_dir, SWEA_ROOT=str(root_dir), SWEA_ID=DUMMY_ID, **kv)
+    return load_settings(config_dir)
+
+
+def test_ai_settings_defaults(root_dir, config_dir, fake_keyring):
+    s = _load_ai(root_dir, config_dir, fake_keyring)
+    assert (s.ai_engine, s.ai_wrong_threshold, s.review_days) == ("auto", 3, 3)
+    assert s.coach_dir == config_dir / "coach"
+    s2 = Settings(root=root_dir, user_id="u", password="p")  # 기존 생성 코드 호환
+    assert s2.ai_engine == "auto" and "ai_engine" not in repr(s2)
+
+
+def test_ai_settings_parsed(root_dir, config_dir, fake_keyring):
+    s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_AI_ENGINE="Claude", SWEA_AI_WRONG_THRESHOLD="5", SWEA_REVIEW_DAYS="7")
+    assert (s.ai_engine, s.ai_wrong_threshold, s.review_days) == ("claude", 5, 7)
+
+
+@pytest.mark.parametrize("raw, expect", [("0", 1), ("99", 20), ("-3", 1)])
+def test_ai_threshold_clamped(root_dir, config_dir, fake_keyring, caplog, raw, expect):
+    with caplog.at_level(logging.WARNING, logger="swea_fetcher.config"):
+        s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_AI_WRONG_THRESHOLD=raw)
+    assert s.ai_wrong_threshold == expect and "SWEA_AI_WRONG_THRESHOLD" in caplog.text
+
+
+def test_review_days_clamped_and_invalid(root_dir, config_dir, fake_keyring, caplog):
+    with caplog.at_level(logging.WARNING, logger="swea_fetcher.config"):
+        assert _load_ai(root_dir, config_dir, fake_keyring, SWEA_REVIEW_DAYS="100").review_days == 30
+        assert _load_ai(root_dir, config_dir, fake_keyring, SWEA_REVIEW_DAYS="abc").review_days == 3
+    assert caplog.text.count("SWEA_REVIEW_DAYS") == 2
+
+
+def test_ai_engine_invalid_falls_back_to_auto(root_dir, config_dir, fake_keyring, caplog):
+    with caplog.at_level(logging.WARNING, logger="swea_fetcher.config"):
+        assert _load_ai(root_dir, config_dir, fake_keyring, SWEA_AI_ENGINE="gemini").ai_engine == "auto"
+    assert "SWEA_AI_ENGINE" in caplog.text

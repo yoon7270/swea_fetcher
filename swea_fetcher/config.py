@@ -1,6 +1,7 @@
 """설정 로드. 계정 정보는 프로젝트 밖 `~/.swea-fetch/.env` + Windows 자격 증명 관리자(keyring).
 
-.env 키: SWEA_ROOT (풀이 저장소 경로), SWEA_ID, 선택: SWEA_INPUT_NAME, SWEA_OUTPUT_NAME, SWEA_PYTHON(검증용 인터프리터), SWEA_EDITOR(auto|vscode|pycharm|default).
+.env 키: SWEA_ROOT (풀이 저장소 경로), SWEA_ID, 선택: SWEA_INPUT_NAME, SWEA_OUTPUT_NAME, SWEA_PYTHON(검증용 인터프리터), SWEA_EDITOR(auto|vscode|pycharm|default),
+SWEA_AI_ENGINE(auto|codex|claude), SWEA_AI_WRONG_THRESHOLD(1~20), SWEA_REVIEW_DAYS(1~30) (M17 AI 코치).
 비밀번호는 keyring 에 저장한다 (서비스 "swea-fetch", 사용자명 = SWEA_ID).
 결정 순서: 환경변수 SWEA_PW → .env 의 SWEA_PW (경고, 이관 권장) → keyring → 없으면 ConfigMissing.
 """
@@ -25,6 +26,7 @@ ENV_FILE_NAME = ".env"
 SESSION_FILE_NAME = "session.json"
 LOGIN_STATE_FILE_NAME = "login_state.json"
 CACHE_DIR_NAME = "cache"
+COACH_DIR_NAME = "coach"
 
 REQUIRED_KEYS = ("SWEA_ROOT", "SWEA_ID")  # SWEA_PW 는 별도 검사 (keyring)
 PASSWORD_KEY = "SWEA_PW"
@@ -47,6 +49,9 @@ class Settings:
     auto_push_on: frozenset = field(default_factory=frozenset)  # SWEA_AUTO_PUSH_ON: {"pass","check","save","watch"} (M11)
     editor: str = "auto"  # SWEA_EDITOR: "auto" | "vscode" | "pycharm" | "default" (M13)
     password_source: str = field(default="keyring", repr=False)  # "env" | "dotenv" | "keyring"
+    ai_engine: str = "auto"  # SWEA_AI_ENGINE: "auto" | "codex" | "claude" (M17)
+    ai_wrong_threshold: int = 3  # SWEA_AI_WRONG_THRESHOLD: 이 횟수 이상 오답이면 정답 풀이 제안 (M17)
+    review_days: int = 3  # SWEA_REVIEW_DAYS: 정답 풀이를 본 뒤 복습 권유까지의 일수 (M17)
 
     @property
     def session_file(self) -> Path:
@@ -55,6 +60,11 @@ class Settings:
     @property
     def login_state_file(self) -> Path:
         return self.config_dir / LOGIN_STATE_FILE_NAME
+
+    @property
+    def coach_dir(self) -> Path:
+        """AI 코치 기록 위치 (M17). 루트 폴더 밖 config_dir 아래 — GitHub 로 올라가지 않는다."""
+        return self.config_dir / COACH_DIR_NAME
 
     @property
     def cache_dir(self) -> Path:
@@ -166,6 +176,37 @@ def _editor_setting(raw: str) -> str:
     return value
 
 
+AI_ENGINE_CHOICES = ("auto", "codex", "claude")
+AI_WRONG_THRESHOLD_RANGE = (1, 20)
+REVIEW_DAYS_RANGE = (1, 30)
+
+
+def _ai_engine_setting(raw: str) -> str:
+    """SWEA_AI_ENGINE 파싱 (M17). 허용값 외는 auto + WARNING."""
+    value = (raw or "").strip().lower() or "auto"
+    if value not in AI_ENGINE_CHOICES:
+        log.warning("SWEA_AI_ENGINE 값이 올바르지 않습니다: %r — 'auto' 로 대체", raw)
+        return "auto"
+    return value
+
+
+def _int_setting(key: str, raw: str, default: int, bounds: tuple[int, int]) -> int:
+    """정수 설정 파싱 (M17). 숫자가 아니면 기본값 + WARNING, 범위 밖은 clamp + WARNING."""
+    text = (raw or "").strip()
+    if not text:
+        return default
+    try:
+        value = int(text)
+    except ValueError:
+        log.warning("%s 값이 올바르지 않습니다: %r — %d 로 대체", key, raw, default)
+        return default
+    lo, hi = bounds
+    if not lo <= value <= hi:
+        log.warning("%s 값이 범위(%d~%d)를 벗어났습니다: %d — 조정", key, lo, hi, value)
+        return max(lo, min(hi, value))
+    return value
+
+
 def _auto_push_settings(raw_on: str, raw_scope: str, raw_moments: str) -> dict:
     """SWEA_AUTO_PUSH / _SCOPE / _ON 을 파싱 (M11). 잘못된 값은 기본값 + WARNING.
 
@@ -249,5 +290,8 @@ def load_settings(config_dir: Path | None = None) -> Settings:
         commit_template=get("SWEA_COMMIT_TEMPLATE").strip() or Settings.commit_template,
         password_source=source,
         editor=_editor_setting(get("SWEA_EDITOR")),
+        ai_engine=_ai_engine_setting(get("SWEA_AI_ENGINE")),
+        ai_wrong_threshold=_int_setting("SWEA_AI_WRONG_THRESHOLD", get("SWEA_AI_WRONG_THRESHOLD"), 3, AI_WRONG_THRESHOLD_RANGE),
+        review_days=_int_setting("SWEA_REVIEW_DAYS", get("SWEA_REVIEW_DAYS"), 3, REVIEW_DAYS_RANGE),
         **_auto_push_settings(get("SWEA_AUTO_PUSH"), get("SWEA_AUTO_PUSH_SCOPE"), get("SWEA_AUTO_PUSH_ON")),
     )

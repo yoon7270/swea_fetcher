@@ -14,6 +14,10 @@ import pytest
 
 from swea_fetcher import errors, mcp_tools, service
 from swea_fetcher.errors import (
+    AiEngineMissing,
+    AiError,
+    AiRunFailed,
+    AiTimeout,
     AlreadyExists,
     AttachmentNotFound,
     CheckFailed,
@@ -140,6 +144,11 @@ ERR_CASES = [
     (GitError("git"), "git_error", False),
     (CheckFailed("chk"), "unsupported", False),
     (SubmitError("sub"), "unsupported", False),
+    # AI 코치(M17) 는 GUI 전용 — MCP 는 일반 SweaFetchError 경로 ("error")
+    (AiError("ai"), "error", False),
+    (AiEngineMissing("no engine"), "error", False),
+    (AiRunFailed("run"), "error", False),
+    (AiTimeout("slow"), "error", False),
     (RuntimeError("boom"), "internal_error", False),
 ]
 

@@ -120,9 +120,16 @@ class MainWindow(QMainWindow):
         self.autosync_badge.setCursor(Qt.CursorShape.PointingHandCursor)
         self.autosync_badge.hide()
         self.autosync_badge.clicked.connect(lambda: self.goto("settings"))
+        self.review_badge = QPushButton("")  # 복습할 문제 (M17 AI 코치): 클릭 → 최근 탭의 복습 카드
+        self.review_badge.setObjectName("ReviewBadge")
+        set_class(self.review_badge, "link")
+        self.review_badge.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.review_badge.hide()
+        self.review_badge.clicked.connect(lambda: self.goto("history"))
         sb = self.statusBar()
         sb.addWidget(self.status_login)
         sb.addWidget(self.autosync_badge)
+        sb.addWidget(self.review_badge)
         sb.addPermanentWidget(self.update_badge)
         sb.addPermanentWidget(self.status_root)
 
@@ -141,6 +148,9 @@ class MainWindow(QMainWindow):
         self.settings_page.settings_changed.connect(lambda: self.reload_settings(stay=True))
         self.settings_page.timeout_changed.connect(lambda _v: self.check_page.refresh_hint())
         self.history_page.check_requested.connect(self._goto_check)
+        self.history_page.reviews_changed.connect(self._refresh_review_badge)
+        self.check_page.coach_changed.connect(self._refresh_review_badge)
+        self.settings_page.coach_settings_changed.connect(self._reload_coach_settings)
         self.history_page.push_requested.connect(self._goto_push)
         self.history_page.submit_requested.connect(self._goto_submit)
         self.fetch_page.saved.connect(lambda _oc: self.history_page.refresh())
@@ -300,6 +310,7 @@ class MainWindow(QMainWindow):
             for p in (self.fetch_page, self.problem_page, self.check_page, self.history_page, self.settings_page):
                 p.set_settings(None)
             self._update_status()
+            self._refresh_review_badge()
             if not stay:
                 self.settings_page.show_first_run()
                 self.goto("settings")
@@ -309,6 +320,7 @@ class MainWindow(QMainWindow):
         if self.autosync is not None:
             self.autosync.configure(self.settings)
         self._update_status()
+        self._refresh_review_badge(startup=first_run)
         if first_run:
             key = str(self.qs.value("window/last_page_key", "fetch", type=str))
             row = next((i for i, (_l, k, _ic) in enumerate(PAGES) if k == key), 0)
@@ -319,6 +331,26 @@ class MainWindow(QMainWindow):
             self._back.clear()  # 시작 페이지 복원은 기록하지 않는다
             self._forward.clear()
         # stay=True (설정 페이지에서 저장): 자동 이동 없음 — 결과를 확인할 시간을 준다 (§4.1)
+
+    def _refresh_review_badge(self, startup: bool = False) -> None:
+        """도래한 복습 개수를 상태바 배지에 (파일 1개 읽기). 시작 시 있으면 임시 메시지도 (자정을 넘긴 경우는 다음 갱신 때 반영)."""
+        n = service.due_count(self.settings) if self.settings is not None else 0
+        self.review_badge.setText(f"복습 {n}개 ↗")
+        self.review_badge.setToolTip("클릭하면 최근 탭의 복습 목록으로 이동합니다")
+        self.review_badge.setVisible(n > 0)
+        if startup and n > 0:
+            self.flash(f"복습할 문제 {n}개가 있습니다 — 최근 탭에서 확인", 6000)
+
+    def _reload_coach_settings(self) -> None:
+        """AI 코치 설정(엔진·오답 기준·복습일)이 바뀜: 페이지 입력을 건드리지 않고 설정 객체만 교체한다."""
+        try:
+            self.settings = config.load_settings(self.config_dir)
+        except ConfigMissing:
+            return
+        for p in (self.check_page, self.history_page, self.settings_page):
+            p.settings = self.settings
+        self._refresh_review_badge()
+        self.history_page.refresh()  # 기록을 지웠다면 복습 카드도 사라져야 한다
 
     def _update_status(self) -> None:
         if self.settings is None:

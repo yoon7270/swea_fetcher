@@ -200,6 +200,22 @@ swea-fetch check IM_test 25730
 
 ![설정](docs/gui-screenshots/6-settings-doctor.png)
 
+### AI 코치 (GUI, 선택)
+
+제출 결과를 받은 직후 AI 의 도움을 받습니다. 이 PC 에 설치된 **Codex CLI**(우선) 또는 **Claude Code CLI** 를 호출하므로 API 키가 필요 없고 각자 구독을 씁니다. 두 CLI 모두 없으면 이 기능만 꺼져 있습니다 (설정 → AI 코치 → [연결 테스트]).
+
+| 상황 | 버튼 | 내용 |
+|---|---|---|
+| SWEA Pass | **코드 평가 받기** | 시간·공간 복잡도, 가독성, 개선점 |
+| 오답·시간초과·런타임 에러 (로컬 검증 실패 포함) | **힌트** (전구) | 방향 → 위치 → 수정 방향 3단계, 정답 코드는 보여주지 않음 |
+| 같은 문제 오답이 기준(기본 3회) 이상 | **정답 풀이 보기** | 설명 + 코드를 **화면에만** 표시 (`{번호}.py` 는 그대로), 본 뒤 기본 3일 뒤 복습 알림 |
+
+- **전송**: 버튼을 누를 때 1건씩만 보냅니다 (문제 번호·제목·지문 텍스트, 샘플 입출력 앞부분, 풀이 코드, 채점 요약). SWEA 아이디·비밀번호·세션·폴더 경로·그림은 보내지 않습니다. 엔진(Codex / Claude Code)별로 **처음 한 번 동의**를 받고, 설정에서 초기화할 수 있습니다. 지문은 SWEA 의 저작물이므로 개인 학습 용도로만 쓰세요
+- **공용 PC 주의**: Codex/Claude CLI 는 자체 세션 기록을 홈 폴더에 남길 수 있습니다 (앱이 지우지 않음). 앱의 AI 기록(`~/.swea-fetch/coach/`)은 `swea-fetch logout --all` 또는 설정의 [AI 기록 지우기] 로 지워집니다. 환경변수 `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` 가 있으면 CLI 가 구독 대신 API 과금으로 동작할 수 있어 설정 화면에 경고만 표시합니다
+- **집계 범위**: 오답 횟수는 이 앱(GUI/CLI)으로 제출한 채점 결과만 셉니다 (SWEA 서버 기록과 다를 수 있음). 컴파일 거부·횟수 소진 같은 제출 불가는 세지 않습니다
+- 설치: Codex CLI 는 `npm install -g @openai/codex` 후 `codex login`, Claude Code CLI 는 `npm install -g @anthropic-ai/claude-code` 후 `claude` 를 한 번 실행해 로그인 (공식 안내 기준으로 확인하세요). **설치한 뒤에는 앱을 다시 켜야** 합니다
+- 설정 `.env`: `SWEA_AI_ENGINE=auto|codex|claude`, `SWEA_AI_WRONG_THRESHOLD=3` (1~20), `SWEA_REVIEW_DAYS=3` (1~30) — 설정 페이지에서도 바꿉니다
+
 ---
 
 ## 번호로 못 찾는 문제
