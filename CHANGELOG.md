@@ -2,6 +2,11 @@
 
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/). 버전은 `swea_fetcher/__init__.py` 의 `__version__` 하나로 관리한다.
 
+## 미출시
+
+### 추가
+- 마우스 **뒤로/앞으로** 버튼과 Alt+←/→ 로 이전·다음 페이지 이동 (브라우저처럼, 최근 50개 기록)
+
 ## v0.9.0 — 2026-09-29 "MCP 서버"
 
 ### 추가

@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QObject, QSettings, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -40,6 +41,7 @@ PAGES = (
     ("설정", "settings", "nav-settings"),
 )
 APP_TITLE = "SWEA Fetch"
+NAV_HISTORY_MAX = 50  # 뒤로 가기 기록 상한
 UPDATE_CHECK_DELAY_MS = 1500  # 창이 뜬 뒤에 조회 (시작 속도에 영향 없게). app.main() 이 사용
 
 
@@ -153,8 +155,22 @@ class MainWindow(QMainWindow):
             QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self, activated=lambda i=i: self.nav.setCurrentRow(i))
         QShortcut(QKeySequence("Ctrl+,"), self, activated=lambda: self.goto("settings"))
 
+        # 뒤로/앞으로 (브라우저처럼): 마우스 옆 버튼 + Alt+←/→. 자식 위젯이 먼저 받아 먹지 않도록 앱 단위 필터로 잡는다
+        self._back: list[int] = []
+        self._forward: list[int] = []
+        self._cur_row: int | None = None
+        self._nav_by_history = False
+        QShortcut(QKeySequence("Alt+Left"), self, activated=self.go_back)
+        QShortcut(QKeySequence("Alt+Right"), self, activated=self.go_forward)
+        QApplication.instance().installEventFilter(self)
+
     def _page_changed(self, row: int) -> None:
         self.stack.setCurrentIndex(row)
+        if self._cur_row is not None and row != self._cur_row and not self._nav_by_history:
+            self._back.append(self._cur_row)
+            del self._back[:-NAV_HISTORY_MAX]
+            self._forward.clear()
+        self._cur_row = row
         # 행 번호는 내비 순서가 바뀌면 어긋나므로 key 로 저장한다 (옛 window/last_page 는 무시)
         self.qs.setValue("window/last_page_key", PAGES[row][1])
         if PAGES[row][1] == "history":
@@ -219,6 +235,35 @@ class MainWindow(QMainWindow):
             self._stmt_worker.deleteLater()
         self._stmt_worker = None
 
+    # --- 뒤로/앞으로 ------------------------------------------------------------------
+    def go_back(self) -> None:
+        self._step(self._back, self._forward)
+
+    def go_forward(self) -> None:
+        self._step(self._forward, self._back)
+
+    def _step(self, src: list[int], dst: list[int]) -> None:
+        if not src or self._cur_row is None:
+            return
+        dst.append(self._cur_row)
+        self._nav_by_history = True
+        try:
+            self.nav.setCurrentRow(src.pop())
+        finally:
+            self._nav_by_history = False
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        """이 창 안 어디서든 마우스 뒤로/앞으로 버튼 → 페이지 이동. 다이얼로그 등 다른 창은 건드리지 않는다."""
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and isinstance(obj, QWidget)
+            and obj.window() is self
+            and event.button() in (Qt.MouseButton.BackButton, Qt.MouseButton.ForwardButton)
+        ):
+            self.go_back() if event.button() == Qt.MouseButton.BackButton else self.go_forward()
+            return True
+        return super().eventFilter(obj, event)
+
     def goto(self, key: str) -> None:
         for i, (_label, k, _icon) in enumerate(PAGES):
             if k == key:
@@ -271,6 +316,8 @@ class MainWindow(QMainWindow):
                 row = 0  # 앱을 다시 켜면 문제 탭은 비어 있으므로 저장 탭으로
             self.nav.setCurrentRow(row)
             self.stack.setCurrentIndex(self.nav.currentRow())
+            self._back.clear()  # 시작 페이지 복원은 기록하지 않는다
+            self._forward.clear()
         # stay=True (설정 페이지에서 저장): 자동 이동 없음 — 결과를 확인할 시간을 준다 (§4.1)
 
     def _update_status(self) -> None:
@@ -327,6 +374,7 @@ class MainWindow(QMainWindow):
             self.move(screen.availableGeometry().center() - self.rect().center())
 
     def closeEvent(self, e) -> None:  # noqa: N802
+        QApplication.instance().removeEventFilter(self)
         self.qs.setValue("window/geometry", self.saveGeometry())
         if self.autosync is not None:
             self.autosync._timer.stop()

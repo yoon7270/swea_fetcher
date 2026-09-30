@@ -657,3 +657,65 @@ def test_settings_verify_after_failure_can_retry_with_new_password(main_window, 
     qtbot.waitUntil(lambda: sp._worker is None, timeout=WAIT)
     assert "로그인 확인 완료" in sp.banner.title.text()
     assert [c["method"] for c in good.calls] == ["GET", "POST"]
+
+
+# =============================================================================
+# 뒤로/앞으로 (마우스 옆 버튼 · Alt+←/→)
+# =============================================================================
+
+
+def _page_key(w):
+    from swea_fetcher.gui.main_window import PAGES
+
+    return PAGES[w.nav.currentRow()][1]
+
+
+def _mouse_side(w, target, button):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication
+
+    ev = QMouseEvent(QMouseEvent.Type.MouseButtonPress, QPointF(5, 5), QPointF(5, 5), button, button, Qt.KeyboardModifier.NoModifier)
+    return QApplication.sendEvent(target, ev)
+
+
+def test_back_forward_history(main_window):
+    w = main_window
+    w.goto("fetch")
+    w._back.clear()
+    w.goto("history")
+    w.goto("settings")
+    w.go_back()
+    assert _page_key(w) == "history"
+    w.go_back()
+    assert _page_key(w) == "fetch"
+    w.go_back()  # 더 없으면 그대로
+    assert _page_key(w) == "fetch"
+    w.go_forward()
+    assert _page_key(w) == "history"
+    w.goto("check")  # 새로 이동하면 앞으로 기록은 버린다
+    w.go_forward()
+    assert _page_key(w) == "check"
+    w.go_back()
+    assert _page_key(w) == "history"
+
+
+def test_mouse_side_buttons_navigate_from_child_widget(main_window, qtbot):
+    w = main_window
+    w.show()
+    w.goto("fetch")
+    w._back.clear()
+    w.goto("history")
+    _mouse_side(w, w.history_page.table.viewport(), Qt.MouseButton.BackButton)
+    assert _page_key(w) == "fetch"
+    _mouse_side(w, w.fetch_page.target, Qt.MouseButton.ForwardButton)
+    assert _page_key(w) == "history"
+
+
+def test_mouse_left_click_not_intercepted(main_window):
+    w = main_window
+    w.goto("fetch")
+    w._back.clear()
+    w.goto("history")
+    _mouse_side(w, w.history_page.table.viewport(), Qt.MouseButton.LeftButton)
+    assert _page_key(w) == "history" and w._back
