@@ -363,3 +363,44 @@ def test_which_falls_back_to_bundle_only_for_codex_on_windows(monkeypatch):
     monkeypatch.setattr(ai_engine.shutil, "which", lambda n: None)
     monkeypatch.setattr(ai_engine.sys, "platform", "linux")
     assert REAL_WHICH("codex") is None
+
+
+# --- M18: 둘 다 모드 ---------------------------------------------------------------------
+
+
+def test_labels_and_short_labels():
+    assert ai_engine.ENGINE_LABELS == {"codex": "GPT (Codex)", "claude": "Claude (Claude Code)"}
+    assert (ENGINE_CODEX.label, ENGINE_CODEX.short_label) == ("GPT (Codex)", "GPT")
+    assert (ENGINE_CLAUDE.label, ENGINE_CLAUDE.short_label) == ("Claude (Claude Code)", "Claude")
+
+
+def test_install_hint_uses_cli_names(monkeypatch):
+    _which_map(monkeypatch, {"claude": "C:/c/claude.exe"})
+    with pytest.raises(AiEngineMissing) as ei:
+        ai_engine.resolve("codex")
+    assert "Codex CLI" in str(ei.value) and "Claude Code CLI" in ei.value.hint
+
+
+def test_resolve_rejects_both():
+    with pytest.raises(ValueError):
+        ai_engine.resolve("both")
+
+
+def test_resolve_all_single_delegates(monkeypatch):
+    _which_map(monkeypatch, {"claude": "C:/c/claude.exe"})
+    sel = ai_engine.resolve_all("auto")
+    assert [e.name for e in sel.engines] == ["claude"] and sel.missing == []
+    with pytest.raises(AiEngineMissing):  # 고정 엔진 미설치는 폴백 없음
+        ai_engine.resolve_all("codex")
+
+
+def test_resolve_all_both(monkeypatch):
+    _which_map(monkeypatch, {"codex": "C:/c/codex.cmd", "claude": "C:/c/claude.exe"})
+    sel = ai_engine.resolve_all("both")
+    assert [e.name for e in sel.engines] == ["codex", "claude"] and sel.missing == []
+    _which_map(monkeypatch, {"claude": "C:/c/claude.exe"})
+    sel = ai_engine.resolve_all("both")
+    assert [e.name for e in sel.engines] == ["claude"] and sel.missing == ["codex"]
+    _which_map(monkeypatch, {})
+    with pytest.raises(AiEngineMissing):
+        ai_engine.resolve_all("both")

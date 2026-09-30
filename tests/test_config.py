@@ -338,3 +338,7 @@ def test_ai_engine_invalid_falls_back_to_auto(root_dir, config_dir, fake_keyring
     with caplog.at_level(logging.WARNING, logger="swea_fetcher.config"):
         assert _load_ai(root_dir, config_dir, fake_keyring, SWEA_AI_ENGINE="gemini").ai_engine == "auto"
     assert "SWEA_AI_ENGINE" in caplog.text
+
+
+def test_ai_engine_both_allowed(root_dir, config_dir, fake_keyring):
+    assert _load_ai(root_dir, config_dir, fake_keyring, SWEA_AI_ENGINE="Both").ai_engine == "both"

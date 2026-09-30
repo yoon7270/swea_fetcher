@@ -170,21 +170,26 @@ def test_never_raises(settings, monkeypatch):
 def test_answer_cache_roundtrip_and_hash_invalidation(settings):
     code = "print(1)\n"
     c = coach.load_answers(settings, 7, code)
-    c.hints = [{"level": 1, "markdown": "힌트1"}]
-    c.review = {"markdown": "평가"}
-    c.solution = {"markdown": "풀이"}
+    c.slot("codex").hints = [{"level": 1, "markdown": "힌트1"}]
+    c.slot("codex").review = {"markdown": "평가"}
+    c.slot("codex").solution = {"markdown": "풀이"}
+    c.slot("claude").hints = [{"level": 1, "markdown": "C힌트1"}]
+    c.slot("claude").solution = {"markdown": "C풀이"}
     assert coach.save_answers(settings, c)
+    assert json.loads((settings.coach_dir / coach.ANSWERS_DIR / "7.json").read_text(encoding="utf-8"))["version"] == 2
     same = coach.load_answers(settings, 7, "print(1)\r\n")  # 개행 정규화
-    assert same.hints[0]["markdown"] == "힌트1" and same.review["markdown"] == "평가"
-    changed = coach.load_answers(settings, 7, "print(2)\n")
-    assert changed.hints == [] and changed.review is None and changed.solution["markdown"] == "풀이"  # solution 은 유지
+    assert same.slot("codex").hints[0]["markdown"] == "힌트1" and same.slot("codex").review["markdown"] == "평가"
+    assert same.slot("claude").hints[0]["markdown"] == "C힌트1" and same.slot("claude").review is None  # 슬롯 독립
+    changed = coach.load_answers(settings, 7, "print(2)\n")  # 모든 슬롯의 hints/review 폐기, solution 유지
+    for key, sol in (("codex", "풀이"), ("claude", "C풀이")):
+        assert changed.slot(key).hints == [] and changed.slot(key).review is None and changed.slot(key).solution["markdown"] == sol
 
 
 def test_answer_cache_corrupt_ignored(settings):
     coach.save_answers(settings, coach.AnswerCache(7, coach.code_hash("x")))
     (settings.coach_dir / coach.ANSWERS_DIR / "7.json").write_text("garbage", encoding="utf-8")
     c = coach.load_answers(settings, 7, "x")
-    assert c.hints == [] and c.solution is None
+    assert c.slot("codex").hints == [] and c.slot("codex").solution is None
 
 
 def test_answer_cache_lru_prune(settings, monkeypatch):
@@ -205,3 +210,60 @@ def test_clear_removes_everything_and_counts(settings, config_dir):
     assert coach.clear(config_dir) == 2
     assert not settings.coach_dir.exists()
     assert coach.clear(config_dir) == 0
+
+
+# --- v1 -> v2 마이그레이션 ----------------------------------------------------------------
+
+
+def _write_v1(settings, num, raw):
+    d = settings.coach_dir / coach.ANSWERS_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"{num}.json"
+    raw = {"version": 1, "num": num, "code_sha256": coach.code_hash("x"), **raw}
+    path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _hint(level, engine, text="h"):
+    return {"level": level, "markdown": f"{text}{level}", "engine": engine, "at": "t"}
+
+
+def test_v1_migration_maps_engine_labels(settings):
+    path = _write_v1(settings, 5, {
+        "hints": [_hint(1, "Codex"), _hint(2, "Codex")],
+        "review": {"markdown": "평가", "engine": "Claude Code"},
+        "solution": {"markdown": "풀이", "engine": "Codex"},
+    })
+    before = path.read_bytes()
+    c = coach.load_answers(settings, 5, "x")
+    assert [h["level"] for h in c.slot("codex").hints] == [1, 2] and c.slot("codex").solution["markdown"] == "풀이"
+    assert c.slot("claude").review["markdown"] == "평가" and c.slot("claude").hints == []
+    assert path.read_bytes() == before  # 로드만으로는 파일이 바뀌지 않는다
+    assert coach.save_answers(settings, c)
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+
+
+def test_v1_migration_mixed_hints_keep_first_engine_only(settings):
+    _write_v1(settings, 5, {"hints": [_hint(1, "Claude Code"), _hint(2, "Codex"), _hint(3, "Claude Code")]})
+    c = coach.load_answers(settings, 5, "x")
+    assert [h["level"] for h in c.slot("claude").hints] == [1] and c.slot("codex").hints == []  # 3단계는 연속성이 깨져 절단
+
+
+def test_v1_migration_drops_unmapped_and_truncates_gaps(settings):
+    _write_v1(settings, 5, {
+        "hints": [_hint(1, "Codex"), _hint(3, "Codex")],
+        "review": {"markdown": "?", "engine": "Gemini"},
+        "solution": {"markdown": "?"},
+    })
+    c = coach.load_answers(settings, 5, "x")
+    assert [h["level"] for h in c.slot("codex").hints] == [1]
+    assert c.slot("codex").review is None and c.slot("claude").review is None
+    assert c.slot("codex").solution is None and c.slot("claude").solution is None
+    _write_v1(settings, 6, {"hints": [_hint(1, "??")]})
+    assert coach.load_answers(settings, 6, "x").engines == {}
+
+
+def test_v1_migration_code_change_drops_hints_keeps_solution(settings):
+    _write_v1(settings, 5, {"hints": [_hint(1, "Codex")], "solution": {"markdown": "풀이", "engine": "Codex"}})
+    c = coach.load_answers(settings, 5, "other code")
+    assert c.slot("codex").hints == [] and c.slot("codex").solution["markdown"] == "풀이"

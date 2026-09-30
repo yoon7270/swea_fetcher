@@ -6,7 +6,7 @@ import pytest
 
 from swea_fetcher import ai_engine, ai_prompts, coach, content_cache, service
 from swea_fetcher.ai_engine import AiResult, EngineInfo
-from swea_fetcher.errors import AiEngineMissing, AiRunFailed, NetworkError, SubmitError
+from swea_fetcher.errors import AiEngineMissing, AiRunFailed, AiTimeout, NetworkError, SubmitError
 from swea_fetcher.models import ProblemContent
 from swea_fetcher.submit import SubmitContext, SubmitResult
 
@@ -120,7 +120,7 @@ def test_engine_missing_fails_before_collecting(settings, problem, monkeypatch):
 def test_review_uses_cached_statement_and_caches(settings, problem, ai, cached_statement, no_fetch):
     ai["replies"] = ["## 총평\n좋아요"]
     a = service.ask_coach(settings, "review", "sim", NUM)
-    assert a.markdown.startswith("## 총평") and a.engine == "Codex" and not a.from_cache and a.notes == []
+    assert a.markdown.startswith("## 총평") and a.engine == "GPT (Codex)" and a.engine_key == "codex" and not a.from_cache and a.notes == []
     prompt = ai["calls"][0][0]
     assert "두 수를 더하세요" in prompt and "T = int(input())" in prompt and "1 2" in prompt and "#1 3" in prompt
     a2 = service.ask_coach(settings, "review", "sim", NUM)
@@ -199,7 +199,7 @@ def test_cancelled_result_is_not_cached(settings, problem, ai, cached_statement,
     monkeypatch.setattr(service.ai_engine, "run", lambda *a, **k: AiResult("", [], 0.1, cancelled=True))
     a = service.ask_coach(settings, "solution", "sim", NUM)
     assert a.cancelled and coach.get_record(settings, NUM) is None
-    assert coach.load_answers(settings, NUM, CODE).solution is None
+    assert coach.load_answers(settings, NUM, CODE).slot("codex").solution is None
 
 
 def test_cancel_before_engine_when_flag_set(settings, problem, ai, cached_statement, no_fetch):
@@ -262,3 +262,257 @@ def test_prompt_code_excludes_lines_removed_on_submit(monkeypatch, tmp_path):
     out = submit.strip_io_lines(src)
     assert "import sys" not in out and "open(" not in out
     assert "sys.stdin.readline" in out  # 제출이 거부되는 사용은 남겨 AI 가 지적하게 한다
+
+
+# --- M18: 둘 다 모드 (ask_coach_multi) ------------------------------------------------------
+
+CODEX = EngineInfo("codex", "C:/c/codex.cmd")
+CLAUDE = EngineInfo("claude", "C:/c/claude.exe")
+
+
+@pytest.fixture
+def dual(monkeypatch, settings):
+    """both 설정 + 엔진별 가짜 run. st["reply"][key] = 문자열 | 예외 | callable(engine, prompt, kw). st["calls"] = [(key, prompt)]."""
+    import threading
+
+    st = {"calls": [], "reply": {"codex": "GPT 응답", "claude": "Claude 응답"}, "found": [CODEX, CLAUDE], "lock": threading.Lock()}
+
+    def resolve_all(pref="auto"):
+        missing = [k for k in ("codex", "claude") if k not in [e.name for e in st["found"]]]
+        if not st["found"]:
+            raise AiEngineMissing("없음")
+        return ai_engine.EngineSelection(list(st["found"]), missing)
+
+    def run(engine, prompt, **kw):
+        with st["lock"]:
+            st["calls"].append((engine.name, prompt))
+        if kw.get("on_start"):
+            kw["on_start"](object())
+        reply = st["reply"][engine.name]
+        if callable(reply):
+            reply = reply(engine, prompt, kw)
+        if isinstance(reply, Exception):
+            raise reply
+        return AiResult(reply, [engine.name], 1.0 if engine.name == "codex" else 2.0)
+
+    monkeypatch.setattr(service.ai_engine, "resolve_all", resolve_all)
+    monkeypatch.setattr(service.ai_engine, "run", run)
+    st["called"] = lambda: sorted(k for k, _ in st["calls"])
+    return st
+
+
+def test_multi_runs_both_and_reports_in_completion_order(settings, problem, dual, cached_statement, no_fetch):
+    import threading
+
+    codex_may_finish = threading.Event()
+    seen_threads = []
+
+    def slow_codex(engine, prompt, kw):
+        assert codex_may_finish.wait(5)
+        return "GPT 늦은 답"
+
+    def fast_claude(engine, prompt, kw):
+        codex_may_finish.set()  # codex 가 이미 시작되어 있어야 (동시 기동) claude 도 여기 도달한다
+        return "Claude 빠른 답"
+
+    dual["reply"] = {"codex": slow_codex, "claude": fast_claude}
+    order = []
+    main = threading.current_thread()
+    res = service.ask_coach_multi(
+        settings, "review", "sim", NUM,
+        on_engine_done=lambda o: (order.append(o.engine), seen_threads.append(threading.current_thread())),
+    )
+    assert order == ["claude", "codex"] and all(t is main for t in seen_threads)
+    assert [o.engine for o in res.outcomes] == ["codex", "claude"]  # 결과는 codex, claude 순
+    assert [o.answer.engine for o in res.outcomes] == ["GPT (Codex)", "Claude (Claude Code)"]
+    assert len(res.succeeded) == 2 and not res.all_failed and not res.cancelled
+
+
+def test_multi_shares_material_and_prompts_are_clean(settings, problem, dual, monkeypatch):
+    fetches = []
+    monkeypatch.setattr(service, "_gather_statement", lambda *a, **k: (fetches.append(1) or "지문", "A+B", []))
+    service.ask_coach_multi(settings, "review", "sim", NUM)
+    assert len(fetches) == 1 and dual["called"]() == ["claude", "codex"]
+    for _key, prompt in dual["calls"]:
+        for secret in (settings.user_id, settings.password, str(settings.root), str(settings.config_dir)):
+            assert secret not in prompt
+    service.ask_coach_multi(settings, "review", "sim", NUM)  # 둘 다 캐시 적중 -> 수집도 호출도 없음
+    assert len(fetches) == 1 and len(dual["calls"]) == 2
+
+
+def test_multi_partial_failure_keeps_other_answer(settings, problem, dual, cached_statement, no_fetch):
+    dual["reply"]["claude"] = AiTimeout("Claude 응답이 300초를 넘어 중단했습니다", argv=["claude", "-p"])
+    res = service.ask_coach_multi(settings, "review", "sim", NUM)
+    codex, claude = res.outcomes
+    assert codex.answer.markdown == "GPT 응답" and codex.failure is None
+    assert claude.answer is None and claude.failure.code == "timeout" and claude.failure.argv == ["claude", "-p"]
+    assert not res.all_failed and [o.engine for o in res.succeeded] == ["codex"]
+    dual["reply"]["codex"] = RuntimeError("boom")  # 예상 밖 예외도 다른 엔진을 죽이지 않고 failed 로
+    dual["reply"]["claude"] = AiRunFailed("실패 (코드 1)", stderr="tail")
+    res = service.ask_coach_multi(settings, "solution", "sim", NUM)
+    assert res.all_failed and res.outcomes[0].failure.title.startswith("내부 오류") and res.outcomes[1].failure.stderr == "tail"
+
+
+def test_multi_missing_engine_slot(settings, problem, dual, cached_statement, no_fetch):
+    dual["found"] = [CLAUDE]
+    seen = []
+    res = service.ask_coach_multi(settings, "review", "sim", NUM, on_engine_done=seen.append)
+    assert dual["called"]() == ["claude"]
+    assert res.outcomes[0].failure.code == "missing" and "Codex CLI" in res.outcomes[0].failure.title
+    assert res.outcomes[1].answer is not None and seen[0].engine == "codex"  # 미설치 슬롯은 시작 직후
+    dual["found"] = []
+    with pytest.raises(AiEngineMissing):
+        service.ask_coach_multi(settings, "review", "sim", NUM)
+
+
+def test_multi_engines_subset(settings, problem, dual, cached_statement, no_fetch):
+    res = service.ask_coach_multi(settings, "review", "sim", NUM, engines=["claude"])
+    assert dual["called"]() == ["claude"] and [o.engine for o in res.outcomes] == ["claude"]
+
+
+def test_multi_per_engine_cache(settings, problem, dual, cached_statement, no_fetch):
+    service.ask_coach_multi(settings, "review", "sim", NUM, engines=["codex"])
+    dual["calls"].clear()
+    res = service.ask_coach_multi(settings, "review", "sim", NUM)
+    assert dual["called"]() == ["claude"]  # codex 는 캐시, claude 만 호출
+    assert res.outcomes[0].answer.from_cache and not res.outcomes[1].answer.from_cache
+    service.ask_coach_multi(settings, "review", "sim", NUM, engines=["claude"], force_new=True)
+    assert dual["called"]() == ["claude", "claude"]
+
+
+def _seed_hints(settings, **counts):
+    cache = coach.load_answers(settings, NUM, CODE)
+    for key, n in counts.items():
+        cache.slot(key).hints = [{"level": i, "markdown": f"{key}힌트{i}", "at": "t"} for i in range(1, n + 1)]
+    coach.save_answers(settings, cache)
+
+
+def test_multi_hint_common_level(settings, problem, dual, cached_statement, no_fetch):
+    _seed_hints(settings, codex=1)
+    res = service.ask_coach_multi(settings, "hint", "sim", NUM)
+    assert dual["called"]() == ["claude"]  # (A=1, B=0) -> L=1: A 는 캐시
+    a, b = (o.answer for o in res.outcomes)
+    assert a.from_cache and a.level == 1 and b.level == 1 and not b.from_cache
+    assert res.hint_done == 1
+    dual["calls"].clear()
+    res = service.ask_coach_multi(settings, "hint", "sim", NUM)  # (1,1) -> L=2, 둘 다 호출
+    assert dual["called"]() == ["claude", "codex"] and res.hint_done == 2
+    assert all(o.answer.level == 2 for o in res.outcomes)
+    # 엔진별 previous_hints 는 자기 힌트만
+    by_key = {k: p for k, p in dual["calls"]}
+    assert "codex힌트1" in by_key["codex"] and "claude힌트1" not in by_key["codex"]
+
+
+def test_multi_hint_ahead_engine_shows_prefix_only(settings, problem, dual, cached_statement, no_fetch):
+    _seed_hints(settings, codex=2, claude=1)
+    res = service.ask_coach_multi(settings, "hint", "sim", NUM)
+    assert dual["called"]() == ["claude"]  # L=2: codex 는 hints[:2] 캐시
+    assert res.outcomes[0].answer.from_cache and res.outcomes[0].answer.level == 2
+    _seed_hints(settings, codex=3, claude=3)
+    dual["calls"].clear()
+    res = service.ask_coach_multi(settings, "hint", "sim", NUM)
+    assert dual["calls"] == [] and all(o.answer.level == 3 and o.answer.from_cache for o in res.outcomes)
+
+
+def test_multi_hint_failed_engine_catches_up_next_click(settings, problem, dual, cached_statement, no_fetch):
+    dual["reply"]["claude"] = AiRunFailed("실패")
+    res = service.ask_coach_multi(settings, "hint", "sim", NUM)
+    assert res.hint_done == 0 and res.outcomes[0].answer.level == 1
+    dual["reply"]["claude"] = "Claude 응답"
+    dual["calls"].clear()
+    res = service.ask_coach_multi(settings, "hint", "sim", NUM)
+    assert dual["called"]() == ["claude"] and res.hint_done == 1  # 뒤처진 쪽만 호출 (L=1)
+
+
+def test_multi_hint_force_new_pops_target_engine_last_only(settings, problem, dual, cached_statement, no_fetch):
+    _seed_hints(settings, codex=2, claude=2)
+    res = service.ask_coach_multi(settings, "hint", "sim", NUM, force_new=True, engines=["claude"])
+    assert dual["called"]() == ["claude"] and res.outcomes[0].answer.level == 2
+    cache = coach.load_answers(settings, NUM, CODE)
+    assert [h["markdown"] for h in cache.slot("codex").hints] == ["codex힌트1", "codex힌트2"]
+    assert len(cache.slot("claude").hints) == 2 and cache.slot("claude").hints[0]["markdown"] == "claude힌트1"
+
+
+def test_multi_solution_marks_viewed_once(settings, problem, dual, cached_statement, no_fetch, monkeypatch):
+    calls = []
+    real = coach.mark_solution_viewed
+    monkeypatch.setattr(coach, "mark_solution_viewed", lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+    before = (problem / f"{NUM}.py").read_bytes()
+    for _ in range(3):
+        coach.record_submit(settings, NUM, "sim", "A+B", SubmitResult(False, "오답"))
+    dual["reply"] = {"codex": "## 정답 코드\n```python\nprint(1)\n```", "claude": "## 정답 코드\n```python\nprint(2)\n```"}
+    res = service.ask_coach_multi(settings, "solution", "sim", NUM)
+    assert len(calls) == 1 and res.review_due is not None
+    assert [o.answer.code for o in res.outcomes] == ["print(1)", "print(2)"]
+    assert all(o.answer.review_due == res.review_due for o in res.outcomes)
+    assert (problem / f"{NUM}.py").read_bytes() == before
+    # 한쪽만 성공해도 예약된다
+    calls.clear()
+    coach.dismiss_review(settings, NUM)
+    dual["reply"]["claude"] = AiRunFailed("실패")
+    res = service.ask_coach_multi(settings, "solution", "sim", NUM, force_new=True)
+    assert len(calls) == 1 and res.review_due is not None
+
+
+def test_multi_concurrent_saves_keep_both_slots(settings, problem, dual, cached_statement, no_fetch):
+    import threading
+
+    barrier = threading.Barrier(2, timeout=5)
+
+    def meet(engine, prompt, kw):
+        barrier.wait()  # 두 엔진이 거의 동시에 끝나 저장 경합을 만든다
+        return f"{engine.name} 답"
+
+    dual["reply"] = {"codex": meet, "claude": meet}
+    service.ask_coach_multi(settings, "review", "sim", NUM)
+    cache = coach.load_answers(settings, NUM, CODE)
+    assert cache.slot("codex").review["markdown"] == "codex 답" and cache.slot("claude").review["markdown"] == "claude 답"
+
+
+def test_multi_cancel(settings, problem, dual, cached_statement, no_fetch):
+    res = service.ask_coach_multi(settings, "review", "sim", NUM, is_cancelled=lambda: True)
+    assert res.cancelled and dual["calls"] == []
+    assert all(o.cancelled for o in res.outcomes)
+    # 실행 중 취소: run 이 cancelled 를 돌려주면 캐시하지 않고 다른 쪽 결과는 유지
+    state = {"cancel": False}
+
+    def codex(engine, prompt, kw):
+        state["cancel"] = True
+        return "GPT 답"
+
+    dual["reply"]["codex"] = codex
+    dual["reply"]["claude"] = lambda e, p, kw: (_ for _ in ()).throw(AiRunFailed("x"))
+    res = service.ask_coach_multi(settings, "review", "sim", NUM, is_cancelled=lambda: state["cancel"])
+    assert res.cancelled and coach.load_answers(settings, NUM, CODE).slot("codex").review is None
+
+
+def test_multi_on_start_gets_engine_key(settings, problem, dual, cached_statement, no_fetch):
+    keys = []
+    service.ask_coach_multi(settings, "review", "sim", NUM, on_start=lambda key, proc: keys.append(key))
+    assert sorted(keys) == ["claude", "codex"]
+
+
+def test_multi_ping_parallel_partial(settings, dual):
+    dual["reply"]["claude"] = AiRunFailed("실패 (코드 2)", hint="h", argv=["claude", "-p", "--bogus"])
+    res = service.ask_coach_multi(settings, "ping")
+    assert res.outcomes[0].answer.markdown == "GPT 응답" and res.outcomes[0].answer.kind == "ping"
+    f = res.outcomes[1].failure
+    assert f.code == "failed" and "claude -p --bogus" in f.hint
+    assert dual["called"]() == ["claude", "codex"]
+
+
+def test_ask_coach_wrapper_with_both_uses_first_installed(settings, problem, dual, cached_statement, no_fetch):
+    a = service.ask_coach(settings, "review", "sim", NUM)
+    assert a.engine_key == "codex" and dual["called"]() == ["codex"]
+    dual["found"] = [CLAUDE]
+    a = service.ask_coach(settings, "review", "sim", NUM)
+    assert a.engine_key == "claude"
+
+
+def test_hint_level_is_min_of_target_engines(settings, problem, dual):
+    _seed_hints(settings, codex=2, claude=1)
+    assert service.hint_level(settings, "sim", NUM) == 1
+    dual["found"] = [CODEX]
+    assert service.hint_level(settings, "sim", NUM) == 2  # 미설치 엔진은 제외
+    dual["found"] = []
+    assert service.hint_level(settings, "sim", NUM) == 0

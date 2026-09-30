@@ -26,7 +26,9 @@ ANSWERS_DIR = "answers"
 MAX_PROBLEMS = 500
 MAX_ANSWER_FILES = 50
 MAX_HINTS = 3
-_VERSION = 1
+_VERSION = 1  # records.json
+_ANSWERS_VERSION = 2  # answers/{num}.json: 엔진별 슬롯 (M18)
+ENGINE_KEYS = ("codex", "claude")
 
 
 @dataclass
@@ -60,14 +62,25 @@ class ReviewItem:
 
 
 @dataclass
+class EngineSlot:
+    """엔진 1개분 응답 캐시."""
+
+    hints: list[dict] = field(default_factory=list)  # [{"level", "markdown", "at"}]
+    review: dict | None = None
+    solution: dict | None = None
+
+
+@dataclass
 class AnswerCache:
-    """문제 1건의 AI 응답 캐시. hints/review 는 코드 해시가 다르면 폐기, solution 은 유지."""
+    """문제 1건의 AI 응답 캐시 (엔진별 슬롯). hints/review 는 코드 해시가 다르면 모든 슬롯에서 폐기, solution 은 유지."""
 
     num: int
     code_sha256: str = ""
-    hints: list[dict] = field(default_factory=list)  # [{"level", "markdown", "engine", "at"}]
-    review: dict | None = None
-    solution: dict | None = None
+    engines: dict[str, EngineSlot] = field(default_factory=dict)
+
+    def slot(self, key: str) -> EngineSlot:
+        """엔진 슬롯 (없으면 생성)."""
+        return self.engines.setdefault(key, EngineSlot())
 
 
 # --- 경로 / 입출력 ------------------------------------------------------------------------
@@ -305,40 +318,89 @@ def _answer_path(settings: Settings, num: int) -> Path:
     return settings.coach_dir / ANSWERS_DIR / f"{int(num)}.json"
 
 
+def _slot_from_raw(raw) -> EngineSlot:
+    if not isinstance(raw, dict):
+        return EngineSlot()
+    return EngineSlot(
+        [h for h in (raw.get("hints") or []) if isinstance(h, dict) and "markdown" in h][:MAX_HINTS],
+        raw.get("review") if isinstance(raw.get("review"), dict) else None,
+        raw.get("solution") if isinstance(raw.get("solution"), dict) else None,
+    )
+
+
+def _engine_key_of(label) -> str | None:
+    """v1 엔트리의 표시 이름("Codex" / "Claude Code") → 엔진 키. 매핑 불가면 None."""
+    text = str(label or "").lower()
+    if "codex" in text or "gpt" in text:
+        return "codex"
+    if "claude" in text:
+        return "claude"
+    return None
+
+
+def _migrate_v1(raw: dict) -> dict[str, EngineSlot]:
+    """v1(엔진 무관 hints/review/solution + 엔트리별 engine 라벨) → 엔진별 슬롯. 메모리상 변환만 한다 (파일은 다음 저장 때 v2)."""
+    slots: dict[str, EngineSlot] = {}
+    for name in ("review", "solution"):
+        entry = raw.get(name)
+        if not isinstance(entry, dict):
+            continue
+        key = _engine_key_of(entry.get("engine"))
+        if key is None:
+            log.debug("v1 캐시 %s 의 엔진을 알 수 없어 버립니다", name)
+            continue
+        setattr(slots.setdefault(key, EngineSlot()), name, entry)
+    hints = [h for h in (raw.get("hints") or []) if isinstance(h, dict) and "markdown" in h]
+    first = _engine_key_of(hints[0].get("engine")) if hints else None
+    if first is not None:
+        kept = []
+        for h in hints:
+            if _engine_key_of(h.get("engine")) != first:
+                continue  # 엔진을 바꿔 가며 받은 힌트는 단계 연속성이 깨지므로 버린다
+            if h.get("level") != len(kept) + 1:
+                break  # 1..k 연속 구간까지만
+            kept.append(h)
+        if kept:
+            slots.setdefault(first, EngineSlot()).hints = kept[:MAX_HINTS]
+    elif hints:
+        log.debug("v1 캐시 힌트의 엔진을 알 수 없어 버립니다")
+    return slots
+
+
 def load_answers(settings: Settings, num: int, code: str) -> AnswerCache:
-    """응답 캐시 읽기. 없거나 손상되면 빈 캐시. 코드가 바뀌었으면 hints/review 는 버린다 (solution 은 유지)."""
+    """응답 캐시 읽기. 없거나 손상되면 빈 캐시. 코드가 바뀌었으면 모든 슬롯의 hints/review 는 버린다 (solution 은 유지).
+
+    v1 파일은 메모리에서만 v2 로 변환한다 (로드 시 쓰기 금지).
+    """
     digest = code_hash(code)
     path = _answer_path(settings, num)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        cache = AnswerCache(
-            int(raw["num"]),
-            str(raw.get("code_sha256") or ""),
-            [h for h in (raw.get("hints") or []) if isinstance(h, dict) and "markdown" in h][:MAX_HINTS],
-            raw.get("review") if isinstance(raw.get("review"), dict) else None,
-            raw.get("solution") if isinstance(raw.get("solution"), dict) else None,
-        )
+        if int(raw.get("version") or 1) >= 2:
+            engines = {str(k): _slot_from_raw(v) for k, v in (raw.get("engines") or {}).items() if k in ENGINE_KEYS}
+        else:
+            engines = _migrate_v1(raw)
+        cache = AnswerCache(int(raw["num"]), str(raw.get("code_sha256") or ""), engines)
     except FileNotFoundError:
         return AnswerCache(int(num), digest)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         log.warning("AI 응답 캐시가 손상되어 무시합니다 (%s): %s", path.name, e)
         return AnswerCache(int(num), digest)
     if cache.code_sha256 != digest:
-        cache.hints, cache.review, cache.code_sha256 = [], None, digest
+        for slot in cache.engines.values():
+            slot.hints, slot.review = [], None
+        cache.code_sha256 = digest
     return cache
 
 
 def save_answers(settings: Settings, cache: AnswerCache) -> bool:
-    """응답 캐시 기록 (최근 50문제, mtime LRU). 거부·실패면 False, 예외 없음."""
+    """응답 캐시 기록 (v2, 최근 50문제, mtime LRU). 거부·실패면 False, 예외 없음."""
     if not _writable(settings):
         return False
     path = _answer_path(settings, cache.num)
     try:
-        _atomic_write(
-            path,
-            {"version": _VERSION, "num": cache.num, "code_sha256": cache.code_sha256, "hints": cache.hints[:MAX_HINTS],
-             "review": cache.review, "solution": cache.solution},
-        )
+        engines = {k: {"hints": v.hints[:MAX_HINTS], "review": v.review, "solution": v.solution} for k, v in cache.engines.items()}
+        _atomic_write(path, {"version": _ANSWERS_VERSION, "num": cache.num, "code_sha256": cache.code_sha256, "engines": engines})
         _prune_answers(path.parent)
     except OSError as e:
         log.warning("AI 응답 캐시 기록 실패: %s", e)

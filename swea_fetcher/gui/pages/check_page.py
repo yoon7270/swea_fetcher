@@ -60,8 +60,10 @@ class CheckPage(QWidget):
         self._coach_mode: str | None = None  # 코치 바 상태: "pass" | "wrong" | "local" (로컬 검증 실패) | None
         self._coach_judge: tuple[str, str, str | None] = ("", "", None)  # 힌트 프롬프트용 (채점 요약, run_error, 실행 시간)
         self._coach_kind = "review"  # 마지막으로 표시한 응답 종류 ([다시 받기] 대상)
-        self._coach_code = ""  # 마지막 정답 코드 ([코드 복사])
-        self._last_coach_request: tuple[str, bool] | None = None
+        self._coach_code: dict[str, str] = {}  # 엔진별 마지막 정답 코드 ([코드 복사])
+        self._coach_single = False  # 이번 요청의 대상이 엔진 1개 (전체 실패 시 탭을 지우고 배너로 알린다)
+        self._coach_only: str | None = None  # 개별 재요청이면 대상 엔진 키
+        self._last_coach_request: tuple[str, bool, str | None] | None = None  # (종류, force_new, only)
         self.setAcceptDrops(True)
         self._build()
 
@@ -185,7 +187,8 @@ class CheckPage(QWidget):
         self.coach_bar.solution_clicked.connect(lambda: self.request_coach("solution"))
         self.coach_bar.later_clicked.connect(self._coach_later)
         self.coach_tab.cancel_clicked.connect(self.cancel_coach)
-        self.coach_tab.retry_clicked.connect(lambda: self.request_coach(self._coach_kind, force_new=True))
+        self.coach_tab.retry_clicked.connect(lambda key, force_new: self.request_coach(self._coach_kind, force_new=force_new, only=key))
+        self.coach_tab.settings_requested.connect(lambda: self.goto_requested.emit("settings"))
         self.coach_tab.copy_clicked.connect(self._copy_coach_code)
         self.num.textEdited.connect(lambda _t: self._clear_invalid())
         self.topic.lineEdit().textEdited.connect(lambda _t: self._clear_invalid())
@@ -669,6 +672,11 @@ class CheckPage(QWidget):
                 local=self._coach_mode == "local",
                 solution_viewed=bool(rec and rec.solution_viewed_at),
             )
+        try:  # 대상 엔진이 2개(둘 다 모드)면 동시 요청·사용량 2배 고지 (경로 확인뿐이라 UI 스레드 허용)
+            sel = service.resolve_engines(self.settings)
+            self.coach_bar.set_dual([e.short_label for e in sel.engines] if len(sel.engines) >= 2 else None)
+        except AiError:
+            self.coach_bar.set_dual(None)
         self.coach_bar.set_requesting(self._coach_worker is not None)
 
     def _coach_later(self) -> None:
@@ -676,41 +684,58 @@ class CheckPage(QWidget):
             service.dismiss_offer(self.settings, self._last_target[1])
         self._refresh_coach_bar()
 
-    def request_coach(self, kind: str, force_new: bool = False) -> None:
-        """코치 버튼 → 엔진 확인 → (첫 사용이면) 동의 → CoachWorker. 클릭 없이는 어떤 AI 프로세스도 뜨지 않는다."""
+    def request_coach(self, kind: str, force_new: bool = False, only: str | None = None) -> None:
+        """코치 버튼 → 엔진 확인 → (첫 사용이면) 동의 1회 → CoachWorker. 클릭 없이는 어떤 AI 프로세스도 뜨지 않는다.
+
+        only: 개별 [다시 받기]/[다시 시도] — 그 엔진만 재요청하고 다른 패널은 유지한다 (M18).
+        """
         if self._coach_worker is not None or self.settings is None or self._last_target is None:
             return
         topic, num = self._last_target
         try:
-            engine = service.resolve_engine(self.settings)
+            sel = service.resolve_engines(self.settings)
         except AiError as e:
             self._show_ai_error(e.code, str(e), e.hint)
             return
-        if not has_consent(self.qs, engine.name):
-            if not ask_consent(self, engine.label):
+        engines = [e for e in sel.engines if only in (None, e.name)]
+        missing = [k for k in sel.missing if only in (None, k)]
+        if not engines and not missing:
+            return
+        need = [e for e in engines if not has_consent(self.qs, e.name)]  # 미동의 엔진을 한 다이얼로그에 모은다
+        if need:
+            if not ask_consent(self, [e.label for e in need], dual=len(engines) >= 2):
                 return
-            set_consent(self.qs, engine.name)
-        self._last_coach_request = (kind, force_new)
+            for e in need:
+                set_consent(self.qs, e.name)
+        self._last_coach_request = (kind, force_new, only)
+        self._coach_only = only
+        self._coach_single = only is None and len(sel.engines) + len(sel.missing) == 1
+        if only is None:
+            self._coach_code = {}
+        else:
+            self._coach_code.pop(only, None)
         summary, run_error, exec_time = self._coach_judge
         self.banner.hide()
         self._coach_kind = kind
+        extra = {"engines": [only]} if only else {}
         self._coach_worker = CoachWorker(
             self.settings, kind, topic, num, self,
-            submit_summary=summary, run_error=run_error, execution_time=exec_time, force_new=force_new,
+            submit_summary=summary, run_error=run_error, execution_time=exec_time, force_new=force_new, **extra,
         )
         w = self._coach_worker
         w.progress.connect(self.status_message)
+        w.engine_done.connect(self._on_coach_engine_done)
         w.finished_ok.connect(self._on_coach_done)
         w.ai_failed.connect(self._on_coach_ai_failed)
         w.failed.connect(self._on_coach_failed)
         w.finished.connect(self._coach_cleanup)
         self.coach_bar.set_requesting(True)
-        self.coach_tab.set_busy(True)
         if self.tabs.indexOf(self.coach_tab) < 0:
             self.tabs.addTab(self.coach_tab, "AI 코치")
         self.tabs.setCurrentWidget(self.coach_tab)
         self.stack.setCurrentIndex(1)  # 제출만 하고 로컬 실행이 없으면 결과 영역이 빈 상태에 머무르므로
-        self.coach_tab.show_loading(engine.label)
+        self.coach_tab.begin(engines, missing, only, kind, num)
+        self.coach_tab.set_busy(True)
         self._sync_busy()
         self.busy_changed.emit(True, "AI 코치 응답 대기 중…")
         w.start()
@@ -734,30 +759,70 @@ class CheckPage(QWidget):
         if idx >= 0:
             self.tabs.removeTab(idx)
 
-    def _on_coach_done(self, answer) -> None:
-        if answer is None or answer.cancelled:
-            self._remove_coach_tab()
+    def _on_coach_engine_done(self, outcome) -> None:
+        """엔진 하나의 결과 (먼저 끝난 쪽부터). 해당 패널만 채운다."""
+        num = self._last_target[1] if self._last_target else 0
+        if outcome.answer is not None:
+            self._coach_code[outcome.engine] = outcome.answer.code
+        self.coach_tab.apply_outcome(outcome, num)
+
+    def _on_coach_done(self, result) -> None:
+        if result is None or result.cancelled:
+            if result is not None and self.coach_tab.has_answers():
+                self.coach_tab.cancel_loading()  # 이미 표시된 답은 유지, 로딩 중이던 패널만 "취소했습니다"
+            else:
+                self._remove_coach_tab()
             self.banner.show_message("info", "요청을 취소했습니다", "AI 에게 보낸 요청을 중단했습니다")
             self.status_message.emit("AI 요청 취소됨")
             return
-        num = self._last_target[1] if self._last_target else 0
-        self._coach_code = answer.code
-        self.coach_tab.show_answer(answer, num)
+        if result.all_failed:
+            if self._coach_single:  # 단일 대상은 기존처럼 탭을 지우고 배너로
+                f = result.outcomes[0].failure
+                self._remove_coach_tab()
+                self._show_ai_error(f.code, f.title, f.hint)
+                return
+            if self._coach_only is None:  # 둘 다 실패: 패널마다 인라인 오류는 유지하고 요약 배너만
+                actions = [("coach-retry", "다시 시도")]
+                self.banner.show_message("error", "두 엔진 모두 응답하지 못했습니다", "각 패널의 오류 내용을 확인하세요", actions)
+            self.status_message.emit("AI 코치 응답 실패")
+            return
         self.tabs.setCurrentWidget(self.coach_tab)
-        if answer.kind == "hint":
-            self.coach_bar.set_hint_done(answer.level)
-        elif answer.kind == "solution":
+        if result.kind == "hint":
+            self.coach_bar.set_hint_done(result.hint_done)
+        elif result.kind == "solution":
+            self.coach_tab.show_review_due(result.review_due)
             self.coach_changed.emit()  # 복습 예약 → 메인이 복습 배지 갱신
             self._refresh_coach_bar()
-        self.status_message.emit(f"AI 코치 응답 ({answer.engine}{', 캐시' if answer.from_cache else ''})")
+        self.status_message.emit(self._coach_flash(result))
+
+    @staticmethod
+    def _coach_flash(result) -> str:
+        """상태바 문구: 단일은 "AI 코치 응답 (엔진, 캐시)", 둘 다는 엔진별 소요 시간/실패."""
+        if len(result.outcomes) == 1:
+            a = result.outcomes[0].answer
+            return f"AI 코치 응답 ({a.engine}{', 캐시' if a.from_cache else ''})"
+        parts = []
+        for o in result.outcomes:
+            if o.answer is not None:
+                parts.append(f"{o.label} " + ("캐시" if o.answer.from_cache else f"{o.answer.elapsed:.1f}초"))
+            else:
+                parts.append(f"{o.label} 실패")
+        return "AI 코치 응답 — " + " · ".join(parts)
 
     def _on_coach_ai_failed(self, code: str, title: str, hint: str) -> None:
-        self._remove_coach_tab()
+        self._coach_request_failed(code, title, hint)
         self._show_ai_error(code, title, hint)
 
     def _on_coach_failed(self, title: str, hint: str, detail: str) -> None:
-        self._remove_coach_tab()
+        self._coach_request_failed("failed", title, hint or detail[-400:])
         self.banner.show_message("error", title, hint or detail[-400:])
+
+    def _coach_request_failed(self, code: str, title: str, hint: str) -> None:
+        """요청 전체가 시작하지 못함. 개별 재요청이고 다른 답이 있으면 탭을 지우지 않고 그 패널에 인라인 오류를 남긴다."""
+        if self._coach_only is not None and self.coach_tab.has_answers():
+            self.coach_tab.fail_loading(service.CoachFailure(code, title, hint))
+        else:
+            self._remove_coach_tab()
 
     def _show_ai_error(self, code: str, title: str, hint: str) -> None:
         """AiError → 배너 (design-spec §9): 엔진 없음 = warning + [설정으로 이동], 그 외 = error + [다시 시도]."""
@@ -767,7 +832,8 @@ class CheckPage(QWidget):
             actions = [("coach-retry", "다시 시도")] if self._last_coach_request is not None else None
             self.banner.show_message("error", title, hint, actions)
 
-    def _copy_coach_code(self) -> None:
-        if self._coach_code:
-            QGuiApplication.clipboard().setText(self._coach_code)
+    def _copy_coach_code(self, key: str) -> None:
+        code = self._coach_code.get(key, "")
+        if code:
+            QGuiApplication.clipboard().setText(code)
             self.status_message.emit("정답 코드를 복사했습니다 (파일로는 저장되지 않습니다)")

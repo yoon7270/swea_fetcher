@@ -1,7 +1,7 @@
 """설정 로드. 계정 정보는 프로젝트 밖 `~/.swea-fetch/.env` + Windows 자격 증명 관리자(keyring).
 
 .env 키: SWEA_ROOT (풀이 저장소 경로), SWEA_ID, 선택: SWEA_INPUT_NAME, SWEA_OUTPUT_NAME, SWEA_PYTHON(검증용 인터프리터), SWEA_EDITOR(auto|vscode|pycharm|default),
-SWEA_AI_ENGINE(auto|codex|claude), SWEA_AI_WRONG_THRESHOLD(1~20), SWEA_REVIEW_DAYS(1~30) (M17 AI 코치).
+SWEA_AI_ENGINE(auto|codex|claude|both), SWEA_AI_WRONG_THRESHOLD(1~20), SWEA_REVIEW_DAYS(1~30) (M17 AI 코치).
 비밀번호는 keyring 에 저장한다 (서비스 "swea-fetch", 사용자명 = SWEA_ID).
 결정 순서: 환경변수 SWEA_PW → .env 의 SWEA_PW (경고, 이관 권장) → keyring → 없으면 ConfigMissing.
 """
@@ -49,7 +49,7 @@ class Settings:
     auto_push_on: frozenset = field(default_factory=frozenset)  # SWEA_AUTO_PUSH_ON: {"pass","check","save","watch"} (M11)
     editor: str = "auto"  # SWEA_EDITOR: "auto" | "vscode" | "pycharm" | "default" (M13)
     password_source: str = field(default="keyring", repr=False)  # "env" | "dotenv" | "keyring"
-    ai_engine: str = "auto"  # SWEA_AI_ENGINE: "auto" | "codex" | "claude" (M17)
+    ai_engine: str = "auto"  # SWEA_AI_ENGINE: "auto" | "codex" | "claude" | "both" (M17, both=M18)
     ai_wrong_threshold: int = 3  # SWEA_AI_WRONG_THRESHOLD: 이 횟수 이상 오답이면 정답 풀이 제안 (M17)
     review_days: int = 3  # SWEA_REVIEW_DAYS: 정답 풀이를 본 뒤 복습 권유까지의 일수 (M17)
 
@@ -176,7 +176,7 @@ def _editor_setting(raw: str) -> str:
     return value
 
 
-AI_ENGINE_CHOICES = ("auto", "codex", "claude")
+AI_ENGINE_CHOICES = ("auto", "codex", "claude", "both")  # both: GPT 와 Claude 동시 요청 (M18)
 AI_WRONG_THRESHOLD_RANGE = (1, 20)
 REVIEW_DAYS_RANGE = (1, 30)
 

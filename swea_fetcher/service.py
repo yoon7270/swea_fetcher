@@ -20,10 +20,12 @@ import json
 import difflib
 import logging
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 
 from . import ai_engine, ai_prompts, auth, client, coach, config, content_cache, gitops, lookup, parser, storage, submit
 from .config import Settings
@@ -657,7 +659,8 @@ def logout(config_dir: Path, all_: bool = False) -> list[str]:
 class CoachAnswer:
     kind: str  # review | hint | solution | ping
     markdown: str  # hint 는 1..n 단계 합본 (누적 표시용)
-    engine: str = ""  # 표시용 엔진 이름 (Codex / Claude Code)
+    engine: str = ""  # 표시용 엔진 이름 (GPT (Codex) / Claude (Claude Code))
+    engine_key: str = ""  # "codex" | "claude"
     level: int = 0  # hint 단계 (그 외 0)
     max_level: int = 0
     from_cache: bool = False
@@ -666,6 +669,50 @@ class CoachAnswer:
     review_due: date | None = None  # solution 후 복습 예정일
     elapsed: float = 0.0
     code: str = ""  # solution: 정답 코드 블록 ([복사] 용, 없으면 "")
+
+
+@dataclass
+class CoachFailure:
+    """엔진 1개의 실패 (부분 실패를 예외 없이 결과에 담는다)."""
+
+    code: str  # missing | failed | timeout
+    title: str
+    hint: str = ""
+    stderr: str = ""
+    argv: list[str] = field(default_factory=list)
+
+
+@dataclass
+class EngineOutcome:
+    """엔진 1개의 결과: answer 또는 failure (또는 취소)."""
+
+    engine: str  # 키
+    label: str
+    answer: CoachAnswer | None = None
+    failure: CoachFailure | None = None
+    cancelled: bool = False
+    error: Exception | None = field(default=None, repr=False, compare=False)  # 원본 예외 (ask_coach 래퍼가 재발생)
+
+
+@dataclass
+class CoachResult:
+    kind: str
+    outcomes: list[EngineOutcome] = field(default_factory=list)  # codex, claude 순 (실행 대상 + 미설치)
+    hint_done: int = 0  # 요청 후 대상 엔진들의 받은 힌트 단계 수 중 최소 (코치 바용)
+    review_due: date | None = None  # solution 성공 시 복습 예정일
+
+    @property
+    def cancelled(self) -> bool:
+        return any(o.cancelled for o in self.outcomes)
+
+    @property
+    def succeeded(self) -> list[EngineOutcome]:
+        return [o for o in self.outcomes if o.answer is not None and not o.cancelled]
+
+    @property
+    def all_failed(self) -> bool:
+        """답이 하나도 없고 취소도 아닌 경우 (전부 실패·미설치)."""
+        return bool(self.outcomes) and not self.cancelled and not self.succeeded
 
 
 @dataclass
@@ -680,8 +727,13 @@ def detect_engines(settings: Settings | None = None) -> EngineStatus:
 
 
 def resolve_engine(settings: Settings) -> ai_engine.EngineInfo:
-    """설정(auto/codex/claude)에 따른 엔진. 경로 존재만 확인 (프로세스 기동 없음). 없으면 AiEngineMissing."""
+    """단일 모드(auto/codex/claude) 전용 엔진. both 면 ValueError — GUI 는 resolve_engines 를 쓴다."""
     return ai_engine.resolve(settings.ai_engine)
+
+
+def resolve_engines(settings: Settings) -> ai_engine.EngineSelection:
+    """설정(auto/codex/claude/both)에 따른 실행 대상 엔진. 경로 존재만 확인 (프로세스 기동 없음). 하나도 없으면 AiEngineMissing."""
+    return ai_engine.resolve_all(settings.ai_engine)
 
 
 def get_coach_record(settings: Settings, num: int) -> coach.ProblemRecord | None:
@@ -689,10 +741,12 @@ def get_coach_record(settings: Settings, num: int) -> coach.ProblemRecord | None
 
 
 def hint_level(settings: Settings, topic: str, num: int) -> int:
-    """현재 풀이 코드 기준 이미 받은 힌트 단계 수 (0~3). 파일을 읽지 못하면 0."""
+    """현재 풀이 코드 기준 대상 엔진들이 받은 힌트 단계 수 중 최소 (0~3). 엔진이 없거나 파일을 읽지 못하면 0."""
     try:
+        keys = [e.name for e in resolve_engines(settings).engines]
         code = submit.read_solution(storage.resolve_problem_dir(settings.root, topic, num), num)
-        return len(coach.load_answers(settings, num, code).hints)
+        cache = coach.load_answers(settings, num, code)
+        return min(len(cache.slot(k).hints) for k in keys)
     except (SweaFetchError, ValueError, OSError):
         return 0
 
@@ -752,6 +806,221 @@ def _merge_hints(hints: list[dict]) -> str:
     )
 
 
+
+
+_CACHE_LOCK = threading.Lock()  # 응답 캐시 read-modify-write 직렬화 (두 엔진 결과가 거의 동시에 저장된다)
+
+
+def _failure_of(e: Exception, kind: str) -> CoachFailure:
+    if isinstance(e, AiError):
+        argv = list(getattr(e, "argv", None) or [])
+        if kind == "ping" and argv:  # 옵션 오류를 사용자가 바로 제보할 수 있게 실행 명령줄을 함께 보여준다 (프롬프트 제외)
+            e.hint = f"{e.hint}\n\n실행한 명령: {' '.join(argv)}"
+        return CoachFailure(e.code, str(e), e.hint, getattr(e, "stderr", "") or "", argv)
+    return CoachFailure("failed", f"내부 오류: {e}", "다시 시도하세요")
+
+
+def _missing_failure(key: str) -> CoachFailure:
+    return CoachFailure("missing", f"{ai_engine.CLI_NAMES[key]} 를 찾지 못했습니다", ai_engine.install_hint((key,)))
+
+
+def _run_parallel(items: list[ai_engine.EngineInfo], fn: Callable[[ai_engine.EngineInfo], EngineOutcome], done: Callable[[EngineOutcome], None]) -> None:
+    """엔진당 스레드 1개로 fn 을 실행하고, 끝나는 순서대로 호출 스레드에서 done(outcome) 을 부른다."""
+    with ThreadPoolExecutor(max_workers=len(items), thread_name_prefix="coach") as pool:
+        futures = [pool.submit(fn, e) for e in items]
+        for fut in as_completed(futures):
+            done(fut.result())  # fn 은 예외를 outcome 으로 바꿔 돌려준다
+
+
+def ask_coach_multi(
+    settings: Settings,
+    kind: str,
+    topic: str = "",
+    num: int = 0,
+    *,
+    submit_summary: str = "",
+    run_error: str = "",
+    execution_time: str | None = None,
+    progress: ProgressCb | None = None,
+    on_start: Callable[[str, object], None] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+    on_engine_done: Callable[[EngineOutcome], None] | None = None,
+    force_new: bool = False,
+    engines: Sequence[str] | None = None,
+) -> CoachResult:
+    """AI 코치 요청 1건을 대상 엔진 전부에 동시에 보낸다 (kind = review | hint | solution | ping). M18.
+
+    호출 전 사용자 동의 필수 (프롬프트에 코드·지문이 포함되어 외부 서비스로 전송됨). 이 함수는 동의를 묻지 않는다.
+    엔진이 하나도 없으면 자료 수집 전에 AiEngineMissing. engines 로 대상을 좁힐 수 있다 (개별 [다시 받기]).
+    엔진별 실패(미설치·타임아웃·실행 실패)는 예외 없이 outcome.failure 로 담고 다른 엔진 결과는 유지한다.
+    on_engine_done(outcome) 은 outcome 이 확정될 때마다 호출 스레드에서 호출된다. on_start(engine_key, proc) 는 프로세스가 뜬 직후.
+    힌트 단계는 대상 엔진이 공통으로 진행한다 (받은 단계 최소 + 1). 앞선 엔진은 캐시에서 그 단계까지만 보여준다.
+    정답 풀이는 화면 표시용으로만 돌려준다 — {num}.py 등 루트 폴더에는 절대 쓰지 않는다 (기록은 config_dir/coach/).
+    """
+    if kind not in ai_prompts.KINDS:
+        raise ValueError(f"알 수 없는 종류: {kind}")
+    sel = resolve_engines(settings)
+    targets, missing = list(sel.engines), list(sel.missing)
+    if engines is not None:
+        want = set(engines)
+        targets, missing = [e for e in targets if e.name in want], [k for k in missing if k in want]
+    outcomes: dict[str, EngineOutcome] = {}
+
+    def done(o: EngineOutcome) -> None:
+        outcomes[o.engine] = o
+        if on_engine_done is not None:
+            on_engine_done(o)
+
+    def finish(**extra) -> CoachResult:
+        return CoachResult(kind, [outcomes[k] for k in ai_engine.ENGINE_NAMES if k in outcomes], **extra)
+
+    def start_hook(key: str):
+        return (lambda proc: on_start(key, proc)) if on_start is not None else None
+
+    def cancelled_now() -> bool:
+        return bool(is_cancelled is not None and is_cancelled())
+
+    for key in missing:
+        done(EngineOutcome(key, ai_engine.ENGINE_LABELS[key], failure=_missing_failure(key)))
+    if not targets:
+        return finish()
+
+    if kind == "ping":
+        _emit(progress, f"{' · '.join(e.short_label for e in targets)} 연결 테스트")
+
+        def ping_one(engine: ai_engine.EngineInfo) -> EngineOutcome:
+            try:
+                res = ai_engine.run(engine, ai_prompts.build_prompt("ping"), on_start=start_hook(engine.name), is_cancelled=is_cancelled)
+            except Exception as e:  # noqa: BLE001 — 한 엔진의 예외가 다른 엔진을 죽이지 않는다
+                if not isinstance(e, AiError):
+                    log.exception("코치 내부 오류 (%s)", engine.name)
+                return EngineOutcome(engine.name, engine.label, failure=_failure_of(e, kind), error=e)
+            if res.cancelled:
+                return EngineOutcome(engine.name, engine.label, cancelled=True)
+            return EngineOutcome(engine.name, engine.label, CoachAnswer("ping", res.text, engine.label, engine.name, elapsed=res.elapsed))
+
+        _run_parallel(targets, ping_one, done)
+        return finish()
+
+    try:
+        problem_dir = storage.resolve_problem_dir(settings.root, topic, num)
+    except ValueError as e:
+        raise InvalidInput(str(e)) from e
+    code = submit.read_solution(problem_dir, num)
+    with _CACHE_LOCK:
+        cache = coach.load_answers(settings, num, code)
+
+    # 1) 캐시 적중 판단 (엔진별 슬롯)
+    level = 0
+    call: list[ai_engine.EngineInfo] = []
+    prev_hints: dict[str, list[str]] = {}
+    if kind == "hint":
+        hints = {e.name: list(cache.slot(e.name).hints) for e in targets}
+        if force_new:
+            for h in hints.values():
+                if h:
+                    h.pop()  # [다시 받기]: 마지막 단계만 다시
+        level = min(min(len(h) for h in hints.values()) + 1, ai_prompts.MAX_HINT_LEVEL)
+        for e in targets:
+            h = hints[e.name]
+            if len(h) >= level:
+                answer = CoachAnswer("hint", _merge_hints(h[:level]), e.label, e.name, level, ai_prompts.MAX_HINT_LEVEL, from_cache=True)
+                done(EngineOutcome(e.name, e.label, answer))
+            else:
+                call.append(e)
+                prev_hints[e.name] = [x["markdown"] for x in h]
+    else:
+        for e in targets:
+            entry = getattr(cache.slot(e.name), kind)
+            if entry and not force_new:
+                answer = CoachAnswer(kind, entry["markdown"], e.label, e.name, from_cache=True)
+                if kind == "solution":
+                    answer.code = ai_prompts.first_code_block(entry["markdown"]) or ""
+                done(EngineOutcome(e.name, e.label, answer))
+            else:
+                call.append(e)
+
+    # 2) 엔진 호출 (자료 수집은 1회, 두 엔진이 공유)
+    fresh = 0
+    if call:
+        statement, title, notes = _gather_statement(settings, topic, num, progress)
+        if cancelled_now():
+            for e in call:
+                done(EngineOutcome(e.name, e.label, cancelled=True))
+            call = []
+    if call:
+        base = dict(
+            num=num,
+            title=title or read_skeleton_title(problem_dir / f"{num}.py") or "",
+            statement=statement,
+            sample_input=_read_sample(problem_dir / settings.input_name),
+            sample_output=_read_sample(problem_dir / settings.output_name),
+            code=re.sub(r"\n{3,}", "\n\n", submit.strip_io_lines(code)),  # 제출 때 빠지는 로컬 입력 줄은 AI 에게도 안 보낸다
+            summary=submit_summary,
+            run_error=run_error,
+            execution_time=execution_time,
+            level=level or 1,
+        )
+        _emit(progress, f"{' · '.join(e.short_label for e in call)} 에게 묻는 중")
+
+        def run_one(engine: ai_engine.EngineInfo) -> EngineOutcome:
+            key, label = engine.name, engine.label
+            try:
+                prompt = ai_prompts.build_prompt(kind, previous_hints=prev_hints.get(key, []), **base)
+                res = ai_engine.run(engine, prompt, on_start=start_hook(key), is_cancelled=is_cancelled)
+                if res.cancelled or cancelled_now():
+                    return EngineOutcome(key, label, cancelled=True)
+                text = ai_prompts.clean_titles(res.text)
+                my_notes = list(notes)
+                if res.truncated:
+                    my_notes.append("응답이 너무 길어 일부만 표시합니다")
+                if kind == "hint":
+                    text, removed = ai_prompts.filter_hint(text)
+                    if removed:
+                        my_notes.append("긴 코드 블록을 제거했습니다")
+                    if not text.strip():
+                        raise AiError("힌트 응답이 비어 있습니다", hint="다시 시도하세요")
+                entry = {"markdown": text, "at": datetime.now().isoformat(timespec="seconds")}
+                answer = CoachAnswer(kind, text, label, key, elapsed=res.elapsed, notes=my_notes)
+                with _CACHE_LOCK:  # 재로드 -> 이 엔진 슬롯만 수정 -> 저장 (다른 엔진 결과를 덮어쓰지 않는다)
+                    fresh_cache = coach.load_answers(settings, num, code)
+                    slot = fresh_cache.slot(key)
+                    if kind == "hint":
+                        slot.hints = slot.hints[: level - 1] + [{"level": level, **entry}]
+                        answer.markdown = _merge_hints(slot.hints)
+                        answer.level, answer.max_level = level, ai_prompts.MAX_HINT_LEVEL
+                    elif kind == "review":
+                        slot.review = entry
+                    else:
+                        slot.solution = entry
+                        answer.code = ai_prompts.first_code_block(text) or ""
+                    coach.save_answers(settings, fresh_cache)
+                return EngineOutcome(key, label, answer)
+            except Exception as e:  # noqa: BLE001 — 한 엔진의 예외가 다른 엔진을 죽이지 않는다
+                if cancelled_now():
+                    return EngineOutcome(key, label, cancelled=True)
+                if not isinstance(e, AiError):
+                    log.exception("코치 내부 오류 (%s)", key)
+                return EngineOutcome(key, label, failure=_failure_of(e, kind), error=e)
+
+        _run_parallel(call, run_one, done)
+        fresh = sum(1 for e in call if outcomes[e.name].answer is not None)
+
+    # 3) 정답 풀이: 열람 처리(오답 누적 리셋 + 복습 예약)는 새로 받은 성공이 있을 때 1회만
+    review_due = None
+    if kind == "solution" and any(o.answer is not None for o in outcomes.values()):
+        rec = coach.mark_solution_viewed(settings, num, settings.review_days) if fresh else coach.get_record(settings, num)
+        if rec is not None and rec.review_due:
+            review_due = date.fromisoformat(rec.review_due)
+        for o in outcomes.values():
+            if o.answer is not None:
+                o.answer.review_due = review_due
+    with _CACHE_LOCK:
+        final = coach.load_answers(settings, num, code)
+    hint_done = min(len(final.slot(e.name).hints) for e in targets)
+    return finish(hint_done=hint_done, review_due=review_due)
+
+
 def ask_coach(
     settings: Settings,
     kind: str,
@@ -766,96 +1035,22 @@ def ask_coach(
     is_cancelled: Callable[[], bool] | None = None,
     force_new: bool = False,
 ) -> CoachAnswer:
-    """AI 코치 요청 1건 (kind = review | hint | solution | ping).
+    """단일 엔진 호환 래퍼: ask_coach_multi 를 엔진 1개로 호출하고 실패는 원래 예외로 다시 던진다 (GUI 는 ask_coach_multi 를 쓴다).
 
-    호출 전 사용자 동의 필수 (프롬프트에 코드·지문이 포함되어 외부 서비스로 전송됨). 이 함수는 동의를 묻지 않는다.
-    엔진이 없으면 자료 수집 전에 AiEngineMissing. 유효한 캐시가 있으면 엔진을 부르지 않는다 (review/solution, hint 3단계 이후).
-    정답 풀이는 화면 표시용으로만 돌려준다 — {num}.py 등 루트 폴더에는 절대 쓰지 않는다 (기록은 config_dir/coach/).
-    취소는 예외 없이 CoachAnswer.cancelled=True.
+    설정이 both 면 codex 우선 첫 설치 엔진 1개만 쓴다. 호출 전 사용자 동의 필수. 취소는 예외 없이 CoachAnswer.cancelled=True.
     """
     if kind not in ai_prompts.KINDS:
         raise ValueError(f"알 수 없는 종류: {kind}")
-    engine = ai_engine.resolve(settings.ai_engine)
-    if kind == "ping":
-        _emit(progress, f"{engine.label} 연결 테스트")
-        try:
-            res = ai_engine.run(engine, ai_prompts.build_prompt("ping"), on_start=on_start, is_cancelled=is_cancelled)
-        except AiError as e:  # 옵션 오류를 사용자가 바로 제보할 수 있게 실행 명령줄을 함께 보여준다 (프롬프트 제외)
-            argv = getattr(e, "argv", None)
-            if argv:
-                e.hint = f"{e.hint}\n\n실행한 명령: {' '.join(argv)}"
-            raise
-        return CoachAnswer("ping", res.text, engine.label, cancelled=res.cancelled, elapsed=res.elapsed)
-
-    try:
-        problem_dir = storage.resolve_problem_dir(settings.root, topic, num)
-    except ValueError as e:
-        raise InvalidInput(str(e)) from e
-    code = submit.read_solution(problem_dir, num)
-    cache = coach.load_answers(settings, num, code)
-    label = engine.label
-
-    level = 0
-    if kind == "review" and cache.review and not force_new:
-        return CoachAnswer("review", cache.review["markdown"], cache.review.get("engine", label), from_cache=True)
-    if kind == "solution" and cache.solution and not force_new:
-        rec = coach.get_record(settings, num)
-        due = date.fromisoformat(rec.review_due) if rec and rec.review_due else None
-        return CoachAnswer("solution", cache.solution["markdown"], cache.solution.get("engine", label), from_cache=True, review_due=due,
-                           code=ai_prompts.first_code_block(cache.solution["markdown"]) or "")
-    if kind == "hint":
-        if force_new and cache.hints:
-            cache.hints.pop()  # [다시 받기]: 마지막 단계만 다시
-        if len(cache.hints) >= ai_prompts.MAX_HINT_LEVEL:
-            last = cache.hints[-1]
-            return CoachAnswer("hint", _merge_hints(cache.hints), last.get("engine", label), len(cache.hints), ai_prompts.MAX_HINT_LEVEL, from_cache=True)
-        level = len(cache.hints) + 1
-
-    statement, title, notes = _gather_statement(settings, topic, num, progress)
-    if is_cancelled is not None and is_cancelled():
-        return CoachAnswer(kind, "", label, cancelled=True)
-    title = title or read_skeleton_title(problem_dir / f"{num}.py") or ""
-    prompt = ai_prompts.build_prompt(
-        kind,
-        num=num,
-        title=title,
-        statement=statement,
-        sample_input=_read_sample(problem_dir / settings.input_name),
-        sample_output=_read_sample(problem_dir / settings.output_name),
-        code=re.sub(r"\n{3,}", "\n\n", submit.strip_io_lines(code)),  # 제출 때 빠지는 로컬 입력 줄은 AI 에게도 안 보낸다
-        summary=submit_summary,
-        run_error=run_error,
-        execution_time=execution_time,
-        previous_hints=[h["markdown"] for h in cache.hints],
-        level=level or 1,
+    engine = resolve_engines(settings).engines[0]
+    result = ask_coach_multi(
+        settings, kind, topic, num,
+        submit_summary=submit_summary, run_error=run_error, execution_time=execution_time, progress=progress,
+        on_start=(lambda _key, proc: on_start(proc)) if on_start is not None else None,
+        is_cancelled=is_cancelled, force_new=force_new, engines=[engine.name],
     )
-    _emit(progress, f"{label} 에게 묻는 중")
-    res = ai_engine.run(engine, prompt, on_start=on_start, is_cancelled=is_cancelled)
-    if res.cancelled:
-        return CoachAnswer(kind, "", label, cancelled=True, elapsed=res.elapsed)
-    text = ai_prompts.clean_titles(res.text)
-    if res.truncated:
-        notes.append("응답이 너무 길어 일부만 표시합니다")
-    if kind == "hint":
-        text, removed = ai_prompts.filter_hint(text)
-        if removed:
-            notes.append("긴 코드 블록을 제거했습니다")
-        if not text.strip():
-            raise AiError("힌트 응답이 비어 있습니다", hint="다시 시도하세요")
-    entry = {"markdown": text, "engine": label, "at": datetime.now().isoformat(timespec="seconds")}
-    answer = CoachAnswer(kind, text, label, elapsed=res.elapsed, notes=notes)
-    if kind == "hint":
-        cache.hints.append({"level": level, **entry})
-        answer.markdown = _merge_hints(cache.hints)
-        answer.level, answer.max_level = level, ai_prompts.MAX_HINT_LEVEL
-    elif kind == "review":
-        cache.review = entry
-    else:
-        cache.solution = entry
-        answer.code = ai_prompts.first_code_block(text) or ""
-    coach.save_answers(settings, cache)
-    if kind == "solution":  # 표시 성공 = 열람. 오답 누적 리셋 + 복습 예약
-        rec = coach.mark_solution_viewed(settings, num, settings.review_days)
-        if rec is not None and rec.review_due:
-            answer.review_due = date.fromisoformat(rec.review_due)
-    return answer
+    o = result.outcomes[0]
+    if o.cancelled:
+        return CoachAnswer(kind, "", engine.label, engine.name, cancelled=True)
+    if o.answer is None:
+        raise o.error if o.error is not None else AiError(o.failure.title if o.failure else "AI 코치 실패")
+    return o.answer

@@ -55,6 +55,7 @@ class SettingsPage(QWidget):
         self._ai_detect_worker: FuncWorker | None = None
         self._ai_ping_worker: CoachWorker | None = None
         self._loading_ai = False
+        self._last_ai_status = None  # 마지막 감지 결과 (엔진 콤보가 바뀌면 보조 문구만 다시 그린다)
         self._ai_status_stale = True
         self._build()
 
@@ -316,8 +317,18 @@ class SettingsPage(QWidget):
 
         self.ai_engine = QComboBox()
         self.ai_engine.setObjectName("AiEngineCombo")
-        for value, text in (("auto", "자동 (Codex 우선)"), ("codex", "Codex"), ("claude", "Claude Code")):
+        for value, text in (
+            ("auto", "자동 (Codex 우선)"),
+            ("codex", ai_engine.ENGINE_LABELS["codex"]),
+            ("claude", ai_engine.ENGINE_LABELS["claude"]),
+            ("both", "GPT & Claude (둘 다)"),
+        ):
             self.ai_engine.addItem(text, value)
+        self.ai_both_hint = QLabel("요청 1건마다 GPT 와 Claude 구독 사용량이 각각 소모되고, 답이 2개 표시됩니다.")  # 둘 다 모드에서만
+        self.ai_both_hint.setObjectName("AiBothHint")
+        set_class(self.ai_both_hint, "hint")
+        self.ai_both_hint.setWordWrap(True)
+        self.ai_both_hint.hide()
         self.ai_engine.setAccessibleName("AI 엔진")
         self.ai_engine.setMinimumWidth(180)
         self.ai_status = QLabel("확인 중…")
@@ -354,7 +365,11 @@ class SettingsPage(QWidget):
         set_class(ai_hint, "hint")
         ai_hint.setWordWrap(True)
         g7.addWidget(_label("엔진", self.ai_engine), 0, 0)
-        g7.addWidget(self.ai_engine, 0, 1, 1, 2, Qt.AlignmentFlag.AlignLeft)
+        engine_box = QVBoxLayout()
+        engine_box.setSpacing(tokens.SPACE // 2)
+        engine_box.addWidget(self.ai_engine, 0, Qt.AlignmentFlag.AlignLeft)
+        engine_box.addWidget(self.ai_both_hint)
+        g7.addLayout(engine_box, 0, 1, 1, 2)
         g7.addWidget(_label("감지 상태"), 1, 0)
         g7.addWidget(self.ai_status, 1, 1)
         g7.addWidget(self.ai_detect_btn, 1, 2)
@@ -775,12 +790,19 @@ class SettingsPage(QWidget):
 
     # --- AI 코치 (M17) --------------------------------------------------------------------
     def _ai_engine_changed(self, _idx: int) -> None:
+        self._sync_ai_both_ui()
         if self._loading_ai:
             return
         value = str(self.ai_engine.currentData() or "auto")
         service.set_env_values(self.config_dir, SWEA_AI_ENGINE=value)
         self.status_message.emit("AI 엔진 설정을 저장했습니다")
         self.coach_settings_changed.emit()
+
+    def _sync_ai_both_ui(self) -> None:
+        """둘 다 모드일 때만 사용량 2배 힌트를 보이고, 감지 상태 보조 문구를 다시 만든다."""
+        self.ai_both_hint.setVisible(self.ai_engine.currentData() == "both")
+        if self._last_ai_status is not None:
+            self._show_ai_status(self._last_ai_status)
 
     def _ai_number_saved(self, key: str, value: int, attr: str) -> None:
         """오답 기준·복습일 저장 (editingFinished). 바뀌지 않았으면 쓰지 않는다."""
@@ -809,6 +831,7 @@ class SettingsPage(QWidget):
         self.ai_detect_btn.setEnabled(True)
 
     def _show_ai_status(self, status) -> None:
+        self._last_ai_status = status
         parts = []
         for e in status.engines:
             if not e.found:
@@ -823,6 +846,8 @@ class SettingsPage(QWidget):
             notes.append(f"환경변수 {', '.join(status.api_keys)} 가 설정되어 있습니다 — CLI 가 구독 대신 API 과금으로 동작할 수 있습니다 (앱은 지우지 않습니다)")
         if not any(e.found for e in status.engines):
             notes.append(ai_engine.install_hint())
+        elif self.ai_engine.currentData() == "both" and not all(e.found for e in status.engines):
+            notes.append("둘 다 모드는 설치된 쪽만 실행합니다")
         self.ai_note.setText("\n".join(notes))
         self.ai_note.setVisible(bool(notes))
 
@@ -834,11 +859,12 @@ class SettingsPage(QWidget):
             self.banner.show_message("warning", "설정을 먼저 저장하세요", "루트 폴더·SWEA ID·비밀번호를 저장한 뒤 테스트할 수 있습니다")
             return
         try:
-            engine = service.resolve_engine(self.settings)
+            sel = service.resolve_engines(self.settings)
         except AiError as e:
             self.banner.show_message("warning", "AI 엔진을 찾지 못했습니다", e.hint or str(e))
             return
-        if not has_consent(self.qs, engine.name) and not ask_consent(self, engine.label, ping=True):
+        need = [e for e in sel.engines if not has_consent(self.qs, e.name)]  # 미동의 엔진을 한 다이얼로그에 모은다
+        if need and not ask_consent(self, [e.label for e in need], ping=True, dual=len(sel.engines) >= 2):
             return  # 테스트 문장만 보내는 동의라 엔진 동의로는 저장하지 않는다 (코드 전송 동의는 첫 코치 사용 때)
         w = CoachWorker(self.settings, "ping", parent=self)
         w.finished_ok.connect(self._on_ping_done)
@@ -858,11 +884,31 @@ class SettingsPage(QWidget):
         self.ai_test_btn.setText("연결 테스트")
         self.busy.setVisible(False)
 
-    def _on_ping_done(self, answer) -> None:
-        if answer.cancelled:
+    def _on_ping_done(self, result) -> None:
+        """연결 테스트 결과 배너. 단일 모드는 기존 형식, 둘 다 모드는 엔진별 성공/실패를 나열한다 (전부 성공 success · 일부 실패 warning · 전부 실패 error)."""
+        if result.cancelled:
             self.banner.show_message("info", "연결 테스트를 취소했습니다")
             return
-        self.banner.show_message("success", f"{answer.engine} 연결됨 ({answer.elapsed:.1f}초)", f"응답: {answer.markdown[:80]}")
+        oks = [f"{o.label} 연결됨 ({o.answer.elapsed:.1f}초)" for o in result.succeeded]
+        fails = [o for o in result.outcomes if o.answer is None]
+        details = []
+        for o in fails:
+            f = o.failure
+            hint = f.hint or ""
+            if f.stderr and f.stderr not in hint:
+                hint = f"{hint}\n\n{f.stderr[-ai_engine.STDERR_TAIL:]}".strip()
+            details.append(f"{o.label}: {f.title}" + (f"\n{hint}" if hint else ""))
+        single = len(result.outcomes) == 1
+        if not fails:
+            body = f"응답: {result.outcomes[0].answer.markdown[:80]}" if single else ""
+            self.banner.show_message("success", " · ".join(oks), body)
+        elif not oks:
+            if single:
+                self.banner.show_message("error", fails[0].failure.title, fails[0].failure.hint)
+            else:
+                self.banner.show_message("error", "두 엔진 모두 연결하지 못했습니다", "\n\n".join(details))
+        else:
+            self.banner.show_message("warning", " · ".join(oks + [f"{o.label} 실패" for o in fails]), "\n\n".join(details))
 
     def _reset_ai_consent(self) -> None:
         reset_consents(self.qs)

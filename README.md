@@ -214,7 +214,8 @@ swea-fetch check IM_test 25730
 - **공용 PC 주의**: Codex/Claude CLI 는 자체 세션 기록을 홈 폴더에 남길 수 있습니다 (앱이 지우지 않음). 앱의 AI 기록(`~/.swea-fetch/coach/`)은 `swea-fetch logout --all` 또는 설정의 [AI 기록 지우기] 로 지워집니다. 환경변수 `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` 가 있으면 CLI 가 구독 대신 API 과금으로 동작할 수 있어 설정 화면에 경고만 표시합니다
 - **집계 범위**: 오답 횟수는 이 앱(GUI/CLI)으로 제출한 채점 결과만 셉니다 (SWEA 서버 기록과 다를 수 있음). 컴파일 거부·횟수 소진 같은 제출 불가는 세지 않습니다
 - 설치: Codex CLI 는 `npm install -g @openai/codex` 후 `codex login`, Claude Code CLI 는 `npm install -g @anthropic-ai/claude-code` 후 `claude` 를 한 번 실행해 로그인 (공식 안내 기준으로 확인하세요). **설치한 뒤에는 앱을 다시 켜야** 합니다
-- 설정 `.env`: `SWEA_AI_ENGINE=auto|codex|claude`, `SWEA_AI_WRONG_THRESHOLD=3` (1~20), `SWEA_REVIEW_DAYS=3` (1~30) — 설정 페이지에서도 바꿉니다
+- **GPT & Claude 동시 답변 (선택)**: 설정 → AI 코치 → 엔진을 `GPT & Claude (둘 다)` 로 고르면 같은 요청을 Codex 와 Claude Code 에 **동시에** 보내 답 2개를 나란히 보여줍니다 (기본은 `자동`이라 한 곳에만 보냅니다). **요청 1건마다 두 서비스의 구독 사용량이 각각 소모되고, 지문·코드가 두 곳으로 전송됩니다** — 동의 창에 두 엔진이 함께 표시됩니다. 한쪽이 실패해도 다른 쪽 답은 그대로 보이고 패널별 [다시 받기] 로 그 엔진만 다시 요청할 수 있습니다. 한쪽 CLI 만 설치돼 있으면 설치된 쪽만 실행합니다
+- 설정 `.env`: `SWEA_AI_ENGINE=auto|codex|claude|both`, `SWEA_AI_WRONG_THRESHOLD=3` (1~20), `SWEA_REVIEW_DAYS=3` (1~30) — 설정 페이지에서도 바꿉니다
 
 ---
 

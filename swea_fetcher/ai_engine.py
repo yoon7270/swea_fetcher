@@ -28,7 +28,9 @@ from .errors import AiEngineMissing, AiRunFailed, AiTimeout
 log = logging.getLogger("swea_fetcher.ai_engine")
 
 ENGINE_NAMES = ("codex", "claude")  # auto 의 우선순위 순서
-ENGINE_LABELS = {"codex": "Codex", "claude": "Claude Code"}
+ENGINE_LABELS = {"codex": "GPT (Codex)", "claude": "Claude (Claude Code)"}  # 화면 표시 이름 (M18)
+ENGINE_SHORT = {"codex": "GPT", "claude": "Claude"}  # 패널 제목·상태줄
+CLI_NAMES = {"codex": "Codex CLI", "claude": "Claude Code CLI"}  # 설치 안내용 실제 CLI 이름
 AI_TIMEOUT = 300.0  # 응답 대기 상한 (초)
 VERSION_TIMEOUT = 10.0
 HELP_TIMEOUT = 15.0
@@ -71,8 +73,20 @@ class EngineInfo:
         return ENGINE_LABELS.get(self.name, self.name)
 
     @property
+    def short_label(self) -> str:
+        return ENGINE_SHORT.get(self.name, self.name)
+
+    @property
     def found(self) -> bool:
         return bool(self.path)
+
+
+@dataclass(frozen=True)
+class EngineSelection:
+    """resolve_all 결과: 실행 대상 엔진(codex, claude 순)과 설치되지 않아 빠진 엔진 키."""
+
+    engines: list[EngineInfo]
+    missing: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -189,20 +203,42 @@ def resolve(pref: str = "auto") -> EngineInfo:
     동의받은 벤더가 아닌 곳으로 조용히 보내지 않기 위함이다.
     """
     pref = (pref or "auto").strip().lower()
+    if pref == "both":
+        raise ValueError("'both' 는 resolve_all() 로 해석해야 합니다")
     if pref in ENGINE_NAMES:
         path = _which(pref)
         if path:
             return EngineInfo(pref, path)
         other = [n for n in ENGINE_NAMES if n != pref][0]
         raise AiEngineMissing(
-            f"{ENGINE_LABELS[pref]} CLI 를 찾지 못했습니다",
-            hint=f"{INSTALL_HINTS[pref]}\n{RESTART_HINT}\n(설정에서 '자동'으로 바꾸면 {ENGINE_LABELS[other]} 를 사용합니다)",
+            f"{CLI_NAMES[pref]} 를 찾지 못했습니다",
+            hint=f"{INSTALL_HINTS[pref]}\n{RESTART_HINT}\n(설정에서 '자동'으로 바꾸면 {CLI_NAMES[other]} 를 사용합니다)",
         )
     for name in ENGINE_NAMES:
         path = _which(name)
         if path:
             return EngineInfo(name, path)
     raise AiEngineMissing("AI 엔진(Codex / Claude Code CLI)을 찾지 못했습니다", hint=install_hint())
+
+
+def resolve_all(pref: str = "auto") -> EngineSelection:
+    """실행 대상 엔진 목록 (M18). 단일 설정은 resolve() 에 위임. both 는 설치된 쪽만 담고 없는 쪽은 missing 에 둔다.
+
+    둘 다 없으면 AiEngineMissing. 고정 엔진 미설치 시 폴백하지 않는 규칙은 그대로.
+    """
+    pref = (pref or "auto").strip().lower()
+    if pref != "both":
+        return EngineSelection([resolve(pref)], [])
+    engines, missing = [], []
+    for name in ENGINE_NAMES:
+        path = _which(name)
+        if path:
+            engines.append(EngineInfo(name, path))
+        else:
+            missing.append(name)
+    if not engines:
+        raise AiEngineMissing("AI 엔진(Codex / Claude Code CLI)을 찾지 못했습니다", hint=install_hint())
+    return EngineSelection(engines, missing)
 
 
 # --- 명령 구성 --------------------------------------------------------------------------
@@ -265,8 +301,8 @@ def _require(engine: EngineInfo, helptxt: str, options: tuple[str, ...]) -> None
     missing = [o for o in options if not _supports(helptxt, o)]
     if missing:
         raise AiRunFailed(
-            f"{engine.label} CLI 가 필요한 옵션({', '.join(missing)})을 지원하지 않습니다",
-            hint=f"{engine.label} CLI 버전이 오래됐을 수 있습니다. 업데이트한 뒤 앱을 다시 켜세요 (설정의 [연결 테스트] 로 확인)",
+            f"{CLI_NAMES[engine.name]} 가 필요한 옵션({', '.join(missing)})을 지원하지 않습니다",
+            hint=f"{CLI_NAMES[engine.name]} 버전이 오래됐을 수 있습니다. 업데이트한 뒤 앱을 다시 켜세요 (설정의 [연결 테스트] 로 확인)",
         )
 
 
