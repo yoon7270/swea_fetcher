@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import os
 import sys
 from pathlib import Path
 
@@ -324,3 +325,41 @@ def test_cmd_shim_roundtrip(monkeypatch, tmp_path):
     with pytest.raises(AiRunFailed) as ei:
         ai_engine.run(engine, "FAIL please")
     assert "코드 3" in str(ei.value) and "boom" in ei.value.stderr
+
+
+# --- Codex 번들 탐색 (PATH 밖의 앱·확장 codex.exe) ---------------------------------------------
+
+
+def _touch(p, mtime):
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"")
+    os.utime(p, (mtime, mtime))
+    return p
+
+
+def test_bundled_codex_prefers_app_then_newest(tmp_path, monkeypatch):
+    local, home = tmp_path / "local", tmp_path / "home"
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    assert ai_engine.bundled_codex() is None
+    ext = _touch(home / ".vscode/extensions/openai.chatgpt-1.0-win32-x64/bin/windows-x86_64/codex.exe", 3000)
+    assert ai_engine.bundled_codex() == str(ext)
+    _touch(local / "OpenAI/Codex/bin/aaa/codex.exe", 1000)
+    new_app = _touch(local / "OpenAI/Codex/bin/bbb/codex.exe", 2000)
+    assert ai_engine.bundled_codex() == str(new_app)  # 앱이 확장보다 먼저, 앱끼리는 최신
+
+
+REAL_WHICH = ai_engine._which  # conftest 가 테스트마다 _which 를 막기 전에 원본을 잡아 둔다
+
+
+def test_which_falls_back_to_bundle_only_for_codex_on_windows(monkeypatch):
+    monkeypatch.setattr(ai_engine.shutil, "which", lambda n: None)
+    monkeypatch.setattr(ai_engine, "bundled_codex", lambda: "C:/app/codex.exe")
+    monkeypatch.setattr(ai_engine.sys, "platform", "win32")
+    assert REAL_WHICH("codex") == "C:/app/codex.exe"
+    assert REAL_WHICH("claude") is None  # 번들 탐색은 codex 만
+    monkeypatch.setattr(ai_engine.shutil, "which", lambda n: "C:/path/codex.cmd")
+    assert REAL_WHICH("codex") == "C:/path/codex.cmd"  # PATH 가 우선
+    monkeypatch.setattr(ai_engine.shutil, "which", lambda n: None)
+    monkeypatch.setattr(ai_engine.sys, "platform", "linux")
+    assert REAL_WHICH("codex") is None

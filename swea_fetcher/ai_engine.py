@@ -88,7 +88,31 @@ class AiResult:
 
 
 def _which(name: str) -> str | None:
-    return shutil.which(name)  # Windows 는 PATHEXT 로 .cmd/.exe 를 찾는다
+    """PATH 우선 (Windows 는 PATHEXT 로 .cmd/.exe). Codex 는 PATH 에 없어도 앱·확장 번들의 codex.exe 를 찾는다."""
+    found = shutil.which(name)
+    if found or name != "codex" or sys.platform != "win32":
+        return found
+    return bundled_codex()
+
+
+# Codex 앱 / VS Code·Cursor 의 Codex(ChatGPT) 확장은 codex.exe 를 PATH 밖에 넣어 둔다 (버전별 폴더).
+# 앱을 먼저, 그다음 확장. 같은 종류 안에서는 가장 최근에 설치된 것.
+_CODEX_BUNDLES = (
+    ("LOCALAPPDATA", "OpenAI/Codex/bin/*/codex.exe"),
+    ("USERPROFILE", ".vscode/extensions/openai.chatgpt-*/bin/windows-x86_64/codex.exe"),
+    ("USERPROFILE", ".cursor/extensions/openai.chatgpt-*/bin/windows-x86_64/codex.exe"),
+)
+
+
+def bundled_codex() -> str | None:
+    for env, pattern in _CODEX_BUNDLES:
+        base = os.environ.get(env)
+        if not base:
+            continue
+        hits = [p for p in Path(base).glob(pattern) if p.is_file()]
+        if hits:
+            return str(max(hits, key=lambda p: p.stat().st_mtime))
+    return None
 
 
 def _popen(argv: list[str], **kwargs) -> subprocess.Popen:

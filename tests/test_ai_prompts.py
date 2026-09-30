@@ -148,3 +148,9 @@ def test_first_code_block():
     md = "## 접근 설명\n```\nignore\n```\n## 정답 코드\n```python\nprint(1)\nprint(2)\n```\n"
     assert P.first_code_block(md) == "print(1)\nprint(2)"
     assert P.first_code_block("코드 없음") is None
+
+
+def test_clean_titles_strips_copied_guides_only_on_known_sections():
+    md = "## 총평 (2~3줄)\n본문 (괄호는 유지)\n## 시간 복잡도 (N 의 정의, 근거)\n## 개선점\n## 기타 (그대로)\n### 정답 코드 (Python 3)"
+    out = P.clean_titles(md)
+    assert out == "## 총평\n본문 (괄호는 유지)\n## 시간 복잡도\n## 개선점\n## 기타 (그대로)\n### 정답 코드"

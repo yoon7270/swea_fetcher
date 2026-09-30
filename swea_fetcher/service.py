@@ -833,7 +833,7 @@ def ask_coach(
     res = ai_engine.run(engine, prompt, on_start=on_start, is_cancelled=is_cancelled)
     if res.cancelled:
         return CoachAnswer(kind, "", label, cancelled=True, elapsed=res.elapsed)
-    text = res.text
+    text = ai_prompts.clean_titles(res.text)
     if res.truncated:
         notes.append("응답이 너무 길어 일부만 표시합니다")
     if kind == "hint":
