@@ -23,6 +23,7 @@ from .widgets import Badge, ElidedLabel, svg_icon, set_class
 
 KIND_TITLES = {"review": "코드 평가", "hint": "힌트", "solution": "정답 풀이", "ping": "연결 테스트"}
 CONSENT_PREFIX = "coach/consent/"
+GROWTH_CONSENT_PREFIX = "growth/consent/"  # 주간 AI 코멘트 전용 동의 (M19). 코치 동의가 이미 있으면 그것으로도 허용
 ENGINE_KEYS = ("codex", "claude")
 
 # --- 동의 (D3) ---------------------------------------------------------------------------
@@ -39,6 +40,16 @@ def set_consent(qs: QSettings, engine: str, on: bool = True) -> None:
 def reset_consents(qs: QSettings) -> None:
     for key in ENGINE_KEYS:
         qs.remove(f"{CONSENT_PREFIX}{key}")
+        qs.remove(f"{GROWTH_CONSENT_PREFIX}{key}")
+
+
+def growth_consent_ok(qs: QSettings, engine: str) -> bool:
+    """주간 AI 코멘트를 이 엔진으로 보내도 되는가: 성장 전용 동의 또는 코치 동의 (더 민감한 데이터를 이미 허락함, M19 G12)."""
+    return bool(qs.value(f"{GROWTH_CONSENT_PREFIX}{engine}", False, type=bool)) or has_consent(qs, engine)
+
+
+def set_growth_consent(qs: QSettings, engine: str, on: bool = True) -> None:
+    qs.setValue(f"{GROWTH_CONSENT_PREFIX}{engine}", on)
 
 
 DUAL_NOTE = "GPT 와 Claude 에 각각 1번씩 요청하고 답 2개를 나란히 보여줍니다 (각 서비스에서 쓰는 양은 한 곳만 쓸 때와 같습니다)."
@@ -57,6 +68,7 @@ def consent_text(engine_label: str | list[str], ping: bool = False, dual: bool =
         "· 제출한 풀이 코드 ({num}.py)\n"
         "· SWEA 채점 결과 요약\n"
         "SWEA 아이디·비밀번호·세션과 폴더 경로는 보내지 않습니다.\n"
+        "· AI 응답 끝의 분류 태그(코드 제외)가 성장 기록으로 저장됩니다\n"
         "전송은 버튼을 누를 때 요청 1건씩만 이루어지며, 내용은 해당 서비스의 약관에 따라 처리됩니다 (CLI 가 자체 기록을 남길 수 있음). "
         "지문은 SWEA 의 저작물이므로 개인 학습 용도로만 쓰세요."
         f"{note}"
@@ -452,6 +464,12 @@ class CoachTab(QWidget):
         set_class(self.footer, "hint")
         self.footer.setWordWrap(True)
         lay.addWidget(self.footer)
+        self.tip = QLabel()  # 성장 팁 (M19): 같은 약점이 3번 연속 지적됐을 때 고정 문구 한 줄
+        self.tip.setObjectName("GrowthTip")
+        set_class(self.tip, "muted")
+        self.tip.setWordWrap(True)
+        self.tip.hide()
+        lay.addWidget(self.tip)
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._tick)
@@ -491,6 +509,7 @@ class CoachTab(QWidget):
                 elif key in run:
                     pane.set_loading(title)
             self.info.hide()
+            self.tip.hide()
             self.footer.setText("AI 응답은 틀릴 수 있습니다." + (f" 정답 풀이는 {num}.py 에 저장되지 않습니다." if kind == "solution" else ""))
         elif only in run:
             self.panes[only].setVisible(True)
@@ -530,6 +549,11 @@ class CoachTab(QWidget):
             pane.set_error(outcome.failure)
         pane.set_busy(pane._busy)
         self._sync_timer()
+
+    def show_growth_tip(self, text: str | None) -> None:
+        """성장 팁 한 줄 (푸터 아래). None 이면 숨긴다. 새 요청이 시작되면 begin() 이 숨긴다."""
+        self.tip.setText(text or "")
+        self.tip.setVisible(bool(text))
 
     def show_review_due(self, due) -> None:
         self.info.setText(f"복습 예정: {due.isoformat()}" if due is not None else "")

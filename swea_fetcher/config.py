@@ -1,7 +1,8 @@
 """설정 로드. 계정 정보는 프로젝트 밖 `~/.swea-fetch/.env` + Windows 자격 증명 관리자(keyring).
 
 .env 키: SWEA_ROOT (풀이 저장소 경로), SWEA_ID, 선택: SWEA_INPUT_NAME, SWEA_OUTPUT_NAME, SWEA_PYTHON(검증용 인터프리터), SWEA_EDITOR(auto|vscode|pycharm|default),
-SWEA_AI_ENGINE(auto|codex|claude|both), SWEA_AI_WRONG_THRESHOLD(1~20), SWEA_REVIEW_DAYS(1~30) (M17 AI 코치).
+SWEA_AI_ENGINE(auto|codex|claude|both), SWEA_AI_WRONG_THRESHOLD(1~20), SWEA_REVIEW_DAYS(1~30) (M17 AI 코치),
+SWEA_GROWTH(1|0, 성장 기록), SWEA_GROWTH_COMMENT(1|0, 주간 AI 코멘트 자동 생성) (M19).
 비밀번호는 keyring 에 저장한다 (서비스 "swea-fetch", 사용자명 = SWEA_ID).
 결정 순서: 환경변수 SWEA_PW → .env 의 SWEA_PW (경고, 이관 권장) → keyring → 없으면 ConfigMissing.
 """
@@ -52,6 +53,8 @@ class Settings:
     ai_engine: str = "auto"  # SWEA_AI_ENGINE: "auto" | "codex" | "claude" | "both" (M17, both=M18)
     ai_wrong_threshold: int = 3  # SWEA_AI_WRONG_THRESHOLD: 이 횟수 이상 오답이면 정답 풀이 제안 (M17)
     review_days: int = 3  # SWEA_REVIEW_DAYS: 정답 풀이를 본 뒤 복습 권유까지의 일수 (M17)
+    growth: bool = True  # SWEA_GROWTH: 성장 기록 (AI 응답의 분류 태그·제출 결과 이벤트·주간 리포트) (M19)
+    growth_comment: bool = True  # SWEA_GROWTH_COMMENT: 주간 AI 코멘트 자동 생성 (M19)
 
     @property
     def session_file(self) -> Path:
@@ -207,6 +210,22 @@ def _int_setting(key: str, raw: str, default: int, bounds: tuple[int, int]) -> i
     return value
 
 
+_FALSY = ("0", "false", "no", "off")
+
+
+def _bool_setting(key: str, raw: str, default: bool) -> bool:
+    """1/0 (true/false/yes/no/on/off) 설정 파싱 (M19). 비어 있으면 기본값, 알 수 없는 값은 기본값 + WARNING."""
+    text = (raw or "").strip().lower()
+    if not text:
+        return default
+    if text in ("1", "true", "yes", "on"):
+        return True
+    if text in _FALSY:
+        return False
+    log.warning("%s 값이 올바르지 않습니다: %r — %s 로 대체", key, raw, "1" if default else "0")
+    return default
+
+
 def _auto_push_settings(raw_on: str, raw_scope: str, raw_moments: str) -> dict:
     """SWEA_AUTO_PUSH / _SCOPE / _ON 을 파싱 (M11). 잘못된 값은 기본값 + WARNING.
 
@@ -293,5 +312,7 @@ def load_settings(config_dir: Path | None = None) -> Settings:
         ai_engine=_ai_engine_setting(get("SWEA_AI_ENGINE")),
         ai_wrong_threshold=_int_setting("SWEA_AI_WRONG_THRESHOLD", get("SWEA_AI_WRONG_THRESHOLD"), 3, AI_WRONG_THRESHOLD_RANGE),
         review_days=_int_setting("SWEA_REVIEW_DAYS", get("SWEA_REVIEW_DAYS"), 3, REVIEW_DAYS_RANGE),
+        growth=_bool_setting("SWEA_GROWTH", get("SWEA_GROWTH"), True),
+        growth_comment=_bool_setting("SWEA_GROWTH_COMMENT", get("SWEA_GROWTH_COMMENT"), True),
         **_auto_push_settings(get("SWEA_AUTO_PUSH"), get("SWEA_AUTO_PUSH_SCOPE"), get("SWEA_AUTO_PUSH_ON")),
     )

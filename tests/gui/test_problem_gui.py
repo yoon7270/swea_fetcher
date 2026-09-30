@@ -65,7 +65,7 @@ def _run_fetch(w, qtbot, monkeypatch, outcome, dry_run=False):
 
 def test_nav_order_and_ctrl2_opens_problem_tab(main_window):
     w = main_window
-    assert [k for _l, k, _i in PAGES] == ["fetch", "problem", "check", "history", "settings"]
+    assert [k for _l, k, _i in PAGES] == ["fetch", "problem", "check", "history", "growth", "settings"]
     w.nav.setCurrentRow(3)
     from PySide6.QtGui import QShortcut
 

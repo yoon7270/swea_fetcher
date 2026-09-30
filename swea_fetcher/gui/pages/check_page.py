@@ -787,6 +787,7 @@ class CheckPage(QWidget):
             self.status_message.emit("AI 코치 응답 실패")
             return
         self.tabs.setCurrentWidget(self.coach_tab)
+        self.coach_tab.show_growth_tip(getattr(result, "growth_tip", None))  # 성장 팁 (M19): 같은 약점 3번 연속일 때만
         if result.kind == "hint":
             self.coach_bar.set_hint_done(result.hint_done)
         elif result.kind == "solution":

@@ -118,9 +118,9 @@ QMainWindow  880×600 (min 720×480)   배경 bg
 ├─ 중앙 위젯 QHBoxLayout (margin 0, spacing 0)
 │  ├─ 사이드바 (w 148, surface, border-right 1px border)
 │  │   ├─ QLabel[class=app-title]  "SWEA Fetch"  (md, semibold, padding 16 16 12 16)
-│  │   └─ QListWidget#nav — 항목 4개 (아이콘 20 + 텍스트, h 40, 좌우 padding 12, 항목 간 2px)
-│  │         저장 · 검증 · 최근 · 설정
-│  └─ QStackedWidget  (페이지 4개, 각 QWidget#page)
+│  │   └─ QListWidget#nav — 항목 6개 (아이콘 20 + 텍스트, h 40, 좌우 padding 12, 항목 간 2px)
+│  │         저장 · 문제 · 검증 · 최근 · 성장 · 설정  (M19: 성장은 최근 뒤·설정 앞 — 설정은 마지막에 두는 관례)
+│  └─ QStackedWidget  (페이지 6개, 각 QWidget#page)
 │        └─ 각 페이지: QVBoxLayout margin 24, spacing 16
 │             ├─ 헤더 행: QLabel[class=title] + (우측) 상태 배지/보조 버튼
 │             ├─ QProgressBar#busy (h 3, 진행 중에만 visible)   ← 헤더 바로 아래
@@ -432,6 +432,44 @@ QWidget#Page (QStackedLayout: 빈 상태 | 본문)
 
 **설정 "AI 코치" 카드** (문제 지문 카드 다음, 레이블 열 96): 엔진 콤보(자동 (Codex 우선)/GPT (Codex)/Claude (Claude Code)/GPT & Claude (둘 다)) — 둘 다 선택 시 콤보 아래 `hint` "요청 1건마다 GPT 와 Claude 구독 사용량이 각각 소모되고, 답이 2개 표시됩니다." (objectName `AiBothHint`), 감지 상태 + [다시 감지] (환경변수 API 키 경고·설치 안내·"둘 다 모드는 설치된 쪽만 실행합니다" 는 `hint` 줄), [연결 테스트] (둘 다 모드는 엔진별 결과를 한 배너에: 전부 성공 success · 일부 실패 warning · 전부 실패 error), 오답 기준 스핀(1~20 " 회"), 복습 스핀(1~30 " 일"), [AI 전송 동의 초기화], [AI 기록 지우기](확인창), 안내 `hint` 한 줄.
 
+### 6.7 성장 페이지 (GrowthPage, M19)
+
+**목적**: AI 코치 응답의 분류 태그와 제출 결과로 만든 **주간 리포트**를 보여준다 ("어떤 방향이 좋아졌는지"). 내비 다섯 번째 "성장"(`nav-growth`, Ctrl+5). 새 색·간격 토큰 없음. 항상 "AI 분류 기반 참고용" 을 표시한다.
+
+전체가 `QScrollArea`(NoFrame) 안 — 720×480 에서 잘림 없이 스크롤(가로 스크롤 없음: 값·이름 라벨은 줄바꿈 허용). 위에서 아래로:
+
+1. **배너 슬롯** (`Banner`, 0~1개): 성장 꺼짐(info + [설정으로 이동]) / 코멘트 동의 필요(info, "집계 숫자와 분류 이름만 {엔진} 으로 보냅니다(코드·지문·문제 번호 제외)" + [동의하고 코멘트 받기]). 앱 시작 시 모달 없음.
+2. **리포트 헤더 카드** (`GrowthHeader`): "2026-09-21 ~ 09-27"(`section`) + Badge `진행 중`(idle) / `확정`(success) / `새 리포트`(running = info 색, 미확인일 때만) → 한 줄 아래 `hint` "AI 분류 기반 참고용" → 머리글(`muted`; 기준 주가 없으면 "첫 기록이에요. 다음 주부터 변화를 비교해 드려요") → 섹션 라벨 `section` "좋아진 점"(최대 3) / "지켜볼 점"(최대 2) / "꾸준히 지적되는 약점" + 항목 `muted` "· {문장}" → 진행 중이면 `hint` "월요일에 확정돼요".
+3. **AI 코멘트 카드** (`GrowthCommentCard`): 제목 "AI 코멘트" + `hint` "{엔진 짧은 이름} · {시각}". 상태:
+
+| 상태 (`comment_state`) | 본문 | 버튼 |
+|---|---|---|
+| done | `AnswerBrowser`(내용 높이에 맞춰 72~240px) | [다시 받기] |
+| loading | "코멘트 작성 중…" | [취소] |
+| in_progress | "주가 끝나면 자동으로 만들어져요" (확정 리포트가 아직 없으면 "첫 주가 끝나면 리포트가 만들어져요") | 없음 |
+| skipped_low_data | "이 주는 기록이 적어 코멘트를 생략했어요" | 없음 |
+| skipped_backlog | "밀린 주라 통계만 만들었어요" | [코멘트 받기] |
+| failed | "코멘트를 만들지 못했어요 — {오류 제목}" | [다시 받기] |
+| pending | "코멘트를 곧 자동으로 만들어요" | [코멘트 받기] |
+| comment_off | "주간 AI 코멘트 자동 생성이 꺼져 있어요. …" | [코멘트 받기] (수동은 가능) |
+| no_engine | "AI 엔진을 찾지 못해 코멘트를 만들지 못했어요" | [설정으로 이동] |
+| (needs_consent) | 위 상태 문구 뒤에 " · 동의가 필요해요" + 배너 슬롯의 [동의하고 코멘트 받기] | |
+
+4. **지표 카드** "이번 주 숫자" (`GrowthMetrics`): `BarChart`(최근 8주 Pass 문제 수, 선택 주 강조, 높이 120) + 지표 행 5개(Pass 문제 / 첫 시도 Pass 비율 / Pass 전 평균 오답 / 시간초과 비중 / 힌트·정답 풀이 사용). 행 = 이름(고정 132) · 값(`section`, 고정 112, 줄바꿈) · 변화(`hint`, "▲ 좋아짐 · 지난 기록 대비 +20%p" / "▼ 지켜볼 점 · …" / "변화 없음" / "비교 불가" — 화살표 글리프 + 글자 병기) · `SparkLine`(96×24, 8주).
+5. **강점·약점 카드** "강점·약점 변화" (`GrowthCategories`): "자주 지적된 점(약점)" / "잘한 점(강점)" 각 최대 5행. 행 = 카테고리 이름(132) · 막대(`RateBar`, 높이 8, 길이는 응답당 평균 강도/3) + 값 글자 "점수 4 · 분류 4건 중" · 변화 글자(150) · `SparkLine`. 이번 주 분류가 3건 미만이면 "AI 코치를 더 사용하면 변화가 보여요 (이번 주 분류 {n}건)" 로 대체.
+6. **지난 리포트 카드** (`GrowthHistory`): `QListWidget#GrowthReportList`(높이 120~220), 첫 행 "이번 주 (진행 중)", 그 뒤 최신순 최대 52개 "09-21 ~ 09-27 · Pass 5 · 좋아진 점 2" (미확인은 앞에 "새 · "). 선택 → 카드 갱신 + 맨 위로 스크롤. 기본 선택 = 가장 최근 확정 리포트(없으면 진행 중). 확정 리포트가 화면에 표시되는 순간 확인 처리(상태바 배지 갱신).
+
+빈 상태(`GrowthEmpty`, EmptyState): "아직 기록이 없어요" / "문제를 제출하거나 AI 코치에서 평가·힌트를 받으면 쌓여요." 꺼짐 상태(`GrowthOff`): "성장 기록이 꺼져 있어요" + [설정으로 이동] (+ 배너).
+
+**차트 위젯** (`gui/growth_widgets.py`, QPainter, 외부 라이브러리 없음, 색은 `tokens.LIGHT` 조회만):
+- `BarChart`: 높이 120 고정, 막대 폭 ≤ 40·최소 6, 선택 주 `primary` + 굵은 라벨 / 나머지 `border_strong`, 값 0 은 2px 기준선만, 막대 위 숫자(`text_2`), x 라벨 "09-21"(`text_3`, 좁으면 격 주 생략). accessibleName "주별 Pass 문제 수" + accessibleDescription/툴팁 "09-21: 5, 09-28: 3 …".
+- `SparkLine`: 96×24, `text_3` 1.5px 선, None 은 선을 끊고 점 생략, 마지막 점만 `primary` 원, 유효 값이 2개 미만이면 "-". accessibleDescription "{이름}: 첫값 → 끝값 (낮을수록 좋음)".
+- 값·변화는 항상 옆 글자에도 있어 색·길이만으로 의미를 전달하지 않는다.
+
+**설정 "성장 기록" 카드** (AI 코치 카드 다음): 체크박스 "성장 기록 사용"(`GrowthEnabledCheck`) + `hint`, 체크박스 "주간 AI 코멘트 자동 생성"(`GrowthCommentCheck`, 성장 기록이 꺼지면 비활성) + `hint`, [성장 기록 지우기](확인창 "성장 리포트와 분류 기록이 삭제됩니다") + `hint` "기록은 ~/.swea-fetch/coach/profile 에만 있고 GitHub 로 올라가지 않습니다". 저장은 즉시 `.env`.
+
+**알림**: 상태바 배지 `QPushButton[class=link]#GrowthBadge` "새 성장 리포트 ↗"(2개 이상 "새 성장 리포트 {n}개 ↗", 클릭 → 성장 탭), 앱 시작 메시지 6초(복습이 있으면 "복습 {n}개 · 새 성장 리포트 — 최근/성장 탭에서 확인" 한 메시지), AI 코치 탭 푸터 아래 `muted` 팁 한 줄 `#GrowthTip` ("성장 팁 · 최근 3번 연속 '{이름}' 이(가) 지적됐어요. {팁}"). 토스트 없음.
+
 ## 7. 다이얼로그 (2개)
 
 1. **폴더 찾아보기** — `QFileDialog.getExistingDirectory`, 네이티브. 커스텀 없음.
@@ -479,8 +517,8 @@ QWidget#Page (QStackedLayout: 빈 상태 | 본문)
 
 ## 10. 키보드·접근성
 
-- 탭 순서(저장): 번호 → 주제 → 덮어쓰기 → 뼈대만 → 색인 → [저장] → [미리보기] → 결과 카드 버튼 → 로그 토글. 내비는 Ctrl+1~5 (Tab 순서에서는 맨 앞).
-- 단축키: Enter = 저장(번호·주제 입력에서), Ctrl+Enter = 미리보기, Esc(저장 페이지) = **배너가 보이면 배너 닫기, 아니면 로그 지우기** (배너는 포커스를 받지 않으므로 표시 여부로 판단), F5 = 최근 새로고침, Ctrl+, = 설정, Ctrl+1~5 = 페이지.
+- 탭 순서(저장): 번호 → 주제 → 덮어쓰기 → 뼈대만 → 색인 → [저장] → [미리보기] → 결과 카드 버튼 → 로그 토글. 내비는 Ctrl+1~6 (Tab 순서에서는 맨 앞). M19 로 성장이 Ctrl+5, 설정이 Ctrl+6.
+- 단축키: Enter = 저장(번호·주제 입력에서), Ctrl+Enter = 미리보기, Esc(저장 페이지) = **배너가 보이면 배너 닫기, 아니면 로그 지우기** (배너는 포커스를 받지 않으므로 표시 여부로 판단), F5 = 최근 새로고침, Ctrl+, = 설정, Ctrl+1~6 = 페이지 (순서: 저장·문제·검증·최근·성장·설정).
 - 내비 `QListWidget#nav` 는 Fusion 기본 포커스 점선을 유지한다 (`outline: 0` 금지) — 키보드 포커스 위치가 보여야 함.
 - 모든 입력에 `setBuddy` 레이블 + `setAccessibleName`. 아이콘 전용 버튼(배너 ×)에 `setToolTip` + `setAccessibleName("닫기")`.
 - 포커스 링: 모든 포커스 가능 위젯에서 2px `primary` 가시. Qt 기본 점선 outline 은 QSS 로 제거하지 않는다(중복 허용).
@@ -515,6 +553,7 @@ HiDPI: 모든 값 px 토큰 → Qt 가 DPR 로 스케일. SVG 아이콘만 사�
 | `nav-fetch.svg` | 내비 "저장" (아래 화살표 + 트레이) | |
 | `nav-check.svg` | 내비 "검증" (사각 + 재생) | |
 | `nav-history.svg` | 내비 "최근" (시계) | |
+| `nav-growth.svg` | 내비 "성장" (축 + 상승 꺾은선) | M19 |
 | `nav-settings.svg` | 내비 "설정" (슬라이더 3줄) | |
 | `status-success.svg` / `status-error.svg` / `status-warning.svg` | 배너·카드 상태 아이콘, 채움형 | 색은 각 시맨틱 원색 + 흰 글리프 |
 | `app.svg` | 앱 아이콘 (primary 둥근 사각 + 흰 트레이 화살표) | `.ico` 는 빌드 단계에서 생성: `python -c "from PIL import Image; ..."` 또는 `cairosvg` — 256/48/32/16 포함. 저장소에 `design/icons/app.ico` 로 커밋 (바이너리 ~50KB 허용) |
@@ -579,4 +618,5 @@ HiDPI: 모든 값 px 토큰 → Qt 가 DPR 로 스케일. SVG 아이콘만 사�
   7. **상태바 진행 메시지**: 워커 progress 를 로그 + `statusBar().showMessage(4s)` 로 그대로 전달 (스펙 §5.5).
   8. **builder QSS 보강** (`gui/app.py::_builder_supplement`): `QFrame#Sidebar`, 드롭 중 카드 테두리 `[state="drop"]`, 미리보기 블록 `QLabel#preview`. 색은 토큰만 사용.
   - 실제 렌더링 캡처: `docs/gui-screenshots/*.png` (offscreen + Windows 글꼴). 디자이너 확인 요청.
+  - M19 성장 페이지 대체안 (builder, 새 토큰 없음): ① "새 리포트" 배지는 Badge 상태 `info` 가 없어 `running`(primary_soft, 같은 색)으로 표시. ② 약점·강점 비율은 100% 를 넘을 수 있어(강도 합 ÷ 분류 건수) % 대신 "응답당 강도 2.0 → 1.0" 문장과 "점수 N · 분류 M건 중" 값으로 표시, 막대 길이는 응답당 평균 강도/3. ③ "AI 분류 기반 참고용" 은 720px 에서 헤더가 가로로 넘치지 않도록 제목 줄 아래 한 줄로 배치. ④ `design/icons/nav-growth.svg` 는 디자이너 산출물 위치에 builder 가 임시로 만든 것 — 디자이너 검토 요청.
   - (없음)

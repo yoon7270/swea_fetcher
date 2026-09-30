@@ -9,6 +9,7 @@ set_env_values: .env 의 개별 키 갱신 (M7: SWEA_COMMIT_TEMPLATE, SWEA_AUTO_
 push_problem  : 문제 폴더만 git 커밋(+푸시) (M7). 자격증명은 다루지 않는다
 submit_problem: SWEA 에 제출하고 채점 결과를 받는다 (M8). Pass 면 push 까지 (submit_and_push)
 ask_coach     : AI 코치 (M17) — 코드 평가·힌트·정답 풀이·연결 테스트. 호출 전 사용자 동의 필수 (GUI 전용)
+growth_*      : 성장 기록 (M19) — 개요·리포트 조회, 주간 AI 코멘트 생성(generate_growth), 삭제. 동의는 consent_ok 콜백 (GUI 전용)
 
 네트워크·파일 I/O 가 있으므로 GUI 는 워커 스레드에서 호출한다.
 """
@@ -27,7 +28,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Callable, Sequence
 
-from . import ai_engine, ai_prompts, auth, client, coach, config, content_cache, gitops, lookup, parser, storage, submit
+from . import ai_engine, ai_prompts, auth, client, coach, config, content_cache, gitops, growth, growth_tags, lookup, parser, storage, submit
 from .config import Settings
 from .errors import AiError, GitError, InvalidInput, SweaFetchError
 from .gitops import GitResult
@@ -600,7 +601,9 @@ def submit_problem(
     _save_last_submit(settings, num, cid, cat_type, cat_id, result)
     outcome = SubmitOutcome(result, None, notes, cid, cat_type, cat_id)
     # AI 코치 오답 횟수 기록 (M17). 채점이 끝난 제출만 센다. 실패해도 제출 결과·CLI 출력은 그대로
+    prev_record = coach.get_record(settings, num) if settings.growth else None  # 성장 기록의 wb (이번 제출 직전 오답 누적)
     outcome.coach = coach.record_submit(settings, num, topic, read_skeleton_title(problem_dir / f"{num}.py") or "", result)
+    _record_growth_submit(settings, num, topic, result, prev_record)
     if push and result.passed:
         if settings.auto_push_scope == "root":
             # 루트 전체 범위는 sync_now 로 (예외 없이 note 반환)
@@ -612,6 +615,17 @@ def submit_problem(
         else:
             outcome.git = push_problem(settings, topic, num, message=message, push=True, progress=progress)
     return outcome
+
+
+def _record_growth_submit(settings: Settings, num: int, topic: str, result: SubmitResult, prev_record: coach.ProblemRecord | None) -> None:
+    """성장 기록의 제출 이벤트 (M19). 실패해도 예외 없음 — 제출 결과·CLI 출력·종료 코드는 그대로."""
+    if not settings.growth:
+        return
+    try:
+        res = coach.classify(result.passed, result.summary, result.run_error, result.timed_out)
+        growth.record_submit(settings, num, topic, res, prev_record.wrong_count if prev_record else 0, at=growth.now())
+    except Exception as e:  # noqa: BLE001
+        log.warning("성장 기록 실패: %s", e)
 
 
 LAST_SUBMIT_FILE = "last_submit.json"
@@ -700,6 +714,7 @@ class CoachResult:
     outcomes: list[EngineOutcome] = field(default_factory=list)  # codex, claude 순 (실행 대상 + 미설치)
     hint_done: int = 0  # 요청 후 대상 엔진들의 받은 힌트 단계 수 중 최소 (코치 바용)
     review_due: date | None = None  # solution 성공 시 복습 예정일
+    growth_tip: str | None = None  # 같은 약점이 3번 연속 지적됐을 때의 고정 문구 한 줄 (M19, 없으면 None)
 
     @property
     def cancelled(self) -> bool:
@@ -857,7 +872,7 @@ def ask_coach_multi(
     힌트 단계는 대상 엔진이 공통으로 진행한다 (받은 단계 최소 + 1). 앞선 엔진은 캐시에서 그 단계까지만 보여준다.
     정답 풀이는 화면 표시용으로만 돌려준다 — {num}.py 등 루트 폴더에는 절대 쓰지 않는다 (기록은 config_dir/coach/).
     """
-    if kind not in ai_prompts.KINDS:
+    if kind not in ai_prompts.COACH_KINDS:
         raise ValueError(f"알 수 없는 종류: {kind}")
     sel = resolve_engines(settings)
     targets, missing = list(sel.engines), list(sel.missing)
@@ -942,6 +957,7 @@ def ask_coach_multi(
 
     # 2) 엔진 호출 (자료 수집은 1회, 두 엔진이 공유)
     fresh = 0
+    recorded: list[str] = []  # 성장 이벤트를 남긴 엔진 (팁 판정 여부)
     if call:
         statement, title, notes = _gather_statement(settings, topic, num, progress)
         if cancelled_now():
@@ -960,6 +976,7 @@ def ask_coach_multi(
             run_error=run_error,
             execution_time=execution_time,
             level=level or 1,
+            growth=settings.growth,
         )
         _emit(progress, f"{' · '.join(e.short_label for e in call)} 에게 묻는 중")
 
@@ -970,7 +987,10 @@ def ask_coach_multi(
                 res = ai_engine.run(engine, prompt, on_start=start_hook(key), is_cancelled=is_cancelled)
                 if res.cancelled or cancelled_now():
                     return EngineOutcome(key, label, cancelled=True)
-                text = ai_prompts.clean_titles(res.text)
+                # 성장 기록용 profile 블록은 clean_titles/filter_hint/first_code_block 보다 먼저 떼어 표시·캐시·다음 힌트 어디에도 남기지 않는다.
+                # SWEA_GROWTH=0 이어도 (AI 가 요청하지 않은 블록을 내는 경우 대비) 항상 제거한다
+                raw_text, parsed = growth_tags.extract(res.text, kind)
+                text = ai_prompts.clean_titles(raw_text)
                 my_notes = list(notes)
                 if res.truncated:
                     my_notes.append("응답이 너무 길어 일부만 표시합니다")
@@ -980,6 +1000,8 @@ def ask_coach_multi(
                         my_notes.append("긴 코드 블록을 제거했습니다")
                     if not text.strip():
                         raise AiError("힌트 응답이 비어 있습니다", hint="다시 시도하세요")
+                elif not text.strip():
+                    raise AiError("응답이 비어 있습니다", hint="다시 시도하세요")
                 entry = {"markdown": text, "at": datetime.now().isoformat(timespec="seconds")}
                 answer = CoachAnswer(kind, text, label, key, elapsed=res.elapsed, notes=my_notes)
                 with _CACHE_LOCK:  # 재로드 -> 이 엔진 슬롯만 수정 -> 저장 (다른 엔진 결과를 덮어쓰지 않는다)
@@ -995,6 +1017,12 @@ def ask_coach_multi(
                         slot.solution = entry
                         answer.code = ai_prompts.first_code_block(text) or ""
                     coach.save_answers(settings, fresh_cache)
+                if settings.growth:  # 새로 받은 응답만 (캐시 적중은 이벤트를 만들지 않는다). 힌트 1단계는 태그를 요청하지 않으므로 ok=false
+                    try:
+                        if growth.record_coach(settings, num, topic, kind, level, key, parsed if growth_tags.wants_tags(kind, level) else None, at=growth.now()):
+                            recorded.append(key)
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("성장 기록 실패: %s", e)
                 return EngineOutcome(key, label, answer)
             except Exception as e:  # noqa: BLE001 — 한 엔진의 예외가 다른 엔진을 죽이지 않는다
                 if cancelled_now():
@@ -1018,7 +1046,10 @@ def ask_coach_multi(
     with _CACHE_LOCK:
         final = coach.load_answers(settings, num, code)
     hint_done = min(len(final.slot(e.name).hints) for e in targets)
-    return finish(hint_done=hint_done, review_due=review_due)
+    tip = None
+    if recorded and not cancelled_now():
+        tip = growth.pending_tip(settings, growth.now())
+    return finish(hint_done=hint_done, review_due=review_due, growth_tip=tip)
 
 
 def ask_coach(
@@ -1039,7 +1070,7 @@ def ask_coach(
 
     설정이 both 면 codex 우선 첫 설치 엔진 1개만 쓴다. 호출 전 사용자 동의 필수. 취소는 예외 없이 CoachAnswer.cancelled=True.
     """
-    if kind not in ai_prompts.KINDS:
+    if kind not in ai_prompts.COACH_KINDS:
         raise ValueError(f"알 수 없는 종류: {kind}")
     engine = resolve_engines(settings).engines[0]
     result = ask_coach_multi(
@@ -1054,3 +1085,155 @@ def ask_coach(
     if o.answer is None:
         raise o.error if o.error is not None else AiError(o.failure.title if o.failure else "AI 코치 실패")
     return o.answer
+
+
+# --- 성장 기록 (M19) -------------------------------------------------------------------
+# 조회 함수는 파일 읽기 전용이라 UI 스레드에서 불러도 된다 (이벤트 파일이 커져 느려지면 워커로). 시각은 growth.now() (테스트가 대체).
+
+GrowthOverview = growth.GrowthOverview
+GrowthReport = growth.GrowthReport
+ConsentCheck = Callable[[str], bool]
+
+
+@dataclass
+class GrowthRunResult:
+    """generate_growth 결과. 예외는 던지지 않고 blocked / failure 로 담는다."""
+
+    new_weeks: list[date] = field(default_factory=list)  # 이번 호출에서 새로 확정된 주 (월요일)
+    commented_week: date | None = None  # AI 코멘트를 새로 저장한 주
+    blocked: str | None = None  # off | no_engine | needs_consent | low_data (호출하지 않았고 시도 횟수도 쓰지 않음)
+    failure: CoachFailure | None = None  # 코멘트 생성 실패 (리포트 통계는 이미 저장됨)
+    cancelled: bool = False
+    engine_key: str = ""  # blocked 가 needs_consent 일 때 동의가 필요한 엔진
+
+
+def growth_overview(settings: Settings, now: datetime | None = None) -> growth.GrowthOverview:
+    """이번 주 진행 중 요약 + 확정 리포트 목록(최신순) + 최근 8주 Pass 문제 수 + 미확인 수."""
+    return growth.overview(settings, now)
+
+
+def growth_report(settings: Settings, week_start: date, now: datetime | None = None) -> growth.GrowthReport:
+    """한 주의 리포트 (확정 스냅샷 또는 이번 주 즉석 계산). 8주 시계열과 판정·코멘트 상태 포함."""
+    return growth.report(settings, week_start, now)
+
+
+def growth_due(settings: Settings, now: datetime | None = None) -> bool:
+    """만들 스냅샷 또는 자동 코멘트 후보가 있는가 (파일 확인만 — 30분 틱용)."""
+    if not settings.growth:
+        return False
+    return growth.is_due(settings, now, comment=settings.growth_comment)
+
+
+def growth_unseen_count(settings: Settings) -> int:
+    """아직 성장 탭에서 보지 않은 확정 리포트 수 (상태바 배지용)."""
+    return growth.unseen_count(settings) if settings.growth else 0
+
+
+def growth_mark_seen(settings: Settings, week_start: date, now: datetime | None = None) -> None:
+    growth.mark_seen(settings, week_start, now)
+
+
+def growth_comment_engine(settings: Settings) -> ai_engine.EngineInfo | None:
+    """주간 코멘트에 쓸 엔진 (설정 auto/codex/claude 를 따르고 both 는 설치된 첫 엔진 = Codex 우선). 없으면 None (폴백 없음)."""
+    try:
+        return ai_engine.resolve_all(settings.ai_engine).engines[0]
+    except (AiError, IndexError):
+        return None
+
+
+def growth_comment_blocker(settings: Settings, consent_ok: ConsentCheck, manual: bool = False) -> str | None:
+    """성장 탭 안내 결정: "off" | "comment_off" | "no_engine" | "needs_consent" | None. manual 이면 자동 생성 설정은 무시한다."""
+    if not settings.growth:
+        return "off"
+    if not manual and not settings.growth_comment:
+        return "comment_off"
+    engine = growth_comment_engine(settings)
+    if engine is None:
+        return "no_engine"
+    if not consent_ok(engine.name):
+        return "needs_consent"
+    return None
+
+
+def clear_growth(config_dir: Path) -> int:
+    """성장 기록(coach/profile: 이벤트·주간 리포트·팁 상태) 삭제. 지운 파일 수. AI 응답 캐시·복습 일정은 그대로."""
+    return growth.clear(Path(config_dir))
+
+
+def generate_growth(
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+    consent_ok: ConsentCheck,
+    on_start: Callable[[object], None] | None = None,
+    on_begin: Callable[[date], None] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+    on_stats: Callable[[list[date]], None] | None = None,
+    on_comment: Callable[[date, str], None] | None = None,
+    force_week: date | None = None,
+) -> GrowthRunResult:
+    """주간 리포트 확정(통계) + 주간 AI 코멘트 1건. 예외는 던지지 않고 결과에 담는다.
+
+    호출 전 사용자 동의는 consent_ok(엔진 키) 콜백이 대신한다 — 이 함수(코어)는 동의를 모른다. 거짓이면 AI 를 호출하지 않는다.
+    AI 로는 집계 숫자·카테고리 이름·판정 문장·기간만 보낸다 (growth.comment_payload 의 허용 키). 코드·지문·문제 번호/제목·주제명은 보내지 않는다.
+    force_week: 수동 [코멘트 받기] — 자동 생성 설정·나이·시도 횟수 제한을 무시한다 (표본 조건은 유지).
+    엔진은 설정(auto/codex/claude)을 따르고 both 는 설치된 첫 엔진 1개만. 고정 엔진이 없으면 폴백 없이 no_engine.
+    on_stats(새 주) 는 스냅샷을 새로 만든 직후, on_begin(주) 는 엔진 호출 직전, on_start(proc) 는 프로세스가 뜬 직후, on_comment(주, 텍스트) 는 저장 직후.
+    """
+    result = GrowthRunResult()
+    if not settings.growth:
+        result.blocked = "off"
+        return result
+    stamp = now or growth.now()
+    try:
+        result.new_weeks = growth.build_missing_snapshots(settings, stamp)
+        if result.new_weeks and on_stats is not None:
+            on_stats(list(result.new_weeks))
+        if force_week is None and not settings.growth_comment:
+            return result
+        snaps = growth.load_snapshots(settings)
+        snap = growth.comment_candidate(snaps, stamp, force_week)
+        if snap is None:
+            if force_week is not None and force_week in snaps:
+                result.blocked = "low_data"  # 표본이 적은 주는 수동으로도 AI 를 호출하지 않는다
+            return result
+        engine = growth_comment_engine(settings)
+        if engine is None:
+            result.blocked = "no_engine"
+            return result
+        if not consent_ok(engine.name):
+            result.blocked, result.engine_key = "needs_consent", engine.name
+            return result
+        if is_cancelled is not None and is_cancelled():
+            result.cancelled = True
+            return result
+        prev = snaps.get(snap.prev_week) if snap.prev_week else None
+        prompt = ai_prompts.build_weekly_prompt(growth.comment_payload(snap, prev))
+        if on_begin is not None:
+            on_begin(snap.week_start)
+        try:
+            res = ai_engine.run(engine, prompt, on_start=on_start, is_cancelled=is_cancelled)
+            if res.cancelled or (is_cancelled is not None and is_cancelled()):
+                result.cancelled = True  # 취소는 상태 변경 없음
+                return result
+            text = growth.clean_comment(res.text)
+            if not text:
+                raise AiError("코멘트 응답이 비어 있습니다", hint="다시 받기를 눌러 보세요")
+        except Exception as e:  # noqa: BLE001 — 통계는 이미 저장되어 있다. 코멘트만 실패로 남긴다
+            if is_cancelled is not None and is_cancelled():
+                result.cancelled = True
+                return result
+            if not isinstance(e, AiError):
+                log.exception("성장 코멘트 내부 오류")
+            result.failure = _failure_of(e, "weekly")
+            growth.update_snapshot(settings, snap.week_start, comment_status="failed", comment_attempts=snap.comment_attempts + 1)
+            return result
+        comment = {"text": text, "engine": engine.label, "at": stamp.isoformat(timespec="seconds")}
+        growth.update_snapshot(settings, snap.week_start, comment=comment, comment_status="ok")
+        result.commented_week = snap.week_start
+        if on_comment is not None:
+            on_comment(snap.week_start, text)
+    except Exception as e:  # noqa: BLE001
+        log.exception("성장 기록 생성 내부 오류")
+        result.failure = CoachFailure("failed", f"내부 오류: {e}", "다시 시도하세요")
+    return result

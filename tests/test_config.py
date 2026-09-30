@@ -342,3 +342,26 @@ def test_ai_engine_invalid_falls_back_to_auto(root_dir, config_dir, fake_keyring
 
 def test_ai_engine_both_allowed(root_dir, config_dir, fake_keyring):
     assert _load_ai(root_dir, config_dir, fake_keyring, SWEA_AI_ENGINE="Both").ai_engine == "both"
+
+
+# =============================================================================
+# M19: 성장 기록 (SWEA_GROWTH / SWEA_GROWTH_COMMENT)
+# =============================================================================
+
+
+def test_growth_settings_defaults_and_parsing(root_dir, config_dir, fake_keyring):
+    s = _load_ai(root_dir, config_dir, fake_keyring)
+    assert (s.growth, s.growth_comment) == (True, True)
+    s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_GROWTH="0", SWEA_GROWTH_COMMENT="off")
+    assert (s.growth, s.growth_comment) == (False, False)
+    s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_GROWTH="TRUE", SWEA_GROWTH_COMMENT="no")
+    assert (s.growth, s.growth_comment) == (True, False)
+    s2 = Settings(root=root_dir, user_id="u", password="p")  # 기존 생성 코드 호환
+    assert s2.growth is True and "growth=" not in repr(s2)
+
+
+def test_growth_settings_invalid_falls_back_to_default(root_dir, config_dir, fake_keyring, caplog):
+    with caplog.at_level(logging.WARNING, logger="swea_fetcher.config"):
+        s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_GROWTH="maybe", SWEA_GROWTH_COMMENT="2")
+    assert (s.growth, s.growth_comment) == (True, True)
+    assert "SWEA_GROWTH " in caplog.text and "SWEA_GROWTH_COMMENT" in caplog.text

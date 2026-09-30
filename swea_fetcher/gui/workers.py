@@ -116,6 +116,49 @@ class SubmitWorker(BaseWorker):
         return service.submit_problem(self.settings, self.topic, self.num, push=self.push, progress=self.progress.emit)
 
 
+class GrowthWorker(BaseWorker):
+    """성장 기록 주간 리포트 확정 + 주간 AI 코멘트 1건 (M19). 결과는 service.GrowthRunResult (finished_ok).
+
+    취소 가능 (CoachWorker 와 같은 방식: 프로세스 트리 종료, 아직 안 떴으면 뜨는 즉시). 코치 요청과 병행해도 된다.
+    consented: UI 스레드에서 미리 읽은 "동의받은 엔진 키" 집합 (QSettings 를 워커 스레드에서 읽지 않는다).
+    시그널: stats_ready(list[date]) 새 주 확정 / comment_started(date) / comment_ready(date) / blocked(str) / failed(title, hint, detail).
+    """
+
+    stats_ready = Signal(object)
+    comment_started = Signal(object)
+    comment_ready = Signal(object)
+    blocked = Signal(str)
+
+    def __init__(self, settings: Settings, consented: frozenset | set, force_week=None, parent=None) -> None:
+        super().__init__(parent)
+        self.settings, self.consented, self.force_week = settings, frozenset(consented), force_week
+        self._proc = None
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+        proc = self._proc
+        if proc is not None:
+            ai_engine.kill_tree(proc)
+
+    def _on_start(self, proc) -> None:
+        self._proc = proc
+        if self._cancel_requested:
+            ai_engine.kill_tree(proc)
+
+    def work(self) -> service.GrowthRunResult:
+        res = service.generate_growth(
+            self.settings, consent_ok=lambda key: key in self.consented, on_start=self._on_start, on_begin=self.comment_started.emit,
+            is_cancelled=lambda: self._cancel_requested, on_stats=self.stats_ready.emit,
+            on_comment=lambda week, _text: self.comment_ready.emit(week), force_week=self.force_week,
+        )
+        if res.blocked:
+            self.blocked.emit(res.blocked)
+        if res.failure is not None:
+            self.failed.emit(res.failure.title, res.failure.hint, "")
+        return res
+
+
 class FuncWorker(BaseWorker):
     """임의 함수를 워커에서 실행 (list_recent 등 파일 I/O)."""
 

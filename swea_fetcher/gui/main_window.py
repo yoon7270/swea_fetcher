@@ -1,8 +1,8 @@
-"""MainWindow (스펙 §3): 사이드바(앱 이름 + 내비 4) + 페이지 스택 + 상태바."""
+"""MainWindow (스펙 §3): 사이드바(앱 이름 + 내비 6) + 페이지 스택 + 상태바."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QSettings, QSize, Qt, QTimer, QUrl
@@ -25,24 +25,29 @@ from .. import config, content_cache, service, storage, update
 from ..config import Settings
 from ..errors import ConfigMissing
 from .pages.check_page import CheckPage
+from .coach_widgets import growth_consent_ok
 from .pages.fetch_page import FetchPage
+from .pages.growth_page import GrowthPage
 from .pages.history_page import HistoryPage
 from .pages.problem_page import ProblemPage
 from .pages.settings_page import SettingsPage
 from .theme import tokens
 from .widgets import nav_icon, set_class
-from .workers import FetchWorker, FuncWorker
+from .workers import FetchWorker, FuncWorker, GrowthWorker
 
 PAGES = (
     ("저장", "fetch", "nav-fetch"),
     ("문제", "problem", "nav-problem"),
     ("검증", "check", "nav-check"),
     ("최근", "history", "nav-history"),
+    ("성장", "growth", "nav-growth"),  # M19: 최근 뒤·설정 앞 (설정은 마지막에 두는 관례)
     ("설정", "settings", "nav-settings"),
 )
 APP_TITLE = "SWEA Fetch"
 NAV_HISTORY_MAX = 50  # 뒤로 가기 기록 상한
 UPDATE_CHECK_DELAY_MS = 1500  # 창이 뜬 뒤에 조회 (시작 속도에 영향 없게). app.main() 이 사용
+GROWTH_KICK_DELAY_MS = 1500  # 시작 후 지연 실행 (M19 성장 리포트 확정·주간 코멘트)
+GROWTH_TICK_MS = 30 * 60 * 1000  # 켜 둔 채 월요일을 넘기는 경우 대응: 30분마다 파일만 확인
 
 
 class MainWindow(QMainWindow):
@@ -53,6 +58,9 @@ class MainWindow(QMainWindow):
         self.settings: Settings | None = None
         self._update_worker: FuncWorker | None = None
         self._stmt_worker: FetchWorker | None = None  # 최근 탭 "문제 보기" 의 지문만 가져오기 (M14)
+        self._growth_worker: GrowthWorker | None = None  # 성장 리포트 확정·주간 코멘트 (M19)
+        self._growth_queued: date | None = None  # 워커 실행 중에 들어온 수동 코멘트 요청
+        self._growth_unseen = 0
         self.autosync = None  # AutoSyncController (M11) — _build 뒤 생성
         self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(*tokens.WINDOW_MIN)
@@ -95,8 +103,9 @@ class MainWindow(QMainWindow):
         self.problem_page = ProblemPage(self.qs)
         self.check_page = CheckPage(self.qs)
         self.history_page = HistoryPage()
+        self.growth_page = GrowthPage(self.qs)
         self.settings_page = SettingsPage(self.qs, self.config_dir)
-        for p in (self.fetch_page, self.problem_page, self.check_page, self.history_page, self.settings_page):  # PAGES 순서
+        for p in self._pages():  # PAGES 순서
             self.stack.addWidget(p)
         lay.addWidget(self.stack, 1)
         self.setCentralWidget(central)
@@ -126,10 +135,17 @@ class MainWindow(QMainWindow):
         self.review_badge.setCursor(Qt.CursorShape.PointingHandCursor)
         self.review_badge.hide()
         self.review_badge.clicked.connect(lambda: self.goto("history"))
+        self.growth_badge = QPushButton("")  # 새 성장 리포트 (M19): 클릭 → 성장 탭
+        self.growth_badge.setObjectName("GrowthBadge")
+        set_class(self.growth_badge, "link")
+        self.growth_badge.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.growth_badge.hide()
+        self.growth_badge.clicked.connect(lambda: self.goto("growth"))
         sb = self.statusBar()
         sb.addWidget(self.status_login)
         sb.addWidget(self.autosync_badge)
         sb.addWidget(self.review_badge)
+        sb.addWidget(self.growth_badge)
         sb.addPermanentWidget(self.update_badge)
         sb.addPermanentWidget(self.status_root)
 
@@ -137,10 +153,13 @@ class MainWindow(QMainWindow):
         self.nav.currentRowChanged.connect(self._page_changed)
         for p in (self.fetch_page, self.check_page, self.settings_page):
             p.busy_changed.connect(self._set_busy)
-        for p in (self.fetch_page, self.problem_page, self.check_page, self.history_page, self.settings_page):
+        for p in self._pages():
             p.status_message.connect(self.flash)
-        for p in (self.fetch_page, self.problem_page, self.check_page, self.history_page):
+        for p in (self.fetch_page, self.problem_page, self.check_page, self.history_page, self.growth_page):
             p.goto_requested.connect(self.goto)
+        self.growth_page.seen_changed.connect(self._refresh_growth_badge)
+        self.growth_page.comment_requested.connect(self._growth_comment_requested)
+        self.growth_page.cancel_requested.connect(self._growth_cancel)
         self.fetch_page.problem_ready.connect(self._on_problem_ready)
         self.fetch_page.cached_problem_requested.connect(self._show_cached_problem)
         self.history_page.problem_requested.connect(self._open_recent_problem)
@@ -161,7 +180,7 @@ class MainWindow(QMainWindow):
         self.autosync.status_changed.connect(self._on_autosync_status)
         self.autosync.synced.connect(lambda r: self.check_page._show_git_log(f"[자동 동기화] {r.note}\n{r.output}"))
 
-        for i in range(len(PAGES)):
+        for i in range(len(PAGES)):  # 인덱스 기반 (내비 순서가 바뀌면 함께 바뀐다). Ctrl+, 는 키 기반
             QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self, activated=lambda i=i: self.nav.setCurrentRow(i))
         QShortcut(QKeySequence("Ctrl+,"), self, activated=lambda: self.goto("settings"))
 
@@ -173,6 +192,19 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Alt+Left"), self, activated=self.go_back)
         QShortcut(QKeySequence("Alt+Right"), self, activated=self.go_forward)
         QApplication.instance().installEventFilter(self)
+
+        # 성장 기록 (M19): 시작 후 지연 실행 + 30분 틱 (틱은 파일 확인만, 할 일이 있을 때만 워커)
+        self._growth_first = QTimer(self)
+        self._growth_first.setSingleShot(True)
+        self._growth_first.timeout.connect(self._growth_kick)
+        self._growth_timer = QTimer(self)
+        self._growth_timer.setInterval(GROWTH_TICK_MS)
+        self._growth_timer.timeout.connect(self._growth_kick)
+        self._growth_timer.start()
+
+    def _pages(self) -> tuple:
+        """스택에 넣는 순서 = PAGES 순서."""
+        return (self.fetch_page, self.problem_page, self.check_page, self.history_page, self.growth_page, self.settings_page)
 
     def _page_changed(self, row: int) -> None:
         self.stack.setCurrentIndex(row)
@@ -307,20 +339,24 @@ class MainWindow(QMainWindow):
             self.settings = config.load_settings(self.config_dir)
         except ConfigMissing:
             self.settings = None
-            for p in (self.fetch_page, self.problem_page, self.check_page, self.history_page, self.settings_page):
+            for p in self._pages():
                 p.set_settings(None)
             self._update_status()
+            self._refresh_growth_badge()
             self._refresh_review_badge()
             if not stay:
                 self.settings_page.show_first_run()
                 self.goto("settings")
             return
-        for p in (self.fetch_page, self.problem_page, self.check_page, self.history_page, self.settings_page):
+        for p in self._pages():
             p.set_settings(self.settings)
         if self.autosync is not None:
             self.autosync.configure(self.settings)
         self._update_status()
-        self._refresh_review_badge(startup=first_run)
+        self._refresh_growth_badge()
+        self._refresh_review_badge(startup=first_run)  # 복습·성장 알림은 한 메시지로 합친다
+        if first_run:
+            self._growth_first.start(GROWTH_KICK_DELAY_MS)
         if first_run:
             key = str(self.qs.value("window/last_page_key", "fetch", type=str))
             row = next((i for i, (_l, k, _ic) in enumerate(PAGES) if k == key), 0)
@@ -338,8 +374,99 @@ class MainWindow(QMainWindow):
         self.review_badge.setText(f"복습 {n}개 ↗")
         self.review_badge.setToolTip("클릭하면 최근 탭의 복습 목록으로 이동합니다")
         self.review_badge.setVisible(n > 0)
-        if startup and n > 0:
-            self.flash(f"복습할 문제 {n}개가 있습니다 — 최근 탭에서 확인", 6000)
+        if startup:
+            msg = self._notice_text(n, self._growth_unseen > 0)
+            if msg:
+                self.flash(msg, 6000)
+
+    @staticmethod
+    def _notice_text(review_n: int, growth_new: bool) -> str | None:
+        """시작·리포트 도착 알림 문구. 복습과 성장 알림이 함께 있으면 한 메시지 (서로 덮어쓰지 않게)."""
+        if review_n > 0 and growth_new:
+            return f"복습 {review_n}개 · 새 성장 리포트 — 최근/성장 탭에서 확인"
+        if review_n > 0:
+            return f"복습할 문제 {review_n}개가 있습니다 — 최근 탭에서 확인"
+        if growth_new:
+            return "새 성장 리포트가 도착했어요 — 성장 탭에서 확인"
+        return None
+
+    def _refresh_growth_badge(self) -> None:
+        """미확인 성장 리포트 수를 상태바 배지에 (파일 읽기만). 성장 기록이 꺼져 있으면 숨긴다."""
+        n = service.growth_unseen_count(self.settings) if self.settings is not None else 0
+        self._growth_unseen = n
+        self.growth_badge.setText("새 성장 리포트 ↗" if n <= 1 else f"새 성장 리포트 {n}개 ↗")
+        self.growth_badge.setToolTip("클릭하면 성장 탭으로 이동합니다")
+        self.growth_badge.setVisible(n > 0)
+
+    # --- 성장 기록 (M19) ---------------------------------------------------------------------
+    def _growth_kick(self, force_week: date | None = None) -> None:
+        """리포트 확정·주간 코멘트가 필요하면 GrowthWorker 시작. 성장 기록이 꺼져 있거나 워커가 돌고 있거나 할 일이 없으면 아무 것도 하지 않는다."""
+        if not isinstance(force_week, date):
+            force_week = None  # QTimer.timeout 이 넘기는 인자 등 무시
+        if self.settings is None or not self.settings.growth:
+            return
+        if self._growth_worker is not None:
+            if force_week is not None:
+                self._growth_queued = force_week  # 끝나면 이어서
+            return
+        if force_week is None and not service.growth_due(self.settings):
+            return
+        consented = frozenset(k for k in ("codex", "claude") if growth_consent_ok(self.qs, k))
+        w = GrowthWorker(self.settings, consented, force_week, self)
+        w.stats_ready.connect(self._on_growth_stats)
+        w.comment_started.connect(self.growth_page.set_comment_running)
+        w.comment_ready.connect(self._on_growth_comment)
+        w.blocked.connect(self._on_growth_blocked)
+        w.failed.connect(lambda title, _hint, _detail: self._on_growth_failed(title))
+        w.finished.connect(self._growth_cleanup)
+        self._growth_worker = w
+        if force_week is not None:
+            self.growth_page.set_comment_running(force_week)
+        w.start()
+
+    def _growth_comment_requested(self, week) -> None:
+        self._growth_kick(week)
+
+    def _growth_cancel(self) -> None:
+        if self._growth_worker is not None:
+            self._growth_worker.cancel()
+        self._growth_queued = None
+
+    def _on_growth_stats(self, weeks) -> None:
+        """새 주간 리포트가 확정됨: 배지 + 알림 (복습 알림과 합쳐 1개 메시지)."""
+        self._refresh_growth_badge()
+        msg = self._notice_text(service.due_count(self.settings) if self.settings is not None else 0, True)
+        if msg:
+            self.flash(msg, 6000)
+        if self.stack.currentWidget() is self.growth_page:
+            self.growth_page.refresh()
+
+    def _on_growth_comment(self, _week) -> None:
+        self.growth_page.set_comment_running(None)
+        if self.stack.currentWidget() is self.growth_page:
+            self.growth_page.refresh()
+
+    def _on_growth_blocked(self, reason: str) -> None:
+        self.growth_page.set_comment_running(None)
+        if reason == "no_engine":
+            self.flash("AI 엔진을 찾지 못해 주간 코멘트를 만들지 못했습니다", 6000)
+
+    def _on_growth_failed(self, title: str) -> None:
+        running = self.growth_page._running_week
+        self.growth_page.note_comment_failure(running, title)
+        self.flash(f"주간 코멘트를 만들지 못했습니다: {title}", 6000)
+
+    def _growth_cleanup(self) -> None:
+        w, self._growth_worker = self._growth_worker, None
+        if w is not None:
+            w.deleteLater()
+        self.growth_page.set_comment_running(None)
+        self._refresh_growth_badge()
+        if self.stack.currentWidget() is self.growth_page:
+            self.growth_page.refresh()
+        queued, self._growth_queued = self._growth_queued, None
+        if queued is not None:
+            self._growth_kick(queued)
 
     def _reload_coach_settings(self) -> None:
         """AI 코치 설정(엔진·오답 기준·복습일)이 바뀜: 페이지 입력을 건드리지 않고 설정 객체만 교체한다."""
@@ -349,6 +476,8 @@ class MainWindow(QMainWindow):
             return
         for p in (self.check_page, self.history_page, self.settings_page):
             p.settings = self.settings
+        self.growth_page.set_settings(self.settings)  # 성장 기록 켜기/끄기·기록 지우기 반영
+        self._refresh_growth_badge()
         self._refresh_review_badge()
         self.history_page.refresh()  # 기록을 지웠다면 복습 카드도 사라져야 한다
 
@@ -412,6 +541,11 @@ class MainWindow(QMainWindow):
             self.autosync._timer.stop()
             if self.settings is not None and self.qs.value("autosync/sync_on_close", True, type=bool):
                 self.autosync.sync_on_close()
+        self._growth_first.stop()
+        self._growth_timer.stop()
+        if self._growth_worker is not None and self._growth_worker.isRunning():
+            self._growth_worker.cancel()  # 최대 5분을 기다리지 않고 프로세스 트리를 먼저 종료
+            self._growth_worker.wait(5000)
         if self._stmt_worker is not None:
             self._stmt_worker.wait(5000)
         for p in (self.settings_page, self.check_page):  # 실행 중 QThread 가 파괴되지 않게

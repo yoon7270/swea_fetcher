@@ -355,7 +355,7 @@ class SettingsPage(QWidget):
         self.review_days.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.ai_consent_reset_btn = QPushButton("AI 전송 동의 초기화")
         self.ai_clear_btn = QPushButton("AI 기록 지우기")
-        self.ai_clear_btn.setToolTip("응답 캐시·오답 횟수·복습 일정을 지웁니다")
+        self.ai_clear_btn.setToolTip("응답 캐시·오답 횟수·복습 일정·성장 기록을 지웁니다")
         th_hint = QLabel("이 횟수 이상 틀리면 정답 풀이를 제안합니다")
         rv_hint = QLabel("정답 풀이를 본 뒤 다시 풀기를 권유할 때까지의 일수")
         for h in (th_hint, rv_hint):
@@ -390,6 +390,37 @@ class SettingsPage(QWidget):
         g7.addWidget(ai_hint, 7, 1, 1, 2)
         g7.setColumnStretch(1, 1)
         root.addWidget(card7)
+
+        # --- 성장 기록 (M19)
+        sec8 = QLabel("성장 기록")
+        set_class(sec8, "section")
+        root.addWidget(sec8)
+        card8 = QFrame()
+        set_class(card8, "card")
+        g8 = QVBoxLayout(card8)
+        g8.setContentsMargins(tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2)
+        g8.setSpacing(tokens.SPACE // 2)
+        self.growth_enabled = QCheckBox("성장 기록 사용")
+        self.growth_enabled.setObjectName("GrowthEnabledCheck")
+        gh1 = QLabel("AI 코치 응답에서 분류 태그만 저장합니다(코드·지문 저장 안 함). 끄면 태그 요청과 기록을 모두 멈춥니다.")
+        self.growth_comment = QCheckBox("주간 AI 코멘트 자동 생성")
+        self.growth_comment.setObjectName("GrowthCommentCheck")
+        gh2 = QLabel("주 1회, 집계 숫자와 분류 이름만 AI 로 보냅니다. 코드·지문·문제 번호는 보내지 않습니다.")
+        gh3 = QLabel("기록은 ~/.swea-fetch/coach/profile 에만 있고 GitHub 로 올라가지 않습니다.")
+        for h in (gh1, gh2, gh3):
+            set_class(h, "hint")
+            h.setWordWrap(True)
+        self.growth_clear_btn = QPushButton("성장 기록 지우기")
+        self.growth_clear_btn.setToolTip("분류 기록과 주간 리포트를 지웁니다 (AI 응답 캐시·복습 일정은 그대로)")
+        g8.addWidget(self.growth_enabled)
+        g8.addWidget(gh1)
+        g8.addSpacing(tokens.SPACE)
+        g8.addWidget(self.growth_comment)
+        g8.addWidget(gh2)
+        g8.addSpacing(tokens.SPACE)
+        g8.addWidget(self.growth_clear_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        g8.addWidget(gh3)
+        root.addWidget(card8)
 
         # --- 진단·업데이트 (M6 §3·§4)
         sec4 = QLabel("진단·업데이트")
@@ -454,6 +485,9 @@ class SettingsPage(QWidget):
         self.ai_test_btn.clicked.connect(self._ai_ping)
         self.ai_consent_reset_btn.clicked.connect(self._reset_ai_consent)
         self.ai_clear_btn.clicked.connect(self._clear_ai_records)
+        self.growth_enabled.toggled.connect(lambda on: self._growth_toggled("SWEA_GROWTH", on))
+        self.growth_comment.toggled.connect(lambda on: self._growth_toggled("SWEA_GROWTH_COMMENT", on))
+        self.growth_clear_btn.clicked.connect(self._clear_growth)
         self.commit_template.editingFinished.connect(self._save_template)
         self.auto_push.clicked.connect(self._auto_push_clicked)
         self.scope_root.toggled.connect(self._scope_root_toggled)
@@ -503,6 +537,9 @@ class SettingsPage(QWidget):
         self.ai_engine.setCurrentIndex(max(0, self.ai_engine.findData(engine)))
         self.ai_threshold.setValue(settings.ai_wrong_threshold if settings else 3)
         self.review_days.setValue(settings.review_days if settings else 3)
+        self.growth_enabled.setChecked(settings.growth if settings else config._truthy(values.get("SWEA_GROWTH") or "1"))
+        self.growth_comment.setChecked(settings.growth_comment if settings else config._truthy(values.get("SWEA_GROWTH_COMMENT") or "1"))
+        self.growth_comment.setEnabled(self.growth_enabled.isChecked())
         self._loading_ai = False
         self._ai_status_stale = True
         if self.isVisible():
@@ -914,8 +951,32 @@ class SettingsPage(QWidget):
         reset_consents(self.qs)
         self.banner.show_message("success", "AI 전송 동의를 초기화했습니다", "다음에 AI 코치를 쓸 때 다시 확인합니다")
 
+    def _growth_toggled(self, key: str, on: bool) -> None:
+        """성장 기록 / 주간 코멘트 체크박스: 저장 즉시 .env (SWEA_GROWTH, SWEA_GROWTH_COMMENT). 성장 기록이 꺼지면 코멘트 옵션은 비활성."""
+        if key == "SWEA_GROWTH":
+            self.growth_comment.setEnabled(on)
+        if self._loading_ai:
+            return
+        service.set_env_values(self.config_dir, **{key: "1" if on else "0"})
+        self.status_message.emit("성장 기록 설정을 저장했습니다")
+        self.coach_settings_changed.emit()
+
+    def _clear_growth(self) -> None:
+        box = QMessageBox(QMessageBox.Icon.Warning, "성장 기록 지우기", "성장 리포트와 분류 기록이 삭제됩니다.\nAI 응답 캐시·복습 일정과 풀이 파일은 건드리지 않습니다.", parent=self)
+        delete = box.addButton("지우기", QMessageBox.ButtonRole.DestructiveRole)
+        set_class(delete, "danger")
+        cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel)
+        box.setEscapeButton(cancel)
+        box.exec()
+        if box.clickedButton() is not delete:
+            return
+        n = service.clear_growth(self.config_dir)
+        self.banner.show_message("success", "성장 기록을 지웠습니다", f"{n}개 파일 삭제" if n else "지울 항목 없음")
+        self.coach_settings_changed.emit()
+
     def _clear_ai_records(self) -> None:
-        box = QMessageBox(QMessageBox.Icon.Warning, "AI 기록 지우기", "AI 응답 캐시·오답 횟수·복습 일정이 모두 지워집니다.\n풀이 파일은 건드리지 않습니다.", parent=self)
+        box = QMessageBox(QMessageBox.Icon.Warning, "AI 기록 지우기", "AI 응답 캐시·오답 횟수·복습 일정·성장 기록(분류·리포트 포함)이 모두 지워집니다.\n풀이 파일은 건드리지 않습니다.", parent=self)
         delete = box.addButton("지우기", QMessageBox.ButtonRole.DestructiveRole)
         set_class(delete, "danger")
         cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)

@@ -154,3 +154,16 @@ def test_clean_titles_strips_copied_guides_only_on_known_sections():
     md = "## 총평 (2~3줄)\n본문 (괄호는 유지)\n## 시간 복잡도 (N 의 정의, 근거)\n## 개선점\n## 기타 (그대로)\n### 정답 코드 (Python 3)"
     out = P.clean_titles(md)
     assert out == "## 총평\n본문 (괄호는 유지)\n## 시간 복잡도\n## 개선점\n## 기타 (그대로)\n### 정답 코드"
+
+
+def test_clean_titles_drops_sys_ok_lines_only():
+    md = (
+        "## 파이썬·SWEA 팁\n"
+        "- `itertools.combinations` 활용은 적절합니다.\n"
+        "- `sys` 모듈 사용도 없어 제출상 문제없습니다.\n"
+        "- sys 사용이 없어 SWEA 조건에 맞습니다.\n"
+        "- `sys.stdin.readline` 은 SWEA 에서 제출이 거부되니 `input()` 으로 바꾸세요.\n"
+    )
+    out = P.clean_titles(md)
+    assert "combinations" in out and "sys.stdin.readline" in out
+    assert "문제없습니다" not in out and "조건에 맞습니다" not in out
