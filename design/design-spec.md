@@ -1279,7 +1279,7 @@ QComboBox QAbstractItemView QScrollBar:vertical { margin: 10px 3px 10px 0; }   /
   선택 표시: 2px `text` 링 + 칩 중앙 `on_primary` 체크(색만으로 선택을 알리지 않음). 프리셋 칩 색은 현재 모드의 보정 후 색. 접근성 이름 "풀이 잔디 색: 초록, 선택됨".
 - 프리셋 목록은 `solved.HEAT_PRESETS` 유지(초록·파랑·보라·주황·분홍).
 - **마이그레이션**: 키 없음 → follow. 키 있음(`#RRGGBB`) → 고정색 그대로(이미 직접 고른 사용자 존중). `parse_hex` 는 `"follow"` 를 모르므로 호출 전에 분기.
-- "잔디 기록을 풀이 저장소에 함께 저장" 토글(`HeatSyncToggle`, QSettings `growth/heat_sync`, 기본 OFF): 성장 기록 카드 잔디 색 줄 아래 한 줄(`_toggle_row`). 힌트 "여러 PC 에서 같은 잔디를 보려면 켜세요. 문제 번호·날짜·방식만 저장하고 코드·지문은 올리지 않습니다." 동기화 기능 빌더 작업이 끝나기 전에는 **행 전체를 숨긴다**(동작하지 않는 스위치 금지, §16.15 동일 원칙).
+- "잔디 기록을 풀이 저장소에 함께 저장" 토글(`HeatSyncToggle`, `.env` `SWEA_SOLVED_SYNC`, 비어 있으면 루트가 git 저장소+원격일 때 ON 표시, M23 에서 활성화): 성장 기록 카드 잔디 색 줄 아래 한 줄(`_toggle_row`). 힌트 "여러 PC 에서 같은 잔디를 보려면 켜세요. 번호·제목·주제·날짜만 저장소에 올라갑니다(지문·코드 없음). …". 성장 기록이 꺼지면 비활성. 저장소가 아니거나 `.gitignore` 가 `.swea-fetch/` 를 무시하면 아래 `HeatSyncNote` 힌트 한 줄로 안내.
 
 ### 17.11 잔디 색 선택 패널 (인라인, `widgets.ColorPicker`)
 

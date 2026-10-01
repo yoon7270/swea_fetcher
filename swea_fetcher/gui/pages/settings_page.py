@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import ai_engine, config, content_cache, doctor, gitops, service, solved, update
+from ... import ai_engine, config, content_cache, doctor, gitops, service, solved, solved_sync, update
 from ...config import Settings
 from ...errors import AiError
 from ..coach_widgets import ask_consent, has_consent, reset_consents
@@ -421,19 +421,21 @@ class SettingsPage(QWidget):
         heat_col.setSpacing(tokens.SPACE)
         heat_col.addLayout(heat_row)
         heat_col.addWidget(self.heat_picker_box)
-        # 동기화 토글 자리 (스펙 §17.10): 동기화 기능이 연결되기 전에는 행 전체를 숨긴다 (동작하지 않는 스위치 금지)
+        # 잔디 기록 동기화 (M23, 스펙 §17.10): .env SWEA_SOLVED_SYNC. 비어 있으면 루트가 git 저장소+원격일 때 켜짐으로 표시
         self.heat_sync = Toggle("잔디 기록을 풀이 저장소에 함께 저장")
         self.heat_sync.setObjectName("HeatSyncToggle")
-        self.heat_sync.setChecked(bool(self.qs.value("growth/heat_sync", False, type=bool)))
-        self.heat_sync_row = _toggle_row(self.heat_sync, "여러 PC 에서 같은 잔디를 보려면 켜세요. 문제 번호·날짜·방식만 저장하고 코드·지문은 올리지 않습니다.")
+        self.heat_sync_row = _toggle_row(self.heat_sync, "여러 PC 에서 같은 잔디를 보려면 켜세요. 번호·제목·주제·날짜만 저장소에 올라갑니다(지문·코드 없음). 다른 PC 기록은 fetch 로 읽기만 하고 pull 은 하지 않습니다.")
         self.heat_sync_row.setObjectName("HeatSyncRow")
-        self.heat_sync_row.setVisible(False)
+        self.heat_sync_note = _hint("")
+        self.heat_sync_note.setObjectName("HeatSyncNote")
+        self.heat_sync_note.setVisible(False)
         v8.addWidget(_toggle_row(self.growth_enabled, "AI 코치 응답에서 분류 태그만 저장합니다(코드·지문 저장 안 함). 끄면 태그 요청과 기록을 모두 멈춥니다."))
         v8.addWidget(_divider())
         v8.addWidget(_toggle_row(self.growth_comment, "주 1회, 집계 숫자와 분류 이름만 AI 로 보냅니다. 코드·지문·문제 번호는 보내지 않습니다."))
         v8.addWidget(_divider())
         v8.addLayout(_field("풀이 잔디 색", heat_col, _hint("성장 탭 맨 위 풀이 잔디의 색입니다. 기본은 현재 테마 색을 따라가고, 직접 고르면 그 색 하나로 고정됩니다. 기준색에서 4단계 농도가 만들어집니다.")))
         v8.addWidget(self.heat_sync_row)
+        v8.addWidget(self.heat_sync_note)
         v8.addWidget(gh3)
         root.addWidget(card8)
 
@@ -531,6 +533,7 @@ class SettingsPage(QWidget):
         self.ai_clear_btn.clicked.connect(self._clear_ai_records)
         self.growth_enabled.toggled.connect(lambda on: self._growth_toggled("SWEA_GROWTH", on))
         self.growth_comment.toggled.connect(lambda on: self._growth_toggled("SWEA_GROWTH_COMMENT", on))
+        self.heat_sync.toggled.connect(self._heat_sync_toggled)
         self.growth_clear_btn.clicked.connect(self._clear_growth)
         self.reduce_motion.toggled.connect(self._reduce_motion_toggled)
         self._paint_heat_buttons()
@@ -587,6 +590,7 @@ class SettingsPage(QWidget):
         self.growth_enabled.setChecked(settings.growth if settings else config._truthy(values.get("SWEA_GROWTH") or "1"))
         self.growth_comment.setChecked(settings.growth_comment if settings else config._truthy(values.get("SWEA_GROWTH_COMMENT") or "1"))
         self.growth_comment.setEnabled(self.growth_enabled.isChecked())
+        self._load_heat_sync(settings, values)
         self._loading_ai = False
         self._ai_status_stale = True
         if self.isVisible():
@@ -1002,10 +1006,38 @@ class SettingsPage(QWidget):
         """성장 기록 / 주간 코멘트 체크박스: 저장 즉시 .env (SWEA_GROWTH, SWEA_GROWTH_COMMENT). 성장 기록이 꺼지면 코멘트 옵션은 비활성."""
         if key == "SWEA_GROWTH":
             self.growth_comment.setEnabled(on)
+            self.heat_sync.setEnabled(on)
         if self._loading_ai:
             return
         service.set_env_values(self.config_dir, **{key: "1" if on else "0"})
         self.status_message.emit("성장 기록 설정을 저장했습니다")
+        self.coach_settings_changed.emit()
+
+    def _load_heat_sync(self, settings, values: dict) -> None:
+        """잔디 동기화 토글 표시: 명시값(SWEA_SOLVED_SYNC) 우선, 비어 있으면 자동 기본값 (루트가 git 저장소+원격이면 켜짐). 저장 시그널은 막는다."""
+        explicit = settings.solved_sync if settings else config._tristate_setting("SWEA_SOLVED_SYNC", values.get("SWEA_SOLVED_SYNC") or "")
+        repo_ok = bool(settings) and solved_sync.auto_default(settings)
+        on = explicit if explicit is not None else repo_ok
+        self.heat_sync.blockSignals(True)
+        self.heat_sync.setChecked(bool(on))
+        self.heat_sync.blockSignals(False)
+        self.heat_sync.setEnabled(self.growth_enabled.isChecked())
+        note = ""
+        if settings is not None:
+            if not repo_ok:
+                note = "풀이 폴더가 git 저장소가 아니거나 원격(origin)이 없어 아직 올릴 곳이 없습니다 — 'GitHub 연동'을 먼저 해 주세요. (켜 두면 로컬에만 기기 파일이 만들어집니다)"
+            else:
+                note = solved_sync.ignored_note(settings)
+        self.heat_sync_note.setText(note)
+        self.heat_sync_note.setVisible(bool(note))
+
+    def _heat_sync_toggled(self, on: bool) -> None:
+        """잔디 동기화 토글: 저장 즉시 .env (SWEA_SOLVED_SYNC=1|0). 켜면 기존 로컬 기록은 다음 잔디 갱신 때 기기 파일로 옮겨진다."""
+        if self._loading_ai:
+            return
+        service.set_env_values(self.config_dir, SWEA_SOLVED_SYNC="1" if on else "0")
+        solved_sync.reset_caches()
+        self.status_message.emit("잔디 기록 동기화 설정을 저장했습니다")
         self.coach_settings_changed.emit()
 
     def _read_heat_setting(self) -> tuple[str, str]:
@@ -1079,7 +1111,7 @@ class SettingsPage(QWidget):
         self.heat_picker.set_levels(heat_level_colors(base))
 
     def _clear_growth(self) -> None:
-        box = QMessageBox(QMessageBox.Icon.Warning, "성장 기록 지우기", "성장 리포트·분류 기록·풀이 잔디가 삭제됩니다.\nAI 응답 캐시·복습 일정과 풀이 파일은 건드리지 않습니다.", parent=self)
+        box = QMessageBox(QMessageBox.Icon.Warning, "성장 기록 지우기", "성장 리포트·분류 기록·풀이 잔디가 삭제됩니다.\nAI 응답 캐시·복습 일정과 풀이 파일은 건드리지 않습니다.\n풀이 저장소에 올라간 잔디 기록(.swea-fetch/solved)도 그대로라, 동기화가 켜져 있으면 다시 표시됩니다.", parent=self)
         delete = box.addButton("지우기", QMessageBox.ButtonRole.DestructiveRole)
         set_class(delete, "danger")
         cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)

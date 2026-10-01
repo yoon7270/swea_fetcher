@@ -7,6 +7,8 @@
 - 모든 저장 함수는 예외를 던지지 않고 로그만 남긴다 (부가 기능이 제출·검증 흐름을 깨면 안 됨).
 - 백필: 첫 로드 때 기존 기록(growth events 의 submit pass 120일, coach records 의 마지막 Pass)에서 채운다. 로컬 검증은 과거 기록이 없어 불가.
   백필 완료 표식은 `coach/solved_backfilled` — [성장 기록 지우기] 뒤에 같은 기록이 되살아나지 않게 profile/ 밖에 둔다.
+- 기기 간 동기화(M23): 켜져 있으면 기록을 `{root}/.swea-fetch/solved/{device_id}.json` 에도 쓰고, load 는 다른 기기 기록과 합쳐 본다 (solved_sync.py).
+  이때 "루트 폴더 안이면 쓰기 거부" 규칙은 로컬 solved.json 에만 적용된다 (기기 파일은 의도적으로 루트 안).
 - growth 를 import 한다 (경로·시각·락 재사용). service 를 import 하지 않는다.
 """
 
@@ -65,16 +67,13 @@ def _mark_path(settings: Settings):
     return settings.coach_dir / BACKFILL_MARK
 
 
-def _read_raw(settings: Settings) -> dict[str, list[dict]]:
-    """파일 → {"YYYY-MM-DD": [항목 dict]}. 없거나 손상되면 빈 dict (손상된 항목만 건너뛴다)."""
+def parse_days(text: str) -> dict[str, list[dict]]:
+    """JSON 본문 → {"YYYY-MM-DD": [항목 dict]}. 손상되면 빈 dict (손상된 항목만 건너뛴다). 기기 파일(M23)도 같은 스키마."""
     try:
-        raw = json.loads(_path(settings).read_text(encoding="utf-8"))
-        days = raw["days"]
+        days = json.loads(text)["days"]
         if not isinstance(days, dict):
             return {}
-    except FileNotFoundError:
-        return {}
-    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
         log.warning("풀이 잔디 기록을 읽지 못했습니다: %s", e)
         return {}
     out: dict[str, list[dict]] = {}
@@ -88,6 +87,23 @@ def _read_raw(settings: Settings) -> dict[str, list[dict]]:
     return out
 
 
+def _read_raw(settings: Settings) -> dict[str, list[dict]]:
+    """로컬 파일 → {"YYYY-MM-DD": [항목 dict]}. 없거나 손상되면 빈 dict."""
+    try:
+        text = _path(settings).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    except OSError as e:
+        log.warning("풀이 잔디 기록을 읽지 못했습니다: %s", e)
+        return {}
+    return parse_days(text)
+
+
+def read_local(settings: Settings) -> dict[str, list[dict]]:
+    """로컬 기록만 (기기 간 동기화 병합 전). solved_sync 가 기기 파일을 만들 때 쓴다."""
+    return _read_raw(settings)
+
+
 def _write(settings: Settings, days: dict[str, list[dict]], today: date) -> bool:
     if not growth._writable(settings):
         return False
@@ -98,6 +114,9 @@ def _write(settings: Settings, days: dict[str, list[dict]], today: date) -> bool
     except OSError as e:
         log.warning("풀이 잔디 저장 실패: %s", e)
         return False
+    from . import solved_sync  # 늦은 import: solved_sync 가 solved 를 import 한다
+
+    solved_sync.sync_device_file(settings, kept, today)  # 켜져 있으면 같은 내용을 풀이 저장소의 기기 파일에도 (M23)
     return True
 
 
@@ -138,9 +157,11 @@ def record(settings: Settings, num: int, topic: str, title: str, via: str, *, at
 
 
 def load(settings: Settings) -> dict[date, list[SolvedItem]]:
-    """{날짜: [항목]} (각 날 안은 기록 시각 순). 읽기 전용."""
+    """{날짜: [항목]} (각 날 안은 기록 시각 순). 읽기 전용. 동기화가 켜져 있으면 다른 기기 기록(작업 트리 파일·원격 캐시)을 합친다 (M23)."""
+    from . import solved_sync
+
     out: dict[date, list[SolvedItem]] = {}
-    for key, items in _read_raw(settings).items():
+    for key, items in solved_sync.merged_days(settings, _read_raw(settings)).items():
         rows = [SolvedItem(i["num"], str(i.get("topic") or ""), str(i.get("title") or ""), i["via"], str(i.get("at") or "")) for i in items]
         if rows:
             out[date.fromisoformat(key)] = sorted(rows, key=lambda r: r.at)

@@ -2,7 +2,7 @@
 
 .env 키: SWEA_ROOT (풀이 저장소 경로), SWEA_ID, 선택: SWEA_INPUT_NAME, SWEA_OUTPUT_NAME, SWEA_PYTHON(검증용 인터프리터), SWEA_EDITOR(auto|vscode|pycharm|default),
 SWEA_AI_ENGINE(auto|codex|claude|both), SWEA_AI_WRONG_THRESHOLD(1~20), SWEA_REVIEW_DAYS(1~30) (M17 AI 코치),
-SWEA_GROWTH(1|0, 성장 기록), SWEA_GROWTH_COMMENT(1|0, 주간 AI 코멘트 자동 생성) (M19).
+SWEA_GROWTH(1|0, 성장 기록), SWEA_GROWTH_COMMENT(1|0, 주간 AI 코멘트 자동 생성) (M19), SWEA_SOLVED_SYNC(1|0|빈 값=자동, 잔디 기록을 풀이 저장소에 함께 저장) (M23).
 비밀번호는 keyring 에 저장한다 (서비스 "swea-fetch", 사용자명 = SWEA_ID).
 결정 순서: 환경변수 SWEA_PW → .env 의 SWEA_PW (경고, 이관 권장) → keyring → 없으면 ConfigMissing.
 """
@@ -55,6 +55,7 @@ class Settings:
     review_days: int = 3  # SWEA_REVIEW_DAYS: 정답 풀이를 본 뒤 복습 권유까지의 일수 (M17)
     growth: bool = True  # SWEA_GROWTH: 성장 기록 (AI 응답의 분류 태그·제출 결과 이벤트·주간 리포트) (M19)
     growth_comment: bool = True  # SWEA_GROWTH_COMMENT: 주간 AI 코멘트 자동 생성 (M19)
+    solved_sync: bool | None = None  # SWEA_SOLVED_SYNC: 잔디 기록을 풀이 저장소에 함께 저장 (M23). None = 자동 (루트가 git 저장소+원격이면 켜짐)
 
     @property
     def session_file(self) -> Path:
@@ -226,6 +227,19 @@ def _bool_setting(key: str, raw: str, default: bool) -> bool:
     return default
 
 
+def _tristate_setting(key: str, raw: str) -> bool | None:
+    """1/0 또는 비어 있음(=None, 자동) (M23). 알 수 없는 값은 자동 + WARNING."""
+    text = (raw or "").strip().lower()
+    if not text:
+        return None
+    if text in ("1", "true", "yes", "on"):
+        return True
+    if text in _FALSY:
+        return False
+    log.warning("%s 값이 올바르지 않습니다: %r — 자동으로 대체", key, raw)
+    return None
+
+
 def _auto_push_settings(raw_on: str, raw_scope: str, raw_moments: str) -> dict:
     """SWEA_AUTO_PUSH / _SCOPE / _ON 을 파싱 (M11). 잘못된 값은 기본값 + WARNING.
 
@@ -314,5 +328,6 @@ def load_settings(config_dir: Path | None = None) -> Settings:
         review_days=_int_setting("SWEA_REVIEW_DAYS", get("SWEA_REVIEW_DAYS"), 3, REVIEW_DAYS_RANGE),
         growth=_bool_setting("SWEA_GROWTH", get("SWEA_GROWTH"), True),
         growth_comment=_bool_setting("SWEA_GROWTH_COMMENT", get("SWEA_GROWTH_COMMENT"), True),
+        solved_sync=_tristate_setting("SWEA_SOLVED_SYNC", get("SWEA_SOLVED_SYNC")),
         **_auto_push_settings(get("SWEA_AUTO_PUSH"), get("SWEA_AUTO_PUSH_SCOPE"), get("SWEA_AUTO_PUSH_ON")),
     )

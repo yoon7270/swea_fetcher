@@ -29,7 +29,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Callable, Sequence
 
-from . import ai_engine, ai_prompts, auth, checker, client, coach, config, content_cache, gitops, growth, growth_tags, lookup, parser, solved, storage, submit
+from . import ai_engine, ai_prompts, auth, checker, client, coach, config, content_cache, gitops, growth, growth_tags, lookup, parser, solved, solved_sync, storage, submit
 from .config import Settings
 from .errors import AiError, GitError, InvalidInput, SweaFetchError
 from .gitops import GitResult
@@ -477,9 +477,17 @@ def sync_now(
     if scope == "problem" and problem_dir is not None and reason in ("pass", "check", "save"):
         message = commit_message_for_dir(settings, problem_dir)
         _emit(progress, f"자동 동기화: {problem_dir.name}")
-        return gitops.commit_and_push(repo, problem_dir, message, push=True)
+        return gitops.commit_and_push(repo, problem_dir, message, push=True, **_extra_kw(settings, repo))
     _emit(progress, f"자동 동기화 ({scope})")
-    return gitops.commit_and_push_scope(repo, settings.root, scope, settings.commit_template, push=True)
+    # 풀이 잔디 기기 파일(M23): 문제 폴더와 함께. 문제 폴더 변경이 없을 땐 watch·manual 에서만 단독 커밋 (그 외는 다음 커밋에 묻어간다)
+    extra = solved_sync.pending_commit_paths(settings, repo) if scope == "problem" else []
+    return gitops.commit_and_push_scope(repo, settings.root, scope, settings.commit_template, push=True, extra_paths=extra, extra_alone=reason in ("watch", "manual"))
+
+
+def _extra_kw(settings: Settings, repo: gitops.RepoInfo) -> dict:
+    """커밋에 함께 넣을 풀이 잔디 기기 파일 (M23). 없으면 빈 dict — 기존 호출 모양 그대로."""
+    extra = solved_sync.pending_commit_paths(settings, repo)
+    return {"extra_paths": extra} if extra else {}
 
 
 def commit_message_for_dir(settings: Settings, problem_dir: Path) -> str:
@@ -523,7 +531,7 @@ def push_problem(
         message = commit_message_for(settings, topic, num, problem_dir)
     rel = problem_dir.resolve().relative_to(repo.toplevel).as_posix()
     _emit(progress, f"git add/commit: {rel} ({repo.branch}{' → ' + repo.upstream if repo.upstream and push else ''})")
-    result = gitops.commit_and_push(repo, problem_dir, message.strip(), push=push)
+    result = gitops.commit_and_push(repo, problem_dir, message.strip(), push=push, **_extra_kw(settings, repo))
     if result.failed:
         raise GitError(result.note, hint=result.output[-600:] if result.output else "")
     _emit(progress, result.note)
@@ -1275,7 +1283,13 @@ def growth_solved(settings: Settings, now: datetime | None = None) -> dict[date,
     if not settings.growth:
         return {}
     solved.backfill(settings, now)
+    solved_sync.sync_device_file(settings, today=now.date() if now else None)  # 동기화를 방금 켠 경우 기존 로컬 기록을 기기 파일로 옮긴다 (M23)
     return solved.load(settings)
+
+
+def refresh_solved_remote(settings: Settings, *, force: bool = False) -> bool:
+    """다른 기기의 잔디 기록을 원격에서 읽어 캐시에 반영 (M23, 백그라운드 워커용). 바뀌었으면 True. 예외 없음·10분 스로틀."""
+    return solved_sync.refresh_remote(settings, force=force)
 
 
 def clear_growth(config_dir: Path) -> int:

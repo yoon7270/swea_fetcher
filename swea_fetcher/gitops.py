@@ -73,9 +73,11 @@ def mask_url(text: str) -> str:
     return _TOKEN_URL_RE.sub(r"\1***@", text or "")
 
 
-def _run(args: list[str], cwd: Path | None, timeout: float = DEFAULT_TIMEOUT) -> subprocess.CompletedProcess:
+def _run(args: list[str], cwd: Path | None, timeout: float = DEFAULT_TIMEOUT, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     git = git_available() or "git"
     env = dict(os.environ)
+    if extra_env:
+        env.update(extra_env)
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["LC_ALL"] = "C"
     env["LANG"] = "C"
@@ -185,6 +187,20 @@ def preflight(repo: RepoInfo | None, problem_dir: Path, push: bool = True) -> li
     return reasons
 
 
+def path_ignored(repo: RepoInfo, rel: str) -> bool:
+    """rel(저장소 기준 상대 경로)이 .gitignore 로 무시되는지 (M23). 판별 실패면 False."""
+    try:
+        return _run(["check-ignore", "-q", "--", rel], repo.toplevel, 10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def path_changed(repo: RepoInfo, rel: str) -> bool:
+    """rel 에 커밋되지 않은 변경(새 파일 포함)이 있는지 (M23)."""
+    out = _ok(["status", "--porcelain", "--untracked-files=all", "--", rel], repo.toplevel)
+    return bool(out)
+
+
 # --- 커밋 메시지 ------------------------------------------------------------------------
 
 
@@ -241,11 +257,15 @@ def commit_and_push(
     *,
     push: bool = True,
     timeout: float = DEFAULT_TIMEOUT,
+    extra_paths: list[str] | None = None,
 ) -> GitResult:
-    """문제 폴더만 add → (변경 있으면) commit -- {rel} → push. 어떤 경우에도 예외 대신 GitResult."""
+    """문제 폴더만 add → (변경 있으면) commit -- {rel} → push. 어떤 경우에도 예외 대신 GitResult.
+
+    extra_paths: 함께 커밋할 저장소 기준 상대 경로 (풀이 잔디 기기 파일, M23).
+    """
     problem_dir = Path(problem_dir)
     rel = problem_dir.resolve().relative_to(repo.toplevel).as_posix()
-    return _commit_push(repo, [rel], message, push=push, timeout=timeout)
+    return _commit_push(repo, [rel, *(extra_paths or [])], message, push=push, timeout=timeout)
 
 
 def changed_problem_dirs(repo: RepoInfo, root: Path) -> list[Path]:
@@ -303,11 +323,15 @@ def commit_and_push_scope(
     *,
     push: bool = True,
     timeout: float = DEFAULT_TIMEOUT,
+    extra_paths: list[str] | None = None,
+    extra_alone: bool = False,
 ) -> GitResult:
     """범위별 커밋+푸시 (M11).
 
     scope="problem": 변경된 문제 폴더들만 (각 폴더 pathspec) — 루트의 다른 변경은 안 건드림.
     scope="root":    루트 서브트리 전체 (`git add -A -- {root}`), .gitignore 는 git 이 적용.
+    extra_paths (M23, 풀이 잔디 기기 파일): problem 범위에서 문제 폴더와 함께 커밋. 문제 폴더 변경이 없을 때는
+    extra_alone=True 일 때만 단독 커밋 (아니면 다음 커밋에 묻어간다). root 범위는 이미 포함돼 있어 무시.
     """
     root_r = Path(root).resolve()
     try:
@@ -319,10 +343,13 @@ def commit_and_push_scope(
     if scope == "root":
         return _commit_push(repo, [root_rel], message, push=push, timeout=timeout, add_all=True)
     # scope == "problem"
+    extra = list(extra_paths or [])
+    if not problem_dirs and extra and extra_alone:
+        return _commit_push(repo, extra, message, push=push, timeout=timeout)
     if not problem_dirs:
         # 변경된 문제 폴더가 없어도, 이전에 커밋만 하고 못 민 게 있을 수 있어 push 는 시도
         return _commit_push(repo, [], message, push=push, timeout=timeout, allow_empty_pathspec=True)
-    rels = [d.resolve().relative_to(repo.toplevel).as_posix() for d in problem_dirs]
+    rels = [d.resolve().relative_to(repo.toplevel).as_posix() for d in problem_dirs] + extra
     return _commit_push(repo, rels, message, push=push, timeout=timeout)
 
 

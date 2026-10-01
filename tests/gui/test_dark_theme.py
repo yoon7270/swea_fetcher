@@ -420,6 +420,6 @@ def test_dark_pages_have_no_large_white_surfaces(main_window, qapp, theme):
         qapp.setStyleSheet("")
 
 
-def test_heat_sync_row_is_hidden_until_feature_exists(main_window):
+def test_heat_sync_row_is_visible_and_wired(main_window):
     sp = main_window.settings_page
-    assert sp.heat_sync_row.isHidden() and sp.heat_sync.objectName() == "HeatSyncToggle"
+    assert sp.heat_sync.objectName() == "HeatSyncToggle" and not sp.heat_sync_row.isHidden()

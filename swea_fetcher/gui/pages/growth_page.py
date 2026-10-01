@@ -421,12 +421,33 @@ class GrowthPage(QWidget):
         self.settings = settings
         self._stale = True
         self._running_week = None
+        self.kick_remote_refresh()  # 앱 시작·설정 변경 직후: 다른 PC 의 잔디 기록을 백그라운드로 읽는다 (M23, 10분 스로틀)
         if self.isVisible():
             self.refresh()
 
     def showEvent(self, e) -> None:  # noqa: N802
         super().showEvent(e)
         self.refresh()  # 다른 탭에서 기록이 늘었을 수 있으니 매번 (파일 읽기 전용, 가벼움)
+        self.kick_remote_refresh()
+
+    def kick_remote_refresh(self) -> None:
+        """풀이 저장소 원격에서 다른 기기의 잔디 기록을 읽는 백그라운드 워커 (fetch 만, pull 없음). 이미 돌고 있거나 꺼져 있으면 무시.
+        캐시가 바뀌었고 이 탭이 보이는 중이면 잔디만 다시 그린다. 실패는 조용히 무시 (로컬 기록만 보인다)."""
+        s = self.settings
+        if s is None or not s.growth:
+            return
+        w = getattr(self, "_remote_worker", None)
+        if w is not None and w.isRunning():
+            return
+        from ..workers import FuncWorker
+
+        self._remote_worker = FuncWorker(lambda: service.refresh_solved_remote(s), self)
+        self._remote_worker.finished_ok.connect(self._on_remote_refreshed)
+        self._remote_worker.start()
+
+    def _on_remote_refreshed(self, changed) -> None:
+        if changed and self.isVisible() and self.settings is not None and self.settings.growth:
+            self._refresh_heat()
 
     def _consent_ok(self, engine: str) -> bool:
         return growth_consent_ok(self.qs, engine)
