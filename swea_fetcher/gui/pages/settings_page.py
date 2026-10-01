@@ -5,11 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QButtonGroup,
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QRadioButton,
     QFileDialog,
@@ -26,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import ai_engine, config, content_cache, doctor, gitops, service, update
+from ... import ai_engine, config, content_cache, doctor, gitops, service, solved, update
 from ...config import Settings
 from ...errors import AiError
 from ..coach_widgets import ask_consent, has_consent, reset_consents
@@ -41,6 +42,7 @@ class SettingsPage(QWidget):
     status_message = Signal(str)
     timeout_changed = Signal(float)
     cache_settings_changed = Signal()  # 지문 캐시 사용 토글 (문제 탭 안내문 갱신용)
+    heat_color_changed = Signal()  # 풀이 잔디 색 변경 (M20) — 성장 탭이 즉시 다시 칠한다
     coach_settings_changed = Signal()  # AI 코치 설정·기록 변경 (엔진·오답 기준·복습일·기록 지우기) — 메인이 설정 객체·배지를 갱신
 
     def __init__(self, qsettings: QSettings, config_dir: Path | None = None, parent=None) -> None:
@@ -406,17 +408,44 @@ class SettingsPage(QWidget):
         self.growth_comment = QCheckBox("주간 AI 코멘트 자동 생성")
         self.growth_comment.setObjectName("GrowthCommentCheck")
         gh2 = QLabel("주 1회, 집계 숫자와 분류 이름만 AI 로 보냅니다. 코드·지문·문제 번호는 보내지 않습니다.")
-        gh3 = QLabel("기록은 ~/.swea-fetch/coach/profile 에만 있고 GitHub 로 올라가지 않습니다.")
-        for h in (gh1, gh2, gh3):
+        gh3 = QLabel("기록은 ~/.swea-fetch/coach/profile 에만 있고 GitHub 로 올라가지 않습니다. 풀이 잔디(하루에 푼 문제)도 여기에 저장됩니다.")
+        gh4 = QLabel("성장 탭 맨 위 풀이 잔디의 색입니다. 고른 색을 기준으로 4단계 농도가 만들어집니다.")
+        for h in (gh1, gh2, gh3, gh4):
             set_class(h, "hint")
             h.setWordWrap(True)
         self.growth_clear_btn = QPushButton("성장 기록 지우기")
-        self.growth_clear_btn.setToolTip("분류 기록과 주간 리포트를 지웁니다 (AI 응답 캐시·복습 일정은 그대로)")
+        self.growth_clear_btn.setToolTip("분류 기록·주간 리포트·풀이 잔디를 지웁니다 (AI 응답 캐시·복습 일정은 그대로)")
+        heat_row = QHBoxLayout()
+        heat_row.setSpacing(tokens.SPACE)
+        heat_row.addWidget(QLabel("풀이 잔디 색"))
+        self.heat_group = QButtonGroup(self)
+        self.heat_group.setExclusive(True)
+        self.heat_buttons: dict[str, QPushButton] = {}
+        for name, hexv in solved.HEAT_PRESETS:
+            b = QPushButton()
+            b.setObjectName(f"HeatPreset_{hexv[1:]}")
+            b.setCheckable(True)
+            b.setFixedSize(24, 24)
+            b.setToolTip(name)
+            b.setAccessibleName(f"풀이 잔디 색: {name}")
+            b.clicked.connect(lambda _c=False, v=hexv: self._set_heat_color(v))
+            self.heat_group.addButton(b)
+            self.heat_buttons[hexv] = b
+            heat_row.addWidget(b)
+        self.heat_custom_btn = QPushButton("직접 고르기")
+        self.heat_custom_btn.setObjectName("HeatCustomButton")
+        self.heat_custom_btn.setToolTip("원하는 색을 직접 고릅니다")
+        heat_row.addWidget(self.heat_custom_btn)
+        heat_row.addStretch(1)
+        self.heat_color = solved.parse_hex(str(self.qs.value("growth/heat_color", solved.DEFAULT_HEAT_COLOR) or ""))
         g8.addWidget(self.growth_enabled)
         g8.addWidget(gh1)
         g8.addSpacing(tokens.SPACE)
         g8.addWidget(self.growth_comment)
         g8.addWidget(gh2)
+        g8.addSpacing(tokens.SPACE)
+        g8.addLayout(heat_row)
+        g8.addWidget(gh4)
         g8.addSpacing(tokens.SPACE)
         g8.addWidget(self.growth_clear_btn, 0, Qt.AlignmentFlag.AlignLeft)
         g8.addWidget(gh3)
@@ -488,6 +517,8 @@ class SettingsPage(QWidget):
         self.growth_enabled.toggled.connect(lambda on: self._growth_toggled("SWEA_GROWTH", on))
         self.growth_comment.toggled.connect(lambda on: self._growth_toggled("SWEA_GROWTH_COMMENT", on))
         self.growth_clear_btn.clicked.connect(self._clear_growth)
+        self.heat_custom_btn.clicked.connect(self._pick_heat_color)
+        self._paint_heat_buttons()
         self.commit_template.editingFinished.connect(self._save_template)
         self.auto_push.clicked.connect(self._auto_push_clicked)
         self.scope_root.toggled.connect(self._scope_root_toggled)
@@ -961,8 +992,37 @@ class SettingsPage(QWidget):
         self.status_message.emit("성장 기록 설정을 저장했습니다")
         self.coach_settings_changed.emit()
 
+    def _set_heat_color(self, value: str) -> None:
+        """풀이 잔디 색 저장 (QSettings growth/heat_color) + 즉시 반영."""
+        self.heat_color = solved.parse_hex(value)
+        self.qs.setValue("growth/heat_color", self.heat_color)
+        self._paint_heat_buttons()
+        self.heat_color_changed.emit()
+
+    def _pick_heat_color(self) -> None:
+        c = QColorDialog.getColor(QColor(self.heat_color), self, "풀이 잔디 색")
+        if c.isValid():
+            self._set_heat_color(c.name())
+
+    def _paint_heat_buttons(self) -> None:
+        """프리셋 버튼을 색 칩으로 칠한다. 현재 색과 같은 프리셋은 체크(굵은 테두리) — 프리셋이 아니면 [직접 고르기] 버튼이 그 색을 띤다."""
+        pal = tokens.DARK or tokens.LIGHT
+        self.heat_group.setExclusive(False)  # 프리셋이 아닌 색이면 모두 해제해야 한다 (배타 그룹은 마지막 하나를 못 끈다)
+        for hexv, b in self.heat_buttons.items():
+            on = hexv == self.heat_color
+            b.setChecked(on)
+            bw = 3 if on else 1
+            inner = 24 - 2 * bw  # QSS 의 min/max-height 는 테두리 안쪽 크기 — 전역 버튼 최소 높이(30)를 덮어 원형 24px 유지
+            b.setStyleSheet(
+                f"QPushButton {{ background: {hexv}; border: {bw}px solid {pal.text if on else pal.border}; border-radius: 12px; "
+                f"min-width: {inner}px; max-width: {inner}px; min-height: {inner}px; max-height: {inner}px; padding: 0px; }}"
+            )
+        self.heat_group.setExclusive(True)
+        custom = self.heat_color not in self.heat_buttons
+        self.heat_custom_btn.setStyleSheet(f"QPushButton {{ border-left: 10px solid {self.heat_color}; }}" if custom else "")
+
     def _clear_growth(self) -> None:
-        box = QMessageBox(QMessageBox.Icon.Warning, "성장 기록 지우기", "성장 리포트와 분류 기록이 삭제됩니다.\nAI 응답 캐시·복습 일정과 풀이 파일은 건드리지 않습니다.", parent=self)
+        box = QMessageBox(QMessageBox.Icon.Warning, "성장 기록 지우기", "성장 리포트·분류 기록·풀이 잔디가 삭제됩니다.\nAI 응답 캐시·복습 일정과 풀이 파일은 건드리지 않습니다.", parent=self)
         delete = box.addButton("지우기", QMessageBox.ButtonRole.DestructiveRole)
         set_class(delete, "danger")
         cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
@@ -976,7 +1036,7 @@ class SettingsPage(QWidget):
         self.coach_settings_changed.emit()
 
     def _clear_ai_records(self) -> None:
-        box = QMessageBox(QMessageBox.Icon.Warning, "AI 기록 지우기", "AI 응답 캐시·오답 횟수·복습 일정·성장 기록(분류·리포트 포함)이 모두 지워집니다.\n풀이 파일은 건드리지 않습니다.", parent=self)
+        box = QMessageBox(QMessageBox.Icon.Warning, "AI 기록 지우기", "AI 응답 캐시·오답 횟수·복습 일정·성장 기록(분류·리포트·풀이 잔디 포함)이 모두 지워집니다.\n풀이 파일은 건드리지 않습니다.", parent=self)
         delete = box.addButton("지우기", QMessageBox.ButtonRole.DestructiveRole)
         set_class(delete, "danger")
         cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)

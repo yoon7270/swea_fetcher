@@ -9,6 +9,7 @@ set_env_values: .env 의 개별 키 갱신 (M7: SWEA_COMMIT_TEMPLATE, SWEA_AUTO_
 push_problem  : 문제 폴더만 git 커밋(+푸시) (M7). 자격증명은 다루지 않는다
 submit_problem: SWEA 에 제출하고 채점 결과를 받는다 (M8). Pass 면 push 까지 (submit_and_push)
 ask_coach     : AI 코치 (M17) — 코드 평가·힌트·정답 풀이·연결 테스트. 호출 전 사용자 동의 필수 (GUI 전용)
+check_problem : 로컬 검증 + 통과 기록 (M20 풀이 잔디). growth_solved: 잔디 데이터 조회
 growth_*      : 성장 기록 (M19) — 개요·리포트 조회, 주간 AI 코멘트 생성(generate_growth), 삭제. 동의는 consent_ok 콜백 (GUI 전용)
 
 네트워크·파일 I/O 가 있으므로 GUI 는 워커 스레드에서 호출한다.
@@ -28,7 +29,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Callable, Sequence
 
-from . import ai_engine, ai_prompts, auth, client, coach, config, content_cache, gitops, growth, growth_tags, lookup, parser, storage, submit
+from . import ai_engine, ai_prompts, auth, checker, client, coach, config, content_cache, gitops, growth, growth_tags, lookup, parser, solved, storage, submit
 from .config import Settings
 from .errors import AiError, GitError, InvalidInput, SweaFetchError
 from .gitops import GitResult
@@ -626,6 +627,31 @@ def _record_growth_submit(settings: Settings, num: int, topic: str, result: Subm
         growth.record_submit(settings, num, topic, res, prev_record.wrong_count if prev_record else 0, at=growth.now())
     except Exception as e:  # noqa: BLE001
         log.warning("성장 기록 실패: %s", e)
+    if result.passed:  # 풀이 잔디 (M20): 앱으로 낸 SWEA Pass
+        _record_solved(settings, topic, num, "swea")
+
+
+def _record_solved(settings: Settings, topic: str, num: int, via: str) -> None:
+    """풀이 잔디에 그날 Pass 1건 (M20). 성장 기록이 꺼져 있으면 기록하지 않는다. 실패해도 예외 없음."""
+    if not settings.growth:
+        return
+    try:
+        title = read_skeleton_title(settings.root / topic / str(num) / f"{num}.py") or ""
+        solved.record(settings, num, topic, title, via, at=growth.now())
+    except Exception as e:  # noqa: BLE001
+        log.warning("풀이 잔디 기록 실패: %s", e)
+
+
+def check_problem(settings: Settings, problem_dir: Path, timeout: float = checker.DEFAULT_TIMEOUT, on_start=None) -> checker.CheckResult:
+    """로컬 검증 (checker.run_and_compare) + 통과하면 풀이 잔디에 기록 (M20). CLI `check` 와 GUI 검증이 공통으로 거친다."""
+    res = checker.run_and_compare(problem_dir, settings, timeout, on_start=on_start) if on_start else checker.run_and_compare(problem_dir, settings, timeout)
+    if res.passed and not res.cancelled:
+        pd = Path(problem_dir)
+        try:
+            _record_solved(settings, pd.parent.relative_to(settings.root).as_posix(), int(pd.name), "local")
+        except (ValueError, OSError):
+            pass  # 루트 밖 폴더·숫자가 아닌 폴더명은 기록하지 않는다
+    return res
 
 
 LAST_SUBMIT_FILE = "last_submit.json"
@@ -1153,6 +1179,14 @@ def growth_comment_blocker(settings: Settings, consent_ok: ConsentCheck, manual:
     if not consent_ok(engine.name):
         return "needs_consent"
     return None
+
+
+def growth_solved(settings: Settings, now: datetime | None = None) -> dict[date, list[solved.SolvedItem]]:
+    """풀이 잔디용 {날짜: [문제]} (M20). 첫 호출에서 기존 기록으로 백필한다. 성장 기록이 꺼져 있으면 빈 dict."""
+    if not settings.growth:
+        return {}
+    solved.backfill(settings, now)
+    return solved.load(settings)
 
 
 def clear_growth(config_dir: Path) -> int:

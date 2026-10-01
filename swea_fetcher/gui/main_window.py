@@ -160,6 +160,8 @@ class MainWindow(QMainWindow):
         self.growth_page.seen_changed.connect(self._refresh_growth_badge)
         self.growth_page.comment_requested.connect(self._growth_comment_requested)
         self.growth_page.cancel_requested.connect(self._growth_cancel)
+        self.growth_page.problem_requested.connect(self._open_recent_problem)  # 풀이 잔디의 날짜 목록 → 문제 탭
+        self.settings_page.heat_color_changed.connect(self.growth_page.apply_heat_color)
         self.fetch_page.problem_ready.connect(self._on_problem_ready)
         self.fetch_page.cached_problem_requested.connect(self._show_cached_problem)
         self.history_page.problem_requested.connect(self._open_recent_problem)

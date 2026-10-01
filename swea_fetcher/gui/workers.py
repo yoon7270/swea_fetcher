@@ -91,7 +91,7 @@ class CheckWorker(BaseWorker):
 
     def work(self) -> checker.CheckResult:
         self.progress.emit(f"실행 중: {self.problem_dir.name}.py (제한 {self.timeout:.0f}초)")
-        return checker.run_and_compare(self.problem_dir, self.settings, self.timeout, on_start=self._on_start)
+        return service.check_problem(self.settings, self.problem_dir, self.timeout, on_start=self._on_start)
 
 
 class GitWorker(BaseWorker):

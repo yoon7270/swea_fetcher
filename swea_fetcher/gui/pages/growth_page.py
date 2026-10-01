@@ -1,4 +1,4 @@
-"""성장 페이지 (스펙 §6.7, M19): 주간 리포트(좋아진 점·지켜볼 점) · AI 코멘트 · 이번 주 숫자 · 강점·약점 · 지난 리포트.
+"""성장 페이지 (스펙 §6.7, M19): 풀이 잔디(M20, §6.8) · 주간 리포트(좋아진 점·지켜볼 점) · AI 코멘트 · 이번 주 숫자 · 강점·약점 · 지난 리포트.
 
 - 서비스 읽기 함수(growth_overview / growth_report)는 파일 읽기 전용이라 UI 스레드에서 부른다. 리포트 생성·AI 코멘트는 메인 창의 GrowthWorker 가 한다
   (이 페이지는 신호로 요청만 한다: comment_requested).
@@ -25,10 +25,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import growth, service
+from ... import growth, service, solved
 from ...config import Settings
 from ..coach_widgets import AnswerBrowser, growth_consent_ok, set_growth_consent
-from ..growth_widgets import BarChart, CategoryRowWidget, MetricRowWidget, week_label
+from ..growth_widgets import BarChart, CategoryRowWidget, HeatLegend, HeatmapWidget, MetricRowWidget, day_text, week_label
 from ..theme import tokens
 from ..widgets import Badge, Banner, EmptyState, set_class
 
@@ -95,6 +95,7 @@ class GrowthPage(QWidget):
     seen_changed = Signal()  # 리포트를 봐서 미확인 수가 줄었다 — 메인이 상태바 배지를 갱신
     comment_requested = Signal(object)  # 주 월요일(date): 수동 [코멘트 받기]/[다시 받기]/동의 후 시작
     cancel_requested = Signal()
+    problem_requested = Signal(str, int)  # 잔디 날짜 목록에서 고른 문제 (주제, 번호) — 메인이 문제 탭으로 연다
 
     def __init__(self, qsettings: QSettings, parent=None) -> None:
         super().__init__(parent)
@@ -110,6 +111,8 @@ class GrowthPage(QWidget):
         self._failures: dict[date, str] = {}  # 이번 실행 중 코멘트 실패 제목
         self._stale = True
         self._banner_kind = ""  # 지금 배너가 무엇인지 ("off" | "consent" | "")
+        self.heat_days: dict = {}  # 풀이 잔디 {날짜: [SolvedItem]}
+        self.heat_selected: date | None = None
         self._build()
 
     # --- UI ------------------------------------------------------------------------------
@@ -132,6 +135,7 @@ class GrowthPage(QWidget):
         root.addWidget(title)
         self.banner = Banner()  # 0~1개: 꺼짐 안내 / 코멘트 동의
         root.addWidget(self.banner)
+        self._build_heat(root)
 
         holder = QWidget()
         self.stack = QStackedLayout(holder)
@@ -156,6 +160,91 @@ class GrowthPage(QWidget):
             self.stack.addWidget(w)
         root.addWidget(holder, 1)
         self.banner.action_clicked.connect(self._banner_action)
+
+    def _build_heat(self, lay: QVBoxLayout) -> None:
+        """풀이 잔디 카드 (맨 위): 제목 · 격자 · 범례 · 선택한 날의 문제 목록."""
+        self.heat_card, hl = _card()
+        self.heat_card.setObjectName("GrowthHeat")
+        self.heat_title = _section("지난 1년간 0문제 해결")
+        self.heat_title.setObjectName("GrowthHeatTitle")
+        hl.addWidget(self.heat_title)
+        self.heatmap = HeatmapWidget()
+        hl.addWidget(self.heatmap)
+        self.heat_legend = HeatLegend()
+        hl.addWidget(self.heat_legend)
+        self.heat_hint = _label("칸을 누르면 그날 푼 문제가 보여요. 앱으로 낸 SWEA Pass 와 로컬 검증 통과를 세요 (같은 날 같은 문제는 1번).", "hint")
+        self.heat_hint.setObjectName("GrowthHeatHint")
+        hl.addWidget(self.heat_hint)
+        self.day_title = _label("", "section")
+        self.day_title.setObjectName("GrowthDayTitle")
+        self.day_title.hide()
+        hl.addWidget(self.day_title)
+        self.day_list = QListWidget()
+        self.day_list.setObjectName("GrowthDayList")
+        self.day_list.setAccessibleName("그날 푼 문제 목록")
+        self.day_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.day_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.day_list.hide()
+        hl.addWidget(self.day_list)
+        lay.addWidget(self.heat_card)
+        self.heatmap.day_clicked.connect(self._heat_day_clicked)
+        self.day_list.itemClicked.connect(self._day_item_clicked)
+        self.day_list.itemActivated.connect(self._day_item_clicked)  # Enter
+
+    def heat_base(self) -> str:
+        return solved.parse_hex(str(self.qs.value("growth/heat_color", solved.DEFAULT_HEAT_COLOR) or ""))
+
+    def apply_heat_color(self) -> None:
+        """설정에서 색을 바꾸면 즉시 반영."""
+        base = self.heat_base()
+        self.heatmap.set_base(base)
+        self.heat_legend.set_base(base)
+
+    def _refresh_heat(self) -> None:
+        s = self.settings
+        if s is None or not s.growth:
+            self.heat_card.hide()
+            self.heat_days = {}
+            return
+        now = growth.now()
+        try:
+            self.heat_days = service.growth_solved(s, now)
+        except Exception:  # noqa: BLE001 — 부가 화면이 앱을 죽이지 않는다
+            self.heat_days = {}
+        counts = solved.counts(self.heat_days)
+        self.heatmap.set_data(counts, now.date(), self.heat_base())
+        self.heat_legend.set_base(self.heat_base())
+        self.heat_title.setText(f"지난 1년간 {solved.total_last_year(self.heat_days, now.date())}문제 해결")
+        self.heat_card.show()
+        if self.heat_selected is not None:
+            self._show_day(self.heat_selected)
+
+    def _heat_day_clicked(self, d: date) -> None:
+        self.heat_selected = d
+        self._show_day(d)
+
+    def _show_day(self, d: date) -> None:
+        """선택한 날의 문제 목록. 0문제면 안내 글자."""
+        items = self.heat_days.get(d, [])
+        self.heatmap.select(d)
+        self.day_title.setText(f"{day_text(d)} · {len(items)}문제" if items else f"{day_text(d)} · 이날은 푼 문제가 없어요")
+        self.day_title.show()
+        self.day_list.clear()
+        for it in items:
+            head = f"{it.num} · {it.title}" if it.title else str(it.num)
+            li = QListWidgetItem(f"{head} · {it.topic or '-'} · {solved.VIA_LABEL[it.via]}")
+            li.setData(Qt.ItemDataRole.UserRole, (it.topic, it.num))
+            li.setToolTip("클릭하면 문제 탭에서 지문을 봅니다")
+            self.day_list.addItem(li)
+        self.day_list.setVisible(bool(items))
+        if items:
+            self.day_list.setFixedHeight(min(len(items), 6) * 28 + 8)
+        self.heat_hint.setVisible(False)
+
+    def _day_item_clicked(self, item: QListWidgetItem) -> None:
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if data:
+            self.problem_requested.emit(str(data[0]), int(data[1]))
 
     def _build_header(self, lay: QVBoxLayout) -> None:
         self.header_card, hl = _card()
@@ -284,6 +373,7 @@ class GrowthPage(QWidget):
         s = self.settings
         if s is None or not s.growth:
             self.overview = self.report = None
+            self._refresh_heat()  # 꺼짐: 잔디 카드를 숨긴다 (기록·표시 모두 멈춤)
             self.comment_state = "off"
             self.stack.setCurrentWidget(self.off_state)
             self._set_banner("off")
@@ -291,6 +381,7 @@ class GrowthPage(QWidget):
             return
         if self._banner_kind == "off":
             self._set_banner("")
+        self._refresh_heat()
         try:
             self.overview = service.growth_overview(s)
         except Exception:  # noqa: BLE001 — 부가 화면이 앱을 죽이지 않는다

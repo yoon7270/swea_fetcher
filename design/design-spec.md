@@ -466,9 +466,23 @@ QWidget#Page (QStackedLayout: 빈 상태 | 본문)
 - `SparkLine`: 96×24, `text_3` 1.5px 선, None 은 선을 끊고 점 생략, 마지막 점만 `primary` 원, 유효 값이 2개 미만이면 "-". accessibleDescription "{이름}: 첫값 → 끝값 (낮을수록 좋음)".
 - 값·변화는 항상 옆 글자에도 있어 색·길이만으로 의미를 전달하지 않는다.
 
-**설정 "성장 기록" 카드** (AI 코치 카드 다음): 체크박스 "성장 기록 사용"(`GrowthEnabledCheck`) + `hint`, 체크박스 "주간 AI 코멘트 자동 생성"(`GrowthCommentCheck`, 성장 기록이 꺼지면 비활성) + `hint`, [성장 기록 지우기](확인창 "성장 리포트와 분류 기록이 삭제됩니다") + `hint` "기록은 ~/.swea-fetch/coach/profile 에만 있고 GitHub 로 올라가지 않습니다". 저장은 즉시 `.env`.
+**설정 "성장 기록" 카드** (AI 코치 카드 다음): 체크박스 "성장 기록 사용"(`GrowthEnabledCheck`) + `hint`, 체크박스 "주간 AI 코멘트 자동 생성"(`GrowthCommentCheck`, 성장 기록이 꺼지면 비활성) + `hint`, "풀이 잔디 색" 행(§6.8), [성장 기록 지우기](확인창 "성장 리포트·분류 기록·풀이 잔디가 삭제됩니다") + `hint` "기록은 ~/.swea-fetch/coach/profile 에만 있고 GitHub 로 올라가지 않습니다". 저장은 즉시 `.env`.
 
 **알림**: 상태바 배지 `QPushButton[class=link]#GrowthBadge` "새 성장 리포트 ↗"(2개 이상 "새 성장 리포트 {n}개 ↗", 클릭 → 성장 탭), 앱 시작 메시지 6초(복습이 있으면 "복습 {n}개 · 새 성장 리포트 — 최근/성장 탭에서 확인" 한 메시지), AI 코치 탭 푸터 아래 `muted` 팁 한 줄 `#GrowthTip` ("성장 팁 · 최근 3번 연속 '{이름}' 이(가) 지적됐어요. {팁}"). 토스트 없음.
+
+### 6.8 풀이 잔디 (M20, 성장 탭 맨 위 카드 `#GrowthHeat`)
+
+GitHub contribution 그래프처럼 하루에 Pass 한 문제 수를 칸으로 채운다. 성장 기록이 꺼져 있으면 카드는 숨기고(기존 꺼짐 안내만), 기록도 하지 않는다.
+
+- **구성** (위 → 아래): 제목 `section` "지난 1년간 N문제 해결"(`#GrowthHeatTitle`) → `HeatmapWidget`(`#Heatmap`) → `HeatLegend`(`#HeatLegend`, 오른쪽 정렬 "적게 ▢▢▢▢▢ 많이") → `hint` 한 줄(첫 클릭 전만) → 선택한 날 제목(`#GrowthDayTitle`, "2026-09-30 (수) · 3문제" / 0문제 "… · 이날은 푼 문제가 없어요") → 문제 목록 `QListWidget#GrowthDayList`.
+- **격자**: 53주 × 7일, 열 = 주, 행 = 요일, **일요일 시작**(GitHub 와 동일), 마지막 열이 오늘이 든 주, 미래 칸은 그리지 않는다. 칸 gap 3px, 모서리 2px. 왼쪽 요일 라벨 "월·수·금"(`text_3`, XS), 위 월 라벨 "9월"(월이 바뀌는 첫 열, 앞 라벨과 겹치면 생략).
+- **칸 크기·좁은 창**: 폭에 맞춰 8~13px. 8px 로도 53주가 안 들어가면 **오른쪽 정렬로 오래된 주부터 자른다**(최신 주가 항상 보임, 최소 6주). 가로 스크롤 없음(720x480 규칙). 제목의 N 은 잘려도 1년 전체 기준. 높이는 칸 크기에 맞춰 조정(`setFixedHeight`).
+- **농도**: 0칸은 `surface_alt`, 1~4단계는 **기준색 하나를 카드 배경(`surface`) 쪽으로 섞어** 만든다(기준색 비율 30 / 50 / 75 / 100%, 4단계 = 기준색). 하루 Pass 수 → 단계는 고정 임계값 **1 / 2 / 3 / 4+** (하루 5문제 넘게 푸는 사람은 드물어 GitHub 식 분포 기반보다 적게 푸는 사용자도 진해지는 보람이 있다). 임계값·비율은 `solved.HEAT_STEPS` / `HEAT_MIX` 한 곳. 다크 팔레트(`tokens.DARK`)가 생기면 그쪽 `surface`·`surface_alt` 로 자동 전환.
+- **강조**: 오늘 칸은 `text` 1.5px 테두리, 선택한 칸은 `primary` 2px 테두리(오늘이면 안쪽에 겹침). 색으로만 의미를 전달하지 않는다 — 문제 수는 툴팁·접근성 설명·선택 목록 글자에 있다.
+- **상호작용**: hover 툴팁 "2026-09-30 (수) · 3문제"(0 이면 "0문제"), 칸 위에서 손가락 커서. 칸 클릭 → 아래 목록("{번호} · {제목} · {주제} · SWEA|로컬", 최대 6줄 높이, 가로 스크롤 없음·말줄임), 목록 항목 클릭/Enter → `problem_requested(topic, num)` → `MainWindow._open_recent_problem`(최근 탭과 같은 흐름: 캐시 있으면 즉시, 없으면 지문만 가져오기).
+- **집계**: Pass 한 문제 = 앱으로 낸 SWEA 제출 Pass(`SWEA`) + 로컬 검증 통과(`로컬`, 샘플 출력 일치; CLI `check` 와 GUI 검증 모두). 같은 날 같은 문제는 1번(둘 다 있으면 SWEA 로 표시). 날짜는 로컬 날짜.
+- **색 설정**: 설정 "성장 기록" 카드 안 "풀이 잔디 색" 행 — 프리셋 원형 칩 5개(초록 `#2DA44E` 기본 · 파랑 · 보라 · 주황 · 분홍, 선택은 3px `text` 테두리) + [직접 고르기](`QColorDialog`; 프리셋이 아닌 색이면 버튼 왼쪽에 그 색 띠). QSettings `growth/heat_color`("#RRGGBB", 잘못된 값은 기본 초록), 변경 즉시 성장 탭에 반영(`heat_color_changed` 신호).
+- **저장**: `~/.swea-fetch/coach/profile/solved.json` (`{"v":1,"days":{"YYYY-MM-DD":[{num,topic,title,via,at}]}}`, 400일 보관, 코드·지문 원문 없음, 루트 안이면 쓰기 거부). [성장 기록 지우기]·[AI 기록 지우기]·`logout --all` 이 함께 지운다. 첫 로드 때 기존 기록에서 백필(growth submit Pass 120일 + AI 코치 기록의 마지막 Pass) — 로컬 검증 과거 기록은 없어 불가. 백필은 1회(`coach/solved_backfilled` 표식; [성장 기록 지우기] 뒤에 되살아나지 않게 `profile/` 밖).
 
 ## 7. 다이얼로그 (2개)
 

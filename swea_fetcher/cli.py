@@ -318,7 +318,7 @@ def run_check(topic: str, num: int, timeout: float, no_push: bool = False) -> in
     if not problem_dir.is_dir():
         raise InvalidInput(f"문제 폴더가 없습니다: {problem_dir}")
 
-    res = checker.run_and_compare(problem_dir, settings, timeout=timeout)
+    res = service.check_problem(settings, problem_dir, timeout=timeout)
     status = "통과" if res.passed else ("시간 초과" if res.timed_out else "실패")
     print(f"[{'OK' if res.passed else 'FAIL'}] {num} {status}  ({res.elapsed:.2f}s)  {problem_dir}")
     if res.note:

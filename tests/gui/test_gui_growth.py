@@ -626,7 +626,7 @@ def test_clear_growth_button_only_clears_profile(gw, monkeypatch, valid_config):
     assert (valid_config / "coach" / "profile").exists()
     FakeBox.choose = "지우기"
     sp.growth_clear_btn.click()
-    assert "성장 리포트와 분류 기록이 삭제됩니다" in FakeBox.made[-1].text
+    assert "성장 리포트·분류 기록·풀이 잔디가 삭제됩니다" in FakeBox.made[-1].text
     assert not (valid_config / "coach" / "profile").exists() and (valid_config / "coach" / "records.json").exists()
     assert gw.growth_page.stack.currentWidget() is gw.growth_page.empty or not gw.growth_page.isVisible()
 
