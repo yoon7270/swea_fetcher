@@ -1032,3 +1032,18 @@ QSS·토큰만으로 끝나는 변경이 기본이다. 위젯 구조가 바뀌�
 - `PageColumn`·`EmptyState(icon)`·`Toast`·`notify` 는 컴포넌트만 완성했고 페이지 적용(S3·S7 호출부)은 M21-D. 단, 성공성 `status_message`(문구가 "~했습니다/켰습니다/껐습니다/지웠습니다/열었습니다/바꿨습니다" 로 끝나거나 "저장 완료" 로 시작)는 `MainWindow._on_page_message` 가 `notify` 로 보내고 그 외는 상태바만.
 - 폼 줄바꿈 정책(S9)은 해당 레이아웃이 QFormLayout 이 아니라 QGridLayout 이어서(`git_dialog` 만 QFormLayout) 페이지 재배치와 함께 M21-D 에서 처리.
 - Pretendard 에는 `✕ ▼ ▶ ● ○ ↗ − ≠ …` 글리프가 없어(`QRawFont.supportsCharacter` 확인) 시스템 폴백 글꼴로 그려진다 — Windows 에서 모양·세로 정렬을 M21-E 에서 확인.
+
+
+### 16.16 M21 2단계 구현 기록 (builder) — 모션·페이지·마감
+
+모션 (구현값)
+- `gui/motion.py`: `motion_enabled()`(§16.9 순서), `tween`/`loop`/`fade_in`/`fade_slide_in`/`count_up`/`finish_now`, `MotionGuard`(유한 애니메이션 프레임 간격 50ms 초과 연속 3회 → 세션 동안 off, 무한 반복은 제외). 꺼짐 = 애니메이션 객체 0개·즉시 최종 상태. `tests/gui/conftest.py` 가 `SWEA_GUI_MOTION=off` 기본, `tests/gui/test_motion.py` 가 켜서 시작·종료 상태만 검증.
+- 스펙 대체안: (1) 버튼 눌림 0.97 축소는 **면만** 축소(글자는 QSS 가 그려 스케일 불가). (2) 스피너 색은 글자색이 아니라 `primary` (회색 비활성 면 위에서 보이게). (3) 내비 항목은 `NavDelegate` 가 아이콘·글자까지 직접 그림(QSS `::item` 은 패딩 외 제거). (4) 토스트 등장/퇴장은 위젯 이동이 아니라 paintEvent 의 투명도·y 오프셋. (5) 모션 on 이어도 창이 활성이 아니면 스피너·스켈레톤은 멈춤(`applicationStateChanged`).
+- 지표 타일(S10): `metric_box` 를 QGridLayout 으로 바꿔 **타일 그리드 채택**(2열, 카드 폭 560 미만 1열). `count()`/`itemAt(i).widget()` 계약과 `MetricRow_*`·`.change`·`.spark` 유지. 값이 숫자 하나("3문제", "85%")일 때만 카운트업, 복합 값("힌트 2 · 정답 풀이 0")은 md 700 정적.
+- `BarChart` 높이 120→140 (테스트 갱신). 성장 제목 `#GrowthHeatTitle` 은 rich text 라 `text()` 대신 `accessibleName()` 이 평문 — 테스트 갱신.
+- 검증 페이지: `QScrollArea` 로 감싸 720×480 에서도 코치 바+결과가 겹치지 않고 스크롤(결과 영역 최소 220). 번호 입력은 이 줄에서만 44px(`size="md"`).
+- EnginePane 머리글: 제목 아래에 메타(`코드 평가 · 14:02 · 16.2초`) — `ElidedLabel.set_parts` 가 좁으면 시각부터 빼고 그래도 안 되면 오른쪽 말줄임. 가운데 말줄임 금지.
+- 글리프: `✕ ▼ ▶ ● ○ ↗ ⟳ ⚠` → SVG(`close`·`caret-down/right`·`arrow-up-right`·`sync`) 또는 `StatusDot`. 상태바 문구는 "로그인됨"/"세션 없음"/"설정 없음"(점은 그림), 배지 문구에서 "↗" 제거(아이콘).
+- 버튼 간격 토큰 `BTN_GAP=12`, `BTN_GAP_SM=8`. 설정 "위험 영역" 카드에 세션 삭제·계정 삭제(danger)·AI 기록 지우기·성장 기록 지우기를 모음. `ReduceMotionToggle` 은 QSettings `ui/reduce_motion`.
+- 번들: `packaging/swea-fetch-gui.spec` 가 `qsvg.dll`·`qsvgicon.dll` 을 binaries 로 명시.
+- 마감 검토: 지연 시작·일시 정지 모션도 교체 시 끝값과 정리 콜백을 적용하고, 취소된 지연 타이머는 재시작하지 않는다. 모션 off 전환 후 같은 키를 요청하면 이전 모션을 먼저 종료한다. 회귀 테스트 2건 추가.

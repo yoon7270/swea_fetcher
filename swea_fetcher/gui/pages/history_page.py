@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 from ... import service
 from ...config import Settings
 from ..theme import tokens
-from ..widgets import Banner, Button, EmptyState, open_in_editor, open_in_explorer, editor_tooltip, set_class
+from ..widgets import Banner, Button, EmptyState, open_in_editor, open_in_explorer, editor_tooltip, set_class, svg_icon
 
 LIMIT = 20
 REVIEW_MAX_ROWS = 5  # 복습 카드에 보여줄 최대 항목 (나머지는 "외 N개")
@@ -50,12 +50,14 @@ class HistoryPage(QWidget):
         root.setContentsMargins(m, m, m, m)
         root.setSpacing(tokens.SPACE * 2)
         head = QHBoxLayout()
+        head.setSpacing(tokens.BTN_GAP)
         title = QLabel("최근 저장")
         set_class(title, "title")
         self.count_label = QLabel(f"최근 {LIMIT}개")
         set_class(self.count_label, "hint")
         self.count_label.hide()
         self.refresh_btn = Button("새로고침")
+        set_class(self.refresh_btn, "tonal")  # 바닥 위 버튼 (스펙 §16.5)
         self.refresh_btn.setToolTip("F5")
         head.addWidget(title)
         head.addStretch(1)
@@ -96,7 +98,7 @@ class HistoryPage(QWidget):
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.setShowGrid(False)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.empty = EmptyState("아직 저장한 문제가 없어요", "저장 페이지에서 문제 번호와 주제를 입력하면 여기에 쌓입니다", "저장 페이지로")
+        self.empty = EmptyState("아직 저장한 문제가 없어요", "저장 페이지에서 문제 번호와 주제를 입력하면 여기에 쌓입니다", "저장 페이지로", icon="nav-history")
         self.stack.addWidget(self.table)
         self.stack.addWidget(self.empty)
         root.addWidget(holder, 1)
@@ -144,6 +146,7 @@ class HistoryPage(QWidget):
         p = tokens.current()
         for it in items[:REVIEW_MAX_ROWS]:
             row = QHBoxLayout()
+            row.setSpacing(tokens.BTN_GAP_SM)
             btn = Button(f"{it.num}. {it.title or '—'}")
             set_class(btn, "link")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -158,7 +161,8 @@ class HistoryPage(QWidget):
             lab = QLabel(f"· {status}")
             lab.setStyleSheet(f"color: {color};")
             close = QToolButton()
-            close.setText("✕")
+            close.setIcon(svg_icon("close", p.text_3, 14))  # ✕ 글리프는 Pretendard 에 없어 SVG
+            close.setIconSize(QSize(14, 14))
             close.setToolTip("복습 목록에서 지웁니다")
             close.setAccessibleName(f"{it.num}번 복습 지우기")
             close.clicked.connect(lambda _=False, i=it: self._dismiss_review(i.num))

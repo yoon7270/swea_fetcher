@@ -13,6 +13,7 @@ from datetime import date
 from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -28,14 +29,22 @@ from PySide6.QtWidgets import (
 from ... import growth, service, solved
 from ...config import Settings
 from ..coach_widgets import AnswerBrowser, growth_consent_ok, set_growth_consent
-from ..growth_widgets import BarChart, CategoryRowWidget, HeatLegend, HeatmapWidget, MetricRowWidget, day_text, week_label
+from .. import motion
+from ..growth_widgets import BarChart, BulletLabel, CategoryRowWidget, HeatLegend, HeatmapWidget, MetricRowWidget, day_text, number_parts, week_label
 from ..theme import tokens
-from ..widgets import Badge, Banner, Button, EmptyState, set_class
+from ..widgets import Badge, Banner, Button, EmptyState, PageColumn, set_class
 
 REFERENCE_NOTE = "AI 분류 기반 참고용"
 EMPTY_TITLE = "아직 기록이 없어요"
 EMPTY_BODY = "문제를 제출하거나 AI 코치에서 평가·힌트를 받으면 쌓여요."
 MIN_TAGGED = growth.THRESH["min_tagged"]
+_HEAT_INTRO_DONE = False  # 잔디 채움 애니메이션은 앱 실행당 처음 성장 탭에 들어올 때 1번만 (A11)
+METRIC_ONE_COL_W = 560  # 지표 카드가 이보다 좁으면 타일 1열
+
+
+def _big_number_html(prefix: str, n: float, suffix: str, color: str) -> str:
+    """"지난 1년간 [178]문제 해결" 처럼 숫자만 xl 700 주색으로 (rich text 한 줄)."""
+    return f"{prefix}<span style='font-size:{tokens.FONT_SIZE_XL}pt; font-weight:700; color:{color}'>{int(round(n))}</span>{suffix}"
 
 
 def ask_growth_consent(parent: QWidget | None, engine_label: str) -> bool:
@@ -61,8 +70,8 @@ def _card() -> tuple[QFrame, QVBoxLayout]:
     card = QFrame()
     set_class(card, "card")
     lay = QVBoxLayout(card)
-    m = tokens.SPACE * 2
-    lay.setContentsMargins(m, tokens.SPACE * 3 // 2, m, tokens.SPACE * 3 // 2)
+    m = tokens.SPACE * 3  # 카드 패딩 24 (스펙 §16.5)
+    lay.setContentsMargins(m, m, m, m)
     lay.setSpacing(tokens.SPACE)
     return card, lay
 
@@ -113,6 +122,11 @@ class GrowthPage(QWidget):
         self._banner_kind = ""  # 지금 배너가 무엇인지 ("off" | "consent" | "")
         self.heat_days: dict = {}  # 풀이 잔디 {날짜: [SolvedItem]}
         self.heat_selected: date | None = None
+        self._heat_total: int | None = None  # 지금 제목에 보이는 값 (카운트업 시작점)
+        self._pass_shown: int | None = None
+        self._metric_prev: dict[str, float] = {}
+        self._metric_tiles: list[QWidget] = []
+        self._metric_cols = 0
         self._build()
 
     # --- UI ------------------------------------------------------------------------------
@@ -122,13 +136,10 @@ class GrowthPage(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
-        inner = QWidget()
-        inner.setObjectName("page")
-        self.scroll.setWidget(inner)
+        col = PageColumn()  # 본문 최대 폭 840 + 가운데 정렬 (스펙 §16.5)
+        self.scroll.setWidget(col)
         outer.addWidget(self.scroll)
-        root = QVBoxLayout(inner)
-        m = tokens.SPACE * 3
-        root.setContentsMargins(m, m, m, m)
+        root = col.body
         root.setSpacing(tokens.SPACE * 2)
         title = QLabel("성장")
         set_class(title, "title")
@@ -151,9 +162,9 @@ class GrowthPage(QWidget):
         self._build_metrics(cl)
         self._build_categories(cl)
         self._build_history(cl)
-        self.empty = EmptyState(EMPTY_TITLE, EMPTY_BODY)
+        self.empty = EmptyState(EMPTY_TITLE, EMPTY_BODY, icon="nav-growth")
         self.empty.setObjectName("GrowthEmpty")
-        self.off_state = EmptyState("성장 기록이 꺼져 있어요", "설정에서 켜면 AI 코치 응답과 제출 결과로 주간 리포트가 쌓여요", "설정으로 이동")
+        self.off_state = EmptyState("성장 기록이 꺼져 있어요", "설정에서 켜면 AI 코치 응답과 제출 결과로 주간 리포트가 쌓여요", "설정으로 이동", icon="nav-growth")
         self.off_state.setObjectName("GrowthOff")
         self.off_state.button.clicked.connect(lambda: self.goto_requested.emit("settings"))
         for w in (self.content, self.empty, self.off_state):
@@ -165,8 +176,10 @@ class GrowthPage(QWidget):
         """풀이 잔디 카드 (맨 위): 제목 · 격자 · 범례 · 선택한 날의 문제 목록."""
         self.heat_card, hl = _card()
         self.heat_card.setObjectName("GrowthHeat")
-        self.heat_title = _section("지난 1년간 0문제 해결")
+        self.heat_title = _section("")
         self.heat_title.setObjectName("GrowthHeatTitle")
+        self.heat_title.setTextFormat(Qt.TextFormat.RichText)  # 숫자만 크게 — 접근성 이름은 평문 (_set_heat_title)
+        self._set_heat_title(0)
         hl.addWidget(self.heat_title)
         self.heatmap = HeatmapWidget()
         hl.addWidget(self.heatmap)
@@ -214,10 +227,31 @@ class GrowthPage(QWidget):
         counts = solved.counts(self.heat_days)
         self.heatmap.set_data(counts, now.date(), self.heat_base())
         self.heat_legend.set_base(self.heat_base())
-        self.heat_title.setText(f"지난 1년간 {solved.total_last_year(self.heat_days, now.date())}문제 해결")
+        total = solved.total_last_year(self.heat_days, now.date())
         self.heat_card.show()
+        self._set_heat_title(total, animate=self.isVisible())
+        global _HEAT_INTRO_DONE
+        if not _HEAT_INTRO_DONE and self.isVisible():  # 처음 들어올 때 1회만 잔디 채움 (갱신·hover·칸 선택에서는 재생 안 함)
+            _HEAT_INTRO_DONE = True
+            self.heatmap.play_reveal()
         if self.heat_selected is not None:
             self._show_day(self.heat_selected)
+
+    def _set_heat_title(self, total: int, animate: bool = False) -> None:
+        """제목 "지난 1년간 N문제 해결". 접근성 이름·툴팁은 즉시 평문 최종값, 표시 숫자만 값이 바뀐 경우 카운트업."""
+        plain = f"지난 1년간 {total}문제 해결"
+        color = tokens.current().primary_soft_text
+
+        def fmt(v: float) -> str:
+            return _big_number_html("지난 1년간 ", v, "문제 해결", color)
+
+        prev, self._heat_total = self._heat_total, total
+        self.heat_title.setAccessibleName(plain)
+        self.heat_title.setToolTip(plain)
+        if animate and (prev is None or prev != total):
+            motion.count_up(self.heat_title, total, fmt, start=0 if prev is None else prev, accessible=plain)
+        else:
+            self.heat_title.setText(fmt(total))
 
     def _heat_day_clicked(self, d: date) -> None:
         self.heat_selected = d
@@ -261,6 +295,18 @@ class GrowthPage(QWidget):
         top.addWidget(self.new_badge)
         top.addStretch(1)
         hl.addLayout(top)
+        big = QHBoxLayout()  # 큰 숫자 줄: "Pass N문제" + 지난 기록 대비 변화 (글자+화살표)
+        big.setSpacing(tokens.SPACE * 3 // 2)
+        self.pass_label = QLabel()
+        self.pass_label.setObjectName("GrowthPass")
+        self.pass_label.setTextFormat(Qt.TextFormat.RichText)
+        set_class(self.pass_label, "section")
+        self.pass_change = QLabel()
+        self.pass_change.setObjectName("GrowthPassChange")
+        set_class(self.pass_change, "muted")
+        big.addWidget(self.pass_label, 0, Qt.AlignmentFlag.AlignBottom)
+        big.addWidget(self.pass_change, 1, Qt.AlignmentFlag.AlignBottom)
+        hl.addLayout(big)
         self.reference = QLabel(REFERENCE_NOTE)  # 좁은 창(720)에서 헤더가 가로로 넘치지 않게 한 줄 아래
         set_class(self.reference, "hint")
         hl.addWidget(self.reference)
@@ -271,7 +317,7 @@ class GrowthPage(QWidget):
         self.watch_label, self.watch_box = _section("지켜볼 점"), QVBoxLayout()
         self.persist_label, self.persist_box = _section("꾸준히 지적되는 약점"), QVBoxLayout()
         for lab, box in ((self.good_label, self.good_box), (self.watch_label, self.watch_box), (self.persist_label, self.persist_box)):
-            box.setSpacing(2)
+            box.setSpacing(tokens.SPACE // 2)
             hl.addWidget(lab)
             hl.addLayout(box)
         self.confirm_note = _label("월요일에 확정돼요", "hint")
@@ -297,6 +343,7 @@ class GrowthPage(QWidget):
         self.comment_text.setObjectName("GrowthCommentText")
         cl.addWidget(self.comment_text)
         btns = QHBoxLayout()
+        btns.setSpacing(tokens.BTN_GAP)
         self.comment_btn = Button("코멘트 받기")
         self.comment_btn.setObjectName("GrowthCommentButton")
         self.comment_cancel_btn = Button("취소")
@@ -318,8 +365,9 @@ class GrowthPage(QWidget):
         ml.addWidget(_section("이번 주 숫자"))
         self.chart = BarChart()
         ml.addWidget(self.chart)
-        self.metric_box = QVBoxLayout()
-        self.metric_box.setSpacing(0)
+        self.metric_box = QGridLayout()  # 타일 그리드: 2열 (카드가 좁으면 1열). count()/itemAt(i).widget() 은 이전과 같다
+        self.metric_box.setHorizontalSpacing(tokens.SPACE * 3 // 2)
+        self.metric_box.setVerticalSpacing(tokens.SPACE * 3 // 2)
         ml.addLayout(self.metric_box)
         lay.addWidget(self.metrics_card)
 
@@ -462,18 +510,65 @@ class GrowthPage(QWidget):
         watch = rep.judgments_of("watch")
         persist = rep.judgments_of("persistent")
         self.headline.setText(rep.headline)
-        for lab, box, items in ((self.good_label, self.good_box, good), (self.watch_label, self.watch_box, watch), (self.persist_label, self.persist_box, persist)):
+        for lab, box, items, kind in (
+            (self.good_label, self.good_box, good, "success"),
+            (self.watch_label, self.watch_box, watch, "warning"),
+            (self.persist_label, self.persist_box, persist, "error"),
+        ):
             lab.setVisible(bool(items))
             for j in items:
-                box.addWidget(_label("· " + j.text, "muted"))
+                box.addWidget(BulletLabel(j.text, kind))  # 6px 색 점 + 글자 (색 단독 아님)
         self.confirm_note.setVisible(rep.in_progress)
+        self._fill_pass(rep)
+
+    def _fill_pass(self, rep: growth.GrowthReport) -> None:
+        """헤더의 큰 숫자 줄. N 은 바뀐 경우에만 카운트업, 접근성 이름은 즉시 평문."""
+        n = rep.stats.solved
+        p = tokens.current()
+        row = growth.metric_rows(rep)[0]
+        color = p.success_text if row.direction == "better" else p.warning_text if row.direction == "worse" else p.text_2
+        self.pass_change.setText(f"<span style='color:{color}'>{row.change}</span>")
+        plain = f"Pass {n}문제"
+
+        def fmt(v: float) -> str:
+            return _big_number_html("Pass ", v, "문제", p.primary_soft_text)
+
+        prev, self._pass_shown = self._pass_shown, n
+        self.pass_label.setToolTip(plain)
+        if self.isVisible() and (prev is None or prev != n):
+            motion.count_up(self.pass_label, n, fmt, start=0 if prev is None else prev, accessible=plain)
+        else:
+            self.pass_label.setText(fmt(n))
+            self.pass_label.setAccessibleName(plain)
 
     def _fill_metrics(self, rep: growth.GrowthReport) -> None:
         values = [0.0 if st is None else float(st.solved) for st in rep.chart_stats]
         self.chart.set_data(values, [week_label(d) for d in rep.chart_weeks], len(values) - 1)
         _clear(self.metric_box)
+        self._metric_tiles = []
+        self._metric_cols = 0
         for row in growth.metric_rows(rep):
-            self.metric_box.addWidget(MetricRowWidget(row))
+            parts = number_parts(row.value)
+            prev = self._metric_prev.get(row.key)
+            start = (0.0 if prev is None else prev) if parts is not None else None  # 숫자 하나인 값만, 처음엔 0 에서, 이후엔 바뀐 경우에만
+            tile = MetricRowWidget(row, animate_from=start)
+            if parts is not None:
+                self._metric_prev[row.key] = parts[1]
+            self._metric_tiles.append(tile)
+        self._layout_metrics()
+
+    def _layout_metrics(self) -> None:
+        """타일을 2열(좁으면 1열)로 배치. 이미 놓인 타일을 옮기므로 위젯은 그대로."""
+        cols = 1 if self.metrics_card.width() < METRIC_ONE_COL_W else 2
+        if cols == self._metric_cols and self.metric_box.count() == len(self._metric_tiles):
+            return
+        self._metric_cols = cols
+        for w in self._metric_tiles:
+            self.metric_box.removeWidget(w)
+        for i, w in enumerate(self._metric_tiles):
+            self.metric_box.addWidget(w, i // cols, i % cols)
+        for c in range(2):
+            self.metric_box.setColumnStretch(c, 1 if c < cols else 0)
 
     def _fill_categories(self, rep: growth.GrowthReport) -> None:
         _clear(self.weak_box)
@@ -490,7 +585,7 @@ class GrowthPage(QWidget):
             if not rows:
                 box.addWidget(_label("이번 주는 해당 없음", "hint"))
             for row in rows:
-                box.addWidget(CategoryRowWidget(row))
+                box.addWidget(CategoryRowWidget(row, kind="warning" if weak else "success"))  # 약점=주황, 강점=초록 (옆 소제목이 글자로 구분)
 
     # --- 코멘트 카드 ------------------------------------------------------------------------
     def set_comment_running(self, week: date | None) -> None:
@@ -565,6 +660,8 @@ class GrowthPage(QWidget):
 
     def resizeEvent(self, e) -> None:  # noqa: N802
         super().resizeEvent(e)
+        if self._metric_tiles:
+            self._layout_metrics()
         if self.comment_state == "done":
             self._fit_comment()
 

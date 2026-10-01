@@ -11,8 +11,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap
+from PySide6.QtCore import QByteArray, QEasingCurve, QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QIcon, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...opener import OpenResult, editor_tooltip, open_folder, open_in_editor  # noqa: F401 — 재노출 (M13)
+from .. import motion
 from ..theme import tokens
 
 ICON_DIR = Path(__file__).resolve().parent.parent / "theme" / "icons"
@@ -55,6 +56,13 @@ def set_class(w: QWidget, cls: str, state: str | None = None) -> None:
 
 def set_state(w: QWidget, state: str) -> None:
     w.setProperty("state", state)
+    w.style().unpolish(w)
+    w.style().polish(w)
+
+
+def set_size(w: QWidget, size: str) -> None:
+    """동적 속성 size ("lg" = 52px 페이지 CTA). QSS `QPushButton[size="lg"]`. 바꾼 뒤 스타일을 다시 적용한다."""
+    w.setProperty("size", size)
     w.style().unpolish(w)
     w.style().polish(w)
 
@@ -108,27 +116,80 @@ def make_busy_bar() -> QProgressBar:
 # --- Button (§16.5) -------------------------------------------------------------------
 
 
+def _lerp_color(a: QColor, b: QColor, t: float) -> QColor:
+    """RGBA 선형 보간 (hover 색 전환용)."""
+    t = max(0.0, min(1.0, t))
+    return QColor(
+        round(a.red() + (b.red() - a.red()) * t),
+        round(a.green() + (b.green() - a.green()) * t),
+        round(a.blue() + (b.blue() - a.blue()) * t),
+        round(a.alpha() + (b.alpha() - a.alpha()) * t),
+    )
+
+
 class Button(QPushButton):
     """면·포커스 링을 직접 그리는 버튼. 글자·패딩·크기는 QSS(class 속성), 색은 현재 테마 팔레트에서 읽는다.
 
     class → 면: primary(주색 면) / tonal(연한 주색) / danger(투명, hover 시 연한 빨강) / link(투명) / 기본(회색 secondary).
     배너 안 버튼은 흰 면. 키보드 포커스일 때만 2px 링 (마우스 클릭 포커스에는 그리지 않는다).
+    모션(M21-C): hover 면 색 120ms 보간, 눌림 시 면만 0.97 배 축소(80ms) 후 복귀(120ms), busy 시 왼쪽 스피너. 모션이 꺼져 있으면 모두 즉시.
     """
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._busy = False
         self._kb_focus = False
+        self._hover_t: float | None = None  # None = 보간 중 아님 (underMouse 로 즉시 판정)
+        self._press_scale = 1.0
+        self._spinner: Spinner | None = None
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.pressed.connect(self._on_pressed)
+        self.released.connect(self._on_released)
 
-    # busy: 작업 중에는 비활성으로 보이고 눌러도 반응하지 않는다 (스피너는 M21-C)
+    # busy: 작업 중에는 비활성으로 보이고 눌러도 반응하지 않는다. 왼쪽에 16px 스피너 (스펙 §16.5·A8)
     def set_busy(self, busy: bool) -> None:
         self._busy = bool(busy)
         self.setEnabled(not self._busy)
+        if self._busy:
+            if self._spinner is None:
+                self._spinner = Spinner(self)
+                self._spinner.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            self._place_spinner()
+            self._spinner.show()
+            self._spinner.raise_()
+        elif self._spinner is not None:
+            self._spinner.hide()
         self.update()
 
     def is_busy(self) -> bool:
         return self._busy
+
+    def set_trailing_icon(self, name: str, size: int = 14) -> None:
+        """글자 오른쪽 아이콘 (↗ 같은 글리프는 Pretendard 에 없어 SVG). 테마가 바뀌면 refresh_icon() 으로 다시 칠한다."""
+        self._trail = (name, size)
+        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.setIconSize(QSize(size, size))
+        self.refresh_icon()
+
+    def refresh_icon(self) -> None:
+        trail = self.__dict__.get("_trail")
+        if trail:
+            self.setIcon(svg_icon(trail[0], tokens.current().primary_soft_text, trail[1]))
+
+    def _place_spinner(self) -> None:
+        if self._spinner is None:
+            return
+        text_w = self.fontMetrics().horizontalAdvance(self.text())
+        x = max(int((self.width() - text_w) / 2) - self._spinner.width() - 8, 8)
+        self._spinner.move(x, (self.height() - self._spinner.height()) // 2)
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        super().setText(text)
+        self._place_spinner()
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        self._place_spinner()
 
     def _on_banner(self) -> bool:
         w = self.parent()
@@ -138,11 +199,11 @@ class Button(QPushButton):
             w = w.parent()
         return False
 
-    def face_color(self) -> QColor | None:
-        """현재 상태(class·hover·pressed·disabled)의 면 색. 면이 없으면(투명) None. 테스트·캡처에서도 쓴다."""
+    def _state_color(self, hover: bool, down: bool) -> QColor | None:
+        """상태(class·hover·pressed·disabled)별 면 색. 면이 없으면(투명) None."""
         p = tokens.current()
         cls = str(self.property("class") or "")
-        enabled, down, hover = self.isEnabled(), self.isDown(), self.underMouse()
+        enabled = self.isEnabled()
         if self._on_banner():
             if not enabled:
                 return QColor(p.bg_subtle)
@@ -167,6 +228,22 @@ class Button(QPushButton):
             return QColor(p.bg_subtle)
         return QColor(p.secondary_pressed if down else p.secondary_hover if hover else p.secondary)
 
+    def face_color(self) -> QColor | None:
+        """현재 상태의 면 색. 면이 없으면(투명) None. hover 보간 중에는 중간색. 테스트·캡처에서도 쓴다."""
+        down = self.isDown()
+        if self._hover_t is None or down or not self.isEnabled():
+            return self._state_color(self.underMouse(), down)
+        rest, hov = self._state_color(False, False), self._state_color(True, False)
+        if rest is None and hov is None:
+            return None
+        if rest is None:  # 투명 → 면: 같은 색의 알파만 보간
+            rest = QColor(hov)
+            rest.setAlpha(0)
+        if hov is None:
+            hov = QColor(rest)
+            hov.setAlpha(0)
+        return _lerp_color(rest, hov, self._hover_t)
+
     def paintEvent(self, e) -> None:  # noqa: N802
         face = self.face_color()
         ring = self._kb_focus and self.isEnabled()
@@ -179,15 +256,62 @@ class Button(QPushButton):
             r = QRectF(self.rect())
             inset = (3.0 if r.height() >= tokens.CONTROL_H_SM else 2.0) if ring else 0.0
             if face is not None:
+                sx = r.width() * (1.0 - self._press_scale) / 2  # 눌림: 면만 중심 기준 축소 (글자는 그대로)
+                sy = r.height() * (1.0 - self._press_scale) / 2
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(face)
-                painter.drawRoundedRect(r.adjusted(inset, inset, -inset, -inset), radius, radius)
+                painter.drawRoundedRect(r.adjusted(inset + sx, inset + sy, -inset - sx, -inset - sy), radius, radius)
             if ring:
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.setPen(QPen(QColor(p.primary), 2))
                 painter.drawRoundedRect(r.adjusted(1, 1, -1, -1), radius + 1, radius + 1)
             painter.end()
         super().paintEvent(e)  # 글자·아이콘 (QSS 배경은 투명)
+
+    # --- 모션 (A3 hover 색 보간 · A4 눌림 축소) ---
+    def _set_hover_t(self, v: float) -> None:
+        self._hover_t = v
+        self.update()
+
+    def _animate_hover(self, to: float) -> None:
+        if not self.isEnabled():
+            self._hover_t = None
+            self.update()
+            return
+        cur = self._hover_t if self._hover_t is not None else (1.0 - to)
+        anim = motion.tween(self, cur, to, motion.MOTION_FAST, self._set_hover_t, motion.EASE_IN, on_finished=self._end_hover, key="hover")
+        if anim is None:
+            self._hover_t = None
+            self.update()
+        else:
+            self._set_hover_t(cur)
+
+    def _end_hover(self) -> None:
+        self._hover_t = None  # 보간 끝 → underMouse 로 판정 (최종 상태와 같다)
+        self.update()
+
+    def enterEvent(self, e) -> None:  # noqa: N802
+        super().enterEvent(e)
+        self._animate_hover(1.0)
+
+    def leaveEvent(self, e) -> None:  # noqa: N802
+        super().leaveEvent(e)
+        self._animate_hover(0.0)
+
+    def _set_scale(self, v: float) -> None:
+        self._press_scale = v
+        self.update()
+
+    def _on_pressed(self) -> None:
+        anim = motion.tween(self, self._press_scale, motion.PRESS_SCALE, motion.PRESS_DOWN_MS, self._set_scale, QEasingCurve.Type.OutQuad, key="press")
+        if anim is None:
+            self._press_scale = 1.0
+
+    def _on_released(self) -> None:
+        anim = motion.tween(self, self._press_scale, 1.0, motion.PRESS_UP_MS, self._set_scale, QEasingCurve.Type.OutQuad, key="press")
+        if anim is None:
+            self._press_scale = 1.0
+            self.update()
 
     def focusInEvent(self, e) -> None:  # noqa: N802
         self._kb_focus = e.reason() in (
@@ -218,9 +342,30 @@ class Toggle(QCheckBox):
     def __init__(self, text: str = "", parent=None) -> None:
         super().__init__(text, parent)
         self._kb_focus = False
+        self._t: float | None = None  # 손잡이 위치 0..1 (None = 보간 중 아님 → isChecked 로 판정)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.toggled.connect(self._on_toggled)
+
+    def _set_t(self, v: float) -> None:
+        self._t = v
+        self.update()
+
+    def _on_toggled(self, on: bool) -> None:
+        """손잡이 이동 + 트랙 색 보간 180ms (A7). 보이지 않거나 모션이 꺼져 있으면 즉시."""
+        target = 1.0 if on else 0.0
+        cur = self._t if self._t is not None else (1.0 - target)
+        anim = motion.tween(self, cur, target, motion.MOTION_TOGGLE, self._set_t, motion.EASE_IN, on_finished=self._end_anim, key="toggle") if self.isVisible() else None
+        if anim is None:
+            self._t = None
+            self.update()
+        else:
+            self._set_t(cur)
+
+    def _end_anim(self) -> None:
+        self._t = None
+        self.update()
 
     def sizeHint(self) -> QSize:  # noqa: N802
         text_w = self.fontMetrics().horizontalAdvance(self.text()) if self.text() else 0
@@ -248,13 +393,13 @@ class Toggle(QCheckBox):
         elided = self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, avail)
         painter.drawText(QRectF(0, 0, avail, self.height()), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), elided)
         # 트랙·손잡이
-        on = self.isChecked()
+        t = self._t if self._t is not None else (1.0 if self.isChecked() else 0.0)
         painter.setOpacity(1.0 if enabled else 0.5)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(p.primary if on else p.toggle_off))
+        painter.setBrush(_lerp_color(QColor(p.toggle_off), QColor(p.primary), t))
         painter.drawRoundedRect(track, self.TRACK_H / 2, self.TRACK_H / 2)
         pad = (self.TRACK_H - self.KNOB) / 2
-        kx = track.right() - pad - self.KNOB if on else track.left() + pad
+        kx = track.left() + pad + (track.width() - 2 * pad - self.KNOB) * t
         painter.setBrush(QColor(p.surface))
         painter.drawEllipse(QRectF(kx, track.top() + pad, self.KNOB, self.KNOB))
         painter.setOpacity(1.0)
@@ -281,6 +426,34 @@ class Toggle(QCheckBox):
     def nextCheckState(self) -> None:  # noqa: N802
         super().nextCheckState()
         self.update()
+
+
+# --- StatusDot (상태바 로그인 표시) ------------------------------------------------------------------
+
+
+class StatusDot(QLabel):
+    """왼쪽에 8px 점을 그리는 라벨 (● ○ 글리프 대신). state 속성 "ok" 면 success 채움 점, 그 외 text_3 속 빈 링.
+    색 단독 전달이 아니라 항상 옆 글자("로그인됨"/"세션 없음")가 함께 있다. 점 자리는 QSS padding-left 가 확보한다."""
+
+    DOT = 8
+
+    def paintEvent(self, e) -> None:  # noqa: N802
+        super().paintEvent(e)
+        p = tokens.current()
+        ok = self.property("state") == "ok"
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        cy = self.height() / 2
+        r = QRectF(1.0, cy - self.DOT / 2, self.DOT, self.DOT)
+        if ok:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(p.success))
+        else:
+            painter.setPen(QPen(QColor(p.text_3), 1.5))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            r = r.adjusted(0.75, 0.75, -0.75, -0.75)
+        painter.drawEllipse(r)
+        painter.end()
 
 
 # --- ThemeChip (설정 > 화면) ------------------------------------------------------------
@@ -368,6 +541,9 @@ class Toast(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._text = ""
         self._kind = "success"
+        self._opacity = 1.0
+        self._dy = 0.0
+        self._exiting = False
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.dismiss)
@@ -381,17 +557,52 @@ class Toast(QWidget):
         return self._kind
 
     def show_message(self, text: str, kind: str = "success", ms: int = 2400) -> None:
-        """새 메시지는 기존 것을 즉시 교체한다. ms 뒤 자동으로 사라진다."""
+        """새 메시지는 기존 것을 즉시 교체한다. ms 뒤 자동으로 사라진다. 등장: 불투명도 0→1 + 아래 12px→0 (200ms, A6)."""
+        was_visible = (not self.isHidden()) and not self._exiting
+        motion.finish_now(self, "toast")
+        self._exiting = False
         self._text, self._kind = text, kind
         self.setAccessibleName(text)
         self._relayout()
+        self._opacity, self._dy = 1.0, 0.0
         self.show()
         self.raise_()
         self._timer.start(max(ms, 500))
+        if not was_visible:
+            self._enter()
+
+    def _set_phase(self, v: float) -> None:
+        self._opacity = v
+        self._dy = 12.0 * (1.0 - v)
+        self.update()
+
+    def _enter(self) -> None:
+        anim = motion.tween(self, 0.0, 1.0, motion.MOTION_BASE, self._set_phase, motion.EASE_IN, key="toast")
+        if anim is None:
+            self._opacity, self._dy = 1.0, 0.0
+        else:
+            self._set_phase(0.0)
 
     def dismiss(self) -> None:
+        """사라짐: 불투명도 1→0 + 아래 8px (150ms, InCubic). 모션이 꺼져 있으면 즉시 숨김."""
         self._timer.stop()
-        self.hide()
+        if self.isHidden() or self._exiting:
+            return
+        self._exiting = True
+
+        def _set(v: float) -> None:
+            self._opacity = 1.0 - v
+            self._dy = 8.0 * v
+            self.update()
+
+        def _done() -> None:
+            self._exiting = False
+            self.hide()
+
+        anim = motion.tween(self, 0.0, 1.0, motion.MOTION_EXIT, _set, motion.EASE_OUT, on_finished=_done, key="toast")
+        if anim is None:
+            self._exiting = False
+            self.hide()
 
     def _icon_w(self) -> int:
         return 24 if self._kind == "success" else 0
@@ -425,6 +636,8 @@ class Toast(QWidget):
         p = tokens.current()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setOpacity(self._opacity)
+        painter.translate(0, self._dy)
         pill = self.pill_rect()
         painter.setPen(Qt.PenStyle.NoPen)
         for grow, alpha in ((18, 4), (10, 6), (4, 9)):  # 바깥 → 안쪽, 겹칠수록 진해짐 (스펙 §16.4 의 3겹 근사)
@@ -517,7 +730,8 @@ class Banner(QFrame):
         self.title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         set_class(self.title, "banner-title")
         self.close_btn = QToolButton()
-        self.close_btn.setText("✕")
+        self.close_btn.setIcon(svg_icon("close", tokens.current().text_2, 16))  # Pretendard 에 ✕ 글리프가 없어 SVG
+        self.close_btn.setIconSize(QSize(16, 16))
         self.close_btn.setToolTip("닫기")
         self.close_btn.setAccessibleName("닫기")
         self.close_btn.setFixedSize(28, 28)
@@ -532,6 +746,7 @@ class Banner(QFrame):
         set_class(self.body, "muted")
         outer.addWidget(self.body)
         self.btn_row = QHBoxLayout()
+        self.btn_row.setSpacing(tokens.BTN_GAP_SM)
         self.btn_row.addStretch(1)
         self._buttons: list[QPushButton] = []
         outer.addLayout(self.btn_row)
@@ -562,7 +777,10 @@ class Banner(QFrame):
             b.clicked.connect(lambda _=False, k=key: self.action_clicked.emit(k))
             self.btn_row.addWidget(b)
             self._buttons.append(b)
+        was_visible = self.isVisible()
         self.show()
+        if not was_visible:
+            motion.fade_in(self)  # 등장 페이드 180ms (A5)
 
     @property
     def hint(self) -> QLabel:  # 하위 호환 (테스트에서 hint.text() 로 본문 확인)
@@ -595,17 +813,32 @@ class Badge(QLabel):
 
 
 class ElidedLabel(QLabel):
-    """가로 정책 Ignored + 가운데 생략. 긴 경로가 가로 스크롤을 만들지 않는다. 툴팁 = 전문."""
+    """가로 정책 Ignored + 생략. 긴 경로가 가로 스크롤을 만들지 않는다. 툴팁 = 전문.
 
-    def __init__(self, parent=None) -> None:
+    mode: 기본은 가운데 생략(경로용). 메타 줄처럼 앞이 중요한 글은 ElideRight.
+    set_parts(parts): 부분 목록(예: ["코드 평가", "14:02", "16.2초"])을 " · " 로 잇되, 안 들어가면 가운데 부분부터
+    통째로 빼고(시각 생략) 그래도 안 되면 오른쪽 말줄임 — 글자 한가운데가 "…" 로 잘려 읽히지 않는 일이 없게 한다.
+    """
+
+    def __init__(self, parent=None, mode: Qt.TextElideMode = Qt.TextElideMode.ElideMiddle) -> None:
         super().__init__(parent)
         self._full = ""
+        self._mode = mode
+        self._parts: list[str] | None = None
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
     def setText(self, text: str) -> None:  # noqa: N802
         self._full = text
+        self._parts = None
         self.setToolTip(text)
+        self._refresh()
+
+    def set_parts(self, parts: list[str], sep: str = " · ") -> None:
+        self._parts = [p for p in parts if p]
+        self._full = sep.join(self._parts)
+        self._sep = sep
+        self.setToolTip(self._full)
         self._refresh()
 
     def fullText(self) -> str:  # noqa: N802
@@ -617,7 +850,19 @@ class ElidedLabel(QLabel):
 
     def _refresh(self) -> None:
         w = max(self.width() - 4, 40)
-        super().setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideMiddle, w))
+        fm = self.fontMetrics()
+        if self._parts:
+            n = len(self._parts)
+            sep = getattr(self, "_sep", " · ")
+            for drop in range(n):  # drop = 가운데에서 빼는 부분 수 (0 = 전부)
+                keep = self._parts[:1] + self._parts[1 + drop :] if drop < n - 1 else self._parts[:1]
+                text = sep.join(keep)
+                if fm.horizontalAdvance(text) <= w:
+                    super().setText(text)
+                    return
+            super().setText(fm.elidedText(self._parts[0], Qt.TextElideMode.ElideRight, w))
+            return
+        super().setText(fm.elidedText(self._full, self._mode, w))
 
 
 # --- EmptyState (§5.11) ---------------------------------------------------------------
@@ -694,6 +939,8 @@ class LogView(QWidget):
         head = QHBoxLayout()
         self.toggle = QToolButton()
         self.toggle.setObjectName("LogToggle")
+        self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.toggle.setIconSize(QSize(16, 16))
         self.toggle.setCheckable(True)
         self.toggle.setChecked(True)
         self.toggle.toggled.connect(self._toggled)
@@ -721,7 +968,8 @@ class LogView(QWidget):
 
     def _toggled(self, on: bool) -> None:
         self.text.setVisible(on)
-        self.toggle.setText("▼ 로그" if on else f"▶ 로그 ({self._n}줄)")
+        self.toggle.setIcon(svg_icon("caret-down" if on else "caret-right", tokens.current().text_2, 16))  # ▼▶ 글리프 대신 SVG
+        self.toggle.setText("로그" if on else f"로그 ({self._n}줄)")
         if self.qs is not None:
             self.qs.setValue(self.key, on)
 
@@ -734,7 +982,7 @@ class LogView(QWidget):
         else:
             self.text.appendHtml(f"{ts}  {_esc(msg)}")
         if not self.toggle.isChecked():
-            self.toggle.setText(f"▶ 로그 ({self._n}줄)")
+            self.toggle.setText(f"로그 ({self._n}줄)")
 
     def clear(self) -> None:
         self.text.clear()
@@ -830,6 +1078,226 @@ class DiffView(QTableWidget):
         if first_bad >= 0:
             self.scrollToItem(self.item(first_bad, 0), QTableWidget.ScrollHint.PositionAtCenter)
         return first_bad
+
+
+# --- Spinner · Skeleton (§16.7 A8·A9) ----------------------------------------------------------------
+
+
+class _LoopWidget(QWidget):
+    """보일 때(+창이 최소화되지 않고 앱이 활성일 때)만 무한 애니메이션을 돌리는 베이스. 모션이 꺼져 있으면 정적 그림.
+
+    유휴 상태에서 타이머가 0개여야 하므로 hideEvent·창 비활성에서 반드시 멈춘다.
+    """
+
+    LOOP_MS = 900
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._phase = 0.0
+        app = QApplication.instance()
+        if app is not None:
+            app.applicationStateChanged.connect(self._sync_loop)
+
+    def _set_phase(self, v: float) -> None:
+        self._phase = v
+        self.update()
+
+    def is_animating(self) -> bool:
+        return motion.loop_running(self)
+
+    def _should_run(self) -> bool:
+        if not self.isVisible():
+            return False
+        if motion.forced_on():
+            return True
+        win = self.window()
+        if win is not None and win.isMinimized():
+            return False
+        return QApplication.applicationState() == Qt.ApplicationState.ApplicationActive
+
+    def _sync_loop(self, *_a) -> None:
+        if self._should_run():
+            if not motion.loop_running(self):
+                if motion.loop(self, self.LOOP_MS, self._set_phase) is None:
+                    self._phase = 0.0
+        else:
+            motion.stop_loop(self)
+
+    def showEvent(self, e) -> None:  # noqa: N802
+        super().showEvent(e)
+        self._sync_loop()
+
+    def hideEvent(self, e) -> None:  # noqa: N802
+        super().hideEvent(e)
+        motion.stop_loop(self)
+
+
+class Spinner(_LoopWidget):
+    """16px 회전 호. 선형 900ms/회전. 모션이 꺼져 있으면 3/4 호 정적 그림."""
+
+    LOOP_MS = motion.SPINNER_MS
+    SIZE = 16
+
+    def __init__(self, parent=None, color: str | None = None) -> None:
+        super().__init__(parent)
+        self._color = color  # None = 현재 테마 primary
+        self.setFixedSize(self.SIZE, self.SIZE)
+
+    def paintEvent(self, e) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        c = QColor(self._color or tokens.current().primary)
+        track = QColor(c)
+        track.setAlpha(50)
+        r = QRectF(self.rect()).adjusted(2, 2, -2, -2)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(track, 2.2))
+        painter.drawEllipse(r)
+        painter.setPen(QPen(c, 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        start = 90 - self._phase * 360  # 12 시에서 시계 방향
+        painter.drawArc(r, int(start * 16), int(-270 * 16))
+        painter.end()
+
+
+class Skeleton(_LoopWidget):
+    """로딩 자리표시 막대 3줄(100/92/64% 폭, 높이 14, 라운드 7). 하이라이트가 좌→우로 1200ms 선형 반복.
+    모션이 꺼져 있으면 기본색 막대만 그린다."""
+
+    LOOP_MS = motion.SKELETON_MS
+    BAR_H, GAP = 14, 10
+    WIDTHS = (1.0, 0.92, 0.64)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(len(self.WIDTHS) * self.BAR_H + (len(self.WIDTHS) - 1) * self.GAP)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def paintEvent(self, e) -> None:  # noqa: N802
+        p = tokens.current()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        w = self.width()
+        for i, frac in enumerate(self.WIDTHS):
+            bar = QRectF(0, i * (self.BAR_H + self.GAP), w * frac, self.BAR_H)
+            painter.setBrush(QColor(p.surface_alt))
+            painter.drawRoundedRect(bar, self.BAR_H / 2, self.BAR_H / 2)
+            if self.is_animating():
+                cx = -0.3 * w + self._phase * 1.6 * w  # 하이라이트 중심 (전체 폭 기준, 막대 밖은 클립)
+                grad = QLinearGradient(cx - 0.3 * w, 0, cx + 0.3 * w, 0)
+                grad.setColorAt(0.0, QColor(p.surface_alt))
+                grad.setColorAt(0.5, QColor(p.border))
+                grad.setColorAt(1.0, QColor(p.surface_alt))
+                painter.save()
+                clip = QPainterPath()
+                clip.addRoundedRect(bar, self.BAR_H / 2, self.BAR_H / 2)
+                painter.setClipPath(clip)
+                painter.setBrush(QBrush(grad))
+                painter.drawRect(bar)
+                painter.restore()
+        painter.end()
+
+
+# --- NavDelegate (내비 알약 슬라이드, §16.5·A2) ---------------------------------------------
+
+
+class NavDelegate(QStyledItemDelegate):
+    """사이드 내비 항목을 직접 그린다. 선택 알약(primary_soft)은 항목 사이를 200ms 로 미끄러져 이동하고,
+    각 항목은 '알약 사각형 ∩ 항목 사각형' 만 칠한다 (이동 중에도 끊기지 않음). 모션이 꺼져 있으면 즉시 현재 항목에.
+    키보드(Tab) 포커스일 때만 2px primary 링. 아이콘·글자는 QListWidget 항목 데이터를 그대로 쓴다."""
+
+    PAD_X = 12
+    ICON = 20
+    ICON_GAP = 10
+
+    def __init__(self, view) -> None:
+        super().__init__(view)
+        self._view = view
+        self._anim_y: float | None = None  # 이동 중인 알약의 위쪽 y (viewport 좌표). None = 현재 항목에 정지
+        self._prev_row: int | None = None
+        view.currentRowChanged.connect(self._on_row_changed)
+
+    def _pill_for(self, row: int) -> QRectF:
+        r = QRectF(self._view.visualRect(self._view.model().index(row, 0)))
+        gap = tokens.NAV_GAP / 2
+        return r.adjusted(0, gap, 0, -gap)
+
+    def pill_rect(self) -> QRectF | None:
+        row = self._view.currentRow()
+        if row < 0:
+            return None
+        base = self._pill_for(row)
+        if self._anim_y is not None:
+            base.moveTop(self._anim_y)
+        return base
+
+    def is_animating(self) -> bool:
+        return motion.is_running(self, "pill")
+
+    def _set_y(self, y: float) -> None:
+        self._anim_y = y
+        self._view.viewport().update()
+
+    def _end(self) -> None:
+        self._anim_y = None
+        self._view.viewport().update()
+
+    def _on_row_changed(self, row: int) -> None:
+        prev, self._prev_row = self._prev_row, row
+        if row < 0 or prev is None or prev < 0 or not self._view.isVisible():
+            self._anim_y = None
+            self._view.viewport().update()
+            return
+        start = self._anim_y if self._anim_y is not None else self._pill_for(prev).top()
+        end = self._pill_for(row).top()
+        anim = motion.tween(self, start, end, motion.MOTION_BASE, self._set_y, motion.EASE_IN, on_finished=self._end, key="pill")
+        if anim is None:
+            self._anim_y = None
+        self._view.viewport().update()
+
+    def paint(self, painter, option, index) -> None:  # noqa: N802
+        p = tokens.current()
+        rect = QRectF(option.rect)
+        gap = tokens.NAV_GAP / 2
+        slot = rect.adjusted(0, gap, 0, -gap)  # 항목 하나의 알약 자리
+        selected = index.row() == self._view.currentRow()
+        hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        radius = tokens.RADIUS_MD
+        if hover and not selected:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(p.secondary))
+            painter.drawRoundedRect(slot, radius, radius)
+        pill = self.pill_rect()
+        if pill is not None and pill.intersects(rect):
+            painter.save()
+            painter.setClipRect(rect)  # 알약 ∩ 이 항목
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(p.primary_soft))
+            painter.drawRoundedRect(pill, radius, radius)
+            painter.restore()
+        # 아이콘 + 글자
+        icon = index.data(Qt.ItemDataRole.DecorationRole)
+        if isinstance(icon, QIcon):
+            mode = QIcon.Mode.Selected if selected else QIcon.Mode.Normal
+            ir = QRectF(slot.left() + self.PAD_X, slot.center().y() - self.ICON / 2, self.ICON, self.ICON)
+            icon.paint(painter, ir.toRect(), Qt.AlignmentFlag.AlignCenter, mode, QIcon.State.Off)
+        font = painter.font()
+        font.setBold(selected)
+        painter.setFont(font)
+        painter.setPen(QColor(p.primary_soft_text if selected else (p.text if hover else p.text_2)))
+        tr = QRectF(slot.left() + self.PAD_X + self.ICON + self.ICON_GAP, slot.top(), slot.width() - self.PAD_X * 2 - self.ICON - self.ICON_GAP, slot.height())
+        painter.drawText(tr, int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), str(index.data(Qt.ItemDataRole.DisplayRole) or ""))
+        if selected and (option.state & QStyle.StateFlag.State_HasFocus):  # 키보드 포커스 링 (§10)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(p.primary), 2))
+            painter.drawRoundedRect(slot.adjusted(1, 1, -1, -1), radius, radius)
+        painter.restore()
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: N802
+        sh = index.data(Qt.ItemDataRole.SizeHintRole)
+        return sh if isinstance(sh, QSize) else QSize(0, tokens.NAV_ITEM_H + tokens.NAV_GAP)
 
 
 # --- 외부 프로그램 -------------------------------------------------------------------------

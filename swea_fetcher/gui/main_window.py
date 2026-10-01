@@ -32,7 +32,8 @@ from .pages.history_page import HistoryPage
 from .pages.problem_page import ProblemPage
 from .pages.settings_page import SettingsPage
 from .theme import tokens
-from .widgets import Button, Toast, nav_icon, set_class
+from . import motion
+from .widgets import Button, NavDelegate, StatusDot, Toast, nav_icon, set_class, svg_icon
 from .workers import FetchWorker, FuncWorker, GrowthWorker
 
 PAGES = (
@@ -44,6 +45,7 @@ PAGES = (
     ("설정", "settings", "nav-settings"),
 )
 APP_TITLE = "SWEA Fetch"
+REDUCE_MOTION_KEY = "ui/reduce_motion"  # QSettings: 동작 줄이기 (bool, 기본 False)
 NAV_HISTORY_MAX = 50  # 뒤로 가기 기록 상한
 UPDATE_CHECK_DELAY_MS = 1500  # 창이 뜬 뒤에 조회 (시작 속도에 영향 없게). app.main() 이 사용
 GROWTH_KICK_DELAY_MS = 1500  # 시작 후 지연 실행 (M19 성장 리포트 확정·주간 코멘트)
@@ -61,8 +63,11 @@ class MainWindow(QMainWindow):
         self._growth_worker: GrowthWorker | None = None  # 성장 리포트 확정·주간 코멘트 (M19)
         self._growth_queued: date | None = None  # 워커 실행 중에 들어온 수동 코멘트 요청
         self._growth_unseen = 0
+        self._autosync_text = ""
+        self._restoring = False  # 시작 페이지 복원 중에는 전환 모션 없음
         self.autosync = None  # AutoSyncController (M11) — _build 뒤 생성
         tokens.set_theme(str(self.qs.value(tokens.THEME_SETTING_KEY, tokens.DEFAULT_THEME) or tokens.DEFAULT_THEME))
+        motion.set_user_reduce(bool(self.qs.value(REDUCE_MOTION_KEY, False, type=bool)))  # 설정 > 화면 > 동작 줄이기
         self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(*tokens.WINDOW_MIN)
         self.resize(*tokens.WINDOW_DEFAULT)
@@ -92,6 +97,8 @@ class MainWindow(QMainWindow):
         self.nav.setObjectName("nav")
         self.nav.setIconSize(QSize(20, 20))
         self.nav.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.nav.setItemDelegate(NavDelegate(self.nav))  # 알약 슬라이드 (스펙 §16.7 A2)
+        self.nav.setMouseTracking(True)
         for label, _key, icon in PAGES:
             item = QListWidgetItem(nav_icon(icon), label)
             item.setSizeHint(QSize(0, tokens.NAV_ITEM_H + tokens.NAV_GAP))  # 항목 높이 + 사이 간격
@@ -113,7 +120,7 @@ class MainWindow(QMainWindow):
         self.toast = Toast(central)  # 끝난 일의 확인 알림 (스펙 §16.5) — notify() 로 띄운다
 
         # 상태바 (§3): 좌 로그인 상태 · 중 임시 메시지 · 우 루트 경로
-        self.status_login = QLabel("○ 세션 없음")
+        self.status_login = StatusDot("세션 없음")  # 점은 StatusDot 이 그린다 (● ○ 글리프 대신)
         self.status_login.setObjectName("LoginState")
         set_class(self.status_login, "login", "none")
         self.status_root = QLabel("")  # 상태바 permanent 위젯은 Ignored 정책이 0폭으로 눌리므로 고정폭 elide 사용
@@ -143,6 +150,8 @@ class MainWindow(QMainWindow):
         self.growth_badge.setCursor(Qt.CursorShape.PointingHandCursor)
         self.growth_badge.hide()
         self.growth_badge.clicked.connect(lambda: self.goto("growth"))
+        for b in (self.update_badge, self.review_badge, self.growth_badge):
+            b.set_trailing_icon("arrow-up-right")  # ↗ 글리프 대신 SVG
         sb = self.statusBar()
         sb.addWidget(self.status_login)
         sb.addWidget(self.autosync_badge)
@@ -213,6 +222,8 @@ class MainWindow(QMainWindow):
 
     def _page_changed(self, row: int) -> None:
         self.stack.setCurrentIndex(row)
+        if not self._restoring:
+            motion.fade_slide_in(self.stack.currentWidget())  # 페이지 전환 200ms (A1). 시작 복원·창이 안 보일 때는 생략
         if self._cur_row is not None and row != self._cur_row and not self._nav_by_history:
             self._back.append(self._cur_row)
             del self._back[:-NAV_HISTORY_MAX]
@@ -364,6 +375,9 @@ class MainWindow(QMainWindow):
             app.setStyleSheet(tokens.build_qss())
         for i, (_label, _key, icon) in enumerate(PAGES):
             self.nav.item(i).setIcon(nav_icon(icon))
+        for b in self.findChildren(Button):  # 글자 옆 SVG 아이콘 재착색
+            b.refresh_icon()
+        self._on_autosync_status(self._autosync_text)
         for w in self.findChildren(QWidget):  # 직접 그리는 위젯(Button·Toggle·잔디·차트)이 새 색으로 다시 그리도록
             w.update()
         self.qs.setValue(tokens.THEME_SETTING_KEY, theme.key)
@@ -397,7 +411,11 @@ class MainWindow(QMainWindow):
             row = next((i for i, (_l, k, _ic) in enumerate(PAGES) if k == key), 0)
             if key == "problem" and not self.problem_page.has_content():
                 row = 0  # 앱을 다시 켜면 문제 탭은 비어 있으므로 저장 탭으로
-            self.nav.setCurrentRow(row)
+            self._restoring = True
+            try:
+                self.nav.setCurrentRow(row)
+            finally:
+                self._restoring = False
             self.stack.setCurrentIndex(self.nav.currentRow())
             self._back.clear()  # 시작 페이지 복원은 기록하지 않는다
             self._forward.clear()
@@ -406,7 +424,7 @@ class MainWindow(QMainWindow):
     def _refresh_review_badge(self, startup: bool = False) -> None:
         """도래한 복습 개수를 상태바 배지에 (파일 1개 읽기). 시작 시 있으면 임시 메시지도 (자정을 넘긴 경우는 다음 갱신 때 반영)."""
         n = service.due_count(self.settings) if self.settings is not None else 0
-        self.review_badge.setText(f"복습 {n}개 ↗")
+        self.review_badge.setText(f"복습 {n}개")
         self.review_badge.setToolTip("클릭하면 최근 탭의 복습 목록으로 이동합니다")
         self.review_badge.setVisible(n > 0)
         if startup:
@@ -429,7 +447,7 @@ class MainWindow(QMainWindow):
         """미확인 성장 리포트 수를 상태바 배지에 (파일 읽기만). 성장 기록이 꺼져 있으면 숨긴다."""
         n = service.growth_unseen_count(self.settings) if self.settings is not None else 0
         self._growth_unseen = n
-        self.growth_badge.setText("새 성장 리포트 ↗" if n <= 1 else f"새 성장 리포트 {n}개 ↗")
+        self.growth_badge.setText("새 성장 리포트" if n <= 1 else f"새 성장 리포트 {n}개")
         self.growth_badge.setToolTip("클릭하면 성장 탭으로 이동합니다")
         self.growth_badge.setVisible(n > 0)
 
@@ -518,12 +536,12 @@ class MainWindow(QMainWindow):
 
     def _update_status(self) -> None:
         if self.settings is None:
-            self.status_login.setText("○ 설정 없음")
+            self.status_login.setText("설정 없음")
             set_class(self.status_login, "login", "none")
             self.status_root.setText("")
             return
         cached = service.is_session_cached(self.settings)
-        self.status_login.setText("● 로그인됨" if cached else "○ 세션 없음")
+        self.status_login.setText("로그인됨" if cached else "세션 없음")
         set_class(self.status_login, "login", "ok" if cached else "none")
         root = str(self.settings.root)
         self.status_root.setText(self.status_root.fontMetrics().elidedText(root, Qt.TextElideMode.ElideMiddle, 360))
@@ -547,13 +565,20 @@ class MainWindow(QMainWindow):
             self.update_badge.hide()
             return
         self._release_url = info.url
-        self.update_badge.setText(f"새 버전 {info.latest} ↗")
+        self.update_badge.setText(f"새 버전 {info.latest}")
         self.update_badge.setToolTip(f"클릭하면 Release 페이지를 엽니다\n{info.url}")
         self.update_badge.show()
 
     def _on_autosync_status(self, text: str) -> None:
-        self.autosync_badge.setText(text)
-        self.autosync_badge.setVisible(bool(text))
+        """자동 동기화 배지. 컨트롤러 문구 앞의 ⚠ ⟳ 글리프(Pretendard 에 없음)는 떼고 SVG 아이콘으로 대신한다."""
+        self._autosync_text = text
+        warn = text.startswith("⚠")
+        plain = text.lstrip("⚠⟳ ").strip()
+        p = tokens.current()
+        self.autosync_badge.setText(plain)
+        self.autosync_badge.setIcon(svg_icon("status-warning", None, 14) if warn else svg_icon("sync", p.primary_soft_text, 14))
+        self.autosync_badge.setIconSize(QSize(14, 14))
+        self.autosync_badge.setVisible(bool(plain))
 
     def _open_release(self) -> None:
         QDesktopServices.openUrl(QUrl(getattr(self, "_release_url", update.RELEASES_URL)))

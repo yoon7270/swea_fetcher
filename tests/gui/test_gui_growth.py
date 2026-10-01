@@ -250,10 +250,10 @@ def test_list_selection_updates_cards_and_marks_seen(gw):
     snap(gw.settings, W2, seen=False, solved=3, passes=3)
     snap(gw.settings, W1, seen=False, solved=6, passes=6, first_try=3)
     gw._refresh_growth_badge()
-    assert gw.growth_badge.text() == "새 성장 리포트 2개 ↗" and not gw.growth_badge.isHidden()
+    assert gw.growth_badge.text() == "새 성장 리포트 2개" and not gw.growth_badge.isHidden()
     p = page_of(gw)  # 가장 최근 확정 = W1 을 표시 → 확인 처리
     assert p.selected_week == W1 and service.growth_unseen_count(gw.settings) == 1
-    assert gw.growth_badge.text() == "새 성장 리포트 ↗"
+    assert gw.growth_badge.text() == "새 성장 리포트"
     assert "새 · " in p.report_list.item(2).text() and not p.report_list.item(1).text().startswith("새")
     p.report_list.setCurrentRow(2)  # 09-14 리포트 선택
     assert p.selected_week == W2 and p.range_label.text() == "2026-09-14 ~ 09-20"
@@ -525,7 +525,7 @@ def test_bar_chart_renders_and_has_accessible_description(qtbot):
     qtbot.addWidget(c)
     c.resize(500, 120)
     c.set_data([1, 0, 3, 5, 0, 2, 4, 6], [f"09-{d:02d}" for d in range(1, 9)], 7)
-    assert has_ink(render(c)) and c.height() == 120
+    assert has_ink(render(c)) and c.height() == 140  # 스펙 §16.5: 120 → 140
     assert c.accessibleName() == "주별 Pass 문제 수" and "09-01: 1" in c.accessibleDescription() and "09-08: 6" in c.toolTip()
 
 
@@ -576,7 +576,7 @@ def test_category_card_falls_back_when_few_tagged(gw):
     assert p.weak_box.count() == 0 and p.weak_label.isHidden()
 
 
-def test_page_scrolls_without_clipping_at_minimum_size(gw):
+def test_page_scrolls_without_clipping_at_minimum_size(gw, qtbot):
     snap(gw.settings, W2, first_try=1, tagged=4, weak={"edge": 4})
     s1 = snap(gw.settings, W1, prev=W2, first_try=4, tagged=4, weak={"edge": 2, "time": 2}, strong={"pythonic": 3}, hints=12, solutions=10)  # 긴 값 ("힌트 12 · 정답 풀이 10")
     s1.judgments = [growth.Judgment("improved", "first_try_rate", 1.0, 0.25, "첫 시도 Pass 비율이 25% → 100% 로 올랐어요 " * 3),
@@ -585,6 +585,7 @@ def test_page_scrolls_without_clipping_at_minimum_size(gw):
     gw.resize(720, 480)
     p = page_of(gw)
     p.refresh()
+    qtbot.wait(50)  # PageColumn 두 겹의 레이아웃 갱신(LayoutRequest)이 끝나길 기다린다
     assert p.scroll.widgetResizable() and p.scroll.verticalScrollBar().maximum() > 0  # 길면 스크롤
     assert p.scroll.horizontalScrollBar().maximum() == 0  # 가로 잘림 없음
 

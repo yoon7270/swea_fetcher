@@ -37,7 +37,7 @@ def test_window_builds_with_settings(main_window):
     w = main_window
     assert w.settings is not None and w.settings.user_id == DUMMY_ID
     assert w.stack.count() == 6 and w.nav.count() == 6
-    assert w.status_login.text() == "○ 세션 없음"
+    assert w.status_login.text() == "세션 없음"
     assert str(w.settings.root) in w.status_root.toolTip()
     assert w.nav.currentRow() == 0 and w.stack.currentIndex() == 0
 
@@ -46,7 +46,7 @@ def test_window_without_settings_goes_to_settings_page(main_window_no_config):
     w = main_window_no_config
     assert w.settings is None
     assert w.stack.currentWidget() is w.settings_page and w.nav.currentRow() == w.stack.currentIndex()  # 키 기반 (내비가 6개)
-    assert w.status_login.text() == "○ 설정 없음"
+    assert w.status_login.text() == "설정 없음"
     assert w.settings_page.banner.isVisibleTo(w) and "처음 실행" in w.settings_page.banner.title.text()
 
 
@@ -65,7 +65,7 @@ def test_status_shows_logged_in_when_session_cached(qtbot, valid_config):
 
     w = MainWindow(config_dir=valid_config)
     qtbot.addWidget(w)
-    assert w.status_login.text() == "● 로그인됨"
+    assert w.status_login.text() == "로그인됨"
 
 
 def test_history_check_request_routes_to_check_page(main_window):
@@ -358,11 +358,11 @@ def test_settings_logout_session(main_window, qtbot):
     w = main_window
     (w.config_dir / "session.json").write_text("{}")
     w._update_status()
-    assert w.status_login.text() == "● 로그인됨"
+    assert w.status_login.text() == "로그인됨"
     with qtbot.waitSignal(w.settings_page.settings_changed, timeout=WAIT):
         w.settings_page._logout(False)
     assert not (w.config_dir / "session.json").exists()
-    assert w.status_login.text() == "○ 세션 없음"
+    assert w.status_login.text() == "세션 없음"
     assert w.settings_page.id_edit.text() == DUMMY_ID  # 계정 정보는 유지
 
 

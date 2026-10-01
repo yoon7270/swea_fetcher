@@ -474,7 +474,7 @@ def test_badge_and_startup_message(main_window):
     _review(s, 401, -1)
     _review(s, 402, 5)  # 아직 도래 전 — 세지 않음
     main_window._refresh_review_badge(startup=True)
-    assert shown(main_window.review_badge) and main_window.review_badge.text() == "복습 1개 ↗"
+    assert shown(main_window.review_badge) and main_window.review_badge.text() == "복습 1개"
     assert "복습할 문제 1개" in main_window.statusBar().currentMessage()
     service.dismiss_review(s, 401)
     main_window._refresh_review_badge()

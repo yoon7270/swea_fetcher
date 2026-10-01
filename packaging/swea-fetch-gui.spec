@@ -8,13 +8,30 @@ onefile + windowed. 백신 오탐 시 아래 ONEFILE 을 False 로 바꿔 onedir
 from pathlib import Path
 
 ROOT = Path(SPECPATH).parent
+
+
+def _qt_svg_plugins():
+    """체크 표시(QSS image: SVG)와 SVG 아이콘이 exe 에서 보이려면 Qt 의 SVG 이미지 플러그인이 번들에 있어야 한다 (M21).
+    PyInstaller 훅이 보통 넣지만 환경에 따라 빠질 수 있어 명시적으로 추가한다."""
+    try:
+        import PySide6
+
+        base = Path(PySide6.__file__).parent / "plugins"
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for sub, name in (("imageformats", "qsvg.dll"), ("iconengines", "qsvgicon.dll")):
+        f = base / sub / name
+        if f.exists():
+            out.append((str(f), f"PySide6/plugins/{sub}"))
+    return out
 PKG = ROOT / "swea_fetcher"
 ONEFILE = True
 
 a = Analysis(
     [str(ROOT / "packaging" / "launch_gui.py")],
     pathex=[str(ROOT)],
-    binaries=[],
+    binaries=_qt_svg_plugins(),  # qsvg(이미지)·qsvgicon(아이콘) — 체크박스 체크·SVG 아이콘
     datas=[
         (str(PKG / "gui" / "theme" / "icons"), "swea_fetcher/gui/theme/icons"),
         # Pretendard 400/700 + OFL 라이선스 (M21, 원본 무수정). 없으면 앱은 Malgun Gothic 폴백으로 실행

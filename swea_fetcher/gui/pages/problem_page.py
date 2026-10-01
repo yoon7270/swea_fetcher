@@ -190,7 +190,7 @@ class ProblemPage(QWidget):
     # --- UI -----------------------------------------------------------------------
     def _build(self) -> None:
         self.stack = QStackedLayout(self)
-        self.empty = EmptyState("아직 가져온 문제가 없습니다", "저장 탭에서 문제를 가져오면 지문이 여기에 표시됩니다", "저장 탭으로")
+        self.empty = EmptyState("아직 가져온 문제가 없습니다", "저장 탭에서 문제를 가져오면 지문이 여기에 표시됩니다", "저장 탭으로", icon="nav-problem")
         if self.empty.button:
             self.empty.button.clicked.connect(lambda: self.goto_requested.emit("fetch"))
         holder = QWidget()
@@ -214,12 +214,15 @@ class ProblemPage(QWidget):
         root.addWidget(self.banner)
 
         bar = QHBoxLayout()
+        bar.setSpacing(tokens.BTN_GAP)
         self.open_dir_btn = Button("폴더 열기")
         self.open_py_btn = Button("에디터에서 열기")
         self.zoom_out_btn = Button("글자 −")
         self.zoom_in_btn = Button("글자 +")
         self.zoom_out_btn.setToolTip("글자 작게 (Ctrl+−)")
         self.zoom_in_btn.setToolTip("글자 크게 (Ctrl++)")
+        for b in (self.open_dir_btn, self.open_py_btn, self.zoom_out_btn, self.zoom_in_btn):
+            set_class(b, "tonal")  # 바닥 위 버튼 (회색 secondary 는 바닥에 묻힌다)
         bar.addWidget(self.open_dir_btn)
         bar.addWidget(self.open_py_btn)
         bar.addStretch(1)

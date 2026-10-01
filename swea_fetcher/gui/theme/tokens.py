@@ -174,6 +174,8 @@ CONTROL_H_LG = 52  # 번호 입력, 페이지 CTA
 CONTROL_H_SM = 36  # 배너·표 안 버튼
 NAV_ITEM_H = 44
 NAV_GAP = 4  # 내비 항목 사이 간격
+BTN_GAP = 12  # 나란한 버튼 사이 간격 (전 페이지 통일 — 8~12 중 12)
+BTN_GAP_SM = 8  # 배너·표 안 sm 버튼 사이 간격
 SIDEBAR_W = 160
 PROGRESS_H = 4  # 진행 중 인디케이터(얇은 막대)
 WINDOW_DEFAULT = (960, 680)
@@ -215,20 +217,18 @@ QLabel[class="muted"]   {{ color: {p.text_2}; font-size: {FONT_SIZE_SM}pt; }}
 QLabel[class="hint"]    {{ color: {p.text_3}; font-size: {FONT_SIZE_SM}pt; }}
 QLabel[class="error"]   {{ color: {p.error_text}; font-size: {FONT_SIZE_SM}pt; }}
 QLabel[class="mono"]    {{ font-family: {FONT_MONO}; font-size: {FONT_SIZE_SM}pt; }}
+QLabel[class="body-2"] {{ color: {p.text_2}; font-size: {FONT_SIZE}pt; }}
+QLabel[class="caption"] {{ color: {p.text_3}; font-size: {FONT_SIZE_XS}pt; }}
+QLabel[class="metric-value"] {{ font-size: {FONT_SIZE_XL}pt; font-weight: 700; }}
+QFrame[class="tile"] {{ background: {p.bg_subtle}; border: none; border-radius: {RADIUS_MD}px; }}
 QLabel[class="app-title"] {{ font-size: {FONT_SIZE_MD}pt; font-weight: 700; padding: {s*3}px {s*3}px {s*2}px {s*3}px; }}
 
-/* ---------- 사이드바 내비 (선택 알약은 M21-C 에서 슬라이드 — 지금은 항목 배경) ---------- */
+/* ---------- 사이드바 내비 (항목·알약은 widgets.NavDelegate 가 그린다 — 알약 슬라이드 §16.7 A2) ---------- */
 QFrame#Sidebar {{ background: {p.surface}; border: none; }}
 QListWidget#nav {{
     background: {p.surface}; border: none;
     padding: 0 {s}px; min-width: {SIDEBAR_W}px; max-width: {SIDEBAR_W}px; outline: 0;
 }}
-QListWidget#nav::item {{
-    min-height: {NAV_ITEM_H}px; padding: 0 {s+4}px; margin: {NAV_GAP//2}px 0;
-    border-radius: {RADIUS_MD}px; color: {p.text_2};
-}}
-QListWidget#nav::item:hover    {{ background: {p.secondary}; color: {p.text}; }}
-QListWidget#nav::item:selected {{ background: {p.primary_soft}; color: {p.primary_soft_text}; font-weight: 700; }}
 
 /* ---------- 진행 막대 (헤더 아래, 진행 중에만 표시) ---------- */
 QProgressBar#busy {{ border: none; border-radius: {PROGRESS_H//2}px; background: {p.surface_alt}; min-height: {PROGRESS_H}px; max-height: {PROGRESS_H}px; }}
@@ -245,6 +245,7 @@ QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ backgr
 QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{ background: {p.bg_subtle}; color: {p.text_disabled}; }}
 QLineEdit[state="invalid"] {{ border: 2px solid {p.error}; }}
 QLineEdit[class="mono"] {{ font-family: {FONT_MONO}; font-size: {FONT_SIZE_MD}pt; min-height: {CONTROL_H_LG - 4}px; max-height: {CONTROL_H_LG - 4}px; }}
+QLineEdit[class="mono"][size="md"] {{ font-size: {FONT_SIZE}pt; min-height: {CONTROL_H - 4}px; max-height: {CONTROL_H - 4}px; }}
 QComboBox::drop-down {{ border: none; width: 28px; }}
 QComboBox::down-arrow {{ image: url({chevron}); width: 16px; height: 16px; }}
 QComboBox QAbstractItemView {{
@@ -287,6 +288,8 @@ QToolButton:focus {{ border: 2px solid {p.primary}; }}
 /* ---------- 카드 (무테 + 명도 차) ---------- */
 QFrame[class="card"] {{ background: {p.surface}; border: none; border-radius: {RADIUS}px; }}
 QFrame[class="card"][state="drop"] {{ background: {p.primary_soft}; border: 2px solid {p.primary}; }}
+
+QFrame[class="divider"] {{ background: {p.border}; border: none; min-height: 1px; max-height: 1px; }}
 
 /* ---------- 배너 (아이콘 + 제목 + 본문 + 조치 버튼 + 닫기) ---------- */
 QFrame[class="banner"] {{ border-radius: {RADIUS_MD}px; border: none; }}
@@ -337,6 +340,7 @@ QTableWidget::item, QTableView::item {{ padding: 0 {s*2}px; border-bottom: 1px s
 QTableWidget::item:hover, QTableView::item:hover {{ background: {p.bg_subtle}; }}
 QTableWidget::item:selected, QTableView::item:selected {{ background: {p.primary_soft}; color: {p.text}; }}
 QTableWidget#diff {{ font-family: {FONT_MONO}; font-size: {FONT_SIZE_SM}pt; }}
+QHeaderView {{ background: {p.surface}; border: none; }}
 QHeaderView::section {{
     background: transparent; border: none;
     padding: {s//2}px {s*2}px; color: {p.text_3}; font-size: {FONT_SIZE_XS}pt; font-weight: 700; min-height: 28px;
@@ -351,8 +355,8 @@ QTabBar::tab:selected {{ color: {p.text}; border-bottom: 3px solid {p.text}; fon
 /* ---------- 상태바 ---------- */
 QStatusBar {{ background: {p.bg}; border: none; color: {p.text_3}; font-size: {FONT_SIZE_XS}pt; min-height: 32px; }}
 QStatusBar::item {{ border: none; }}
-QLabel[class="login"][state="ok"]   {{ color: {p.success_text}; font-size: {FONT_SIZE_XS}pt; }}
-QLabel[class="login"][state="none"] {{ color: {p.text_3}; font-size: {FONT_SIZE_XS}pt; }}
+QLabel[class="login"][state="ok"]   {{ color: {p.success_text}; font-size: {FONT_SIZE_XS}pt; padding-left: 14px; }}
+QLabel[class="login"][state="none"] {{ color: {p.text_3}; font-size: {FONT_SIZE_XS}pt; padding-left: 14px; }}
 
 /* ---------- 빈 상태 ---------- */
 QLabel[class="empty-title"] {{ color: {p.text}; font-size: {FONT_SIZE_MD}pt; font-weight: 700; }}

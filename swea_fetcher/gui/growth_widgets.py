@@ -8,16 +8,27 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QToolTip, QVBoxLayout, QWidget
+import re
+from PySide6.QtCore import QEasingCurve, QEvent, QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QToolTip, QVBoxLayout, QWidget
 
 from .. import growth, solved
+from . import motion
 from .theme import tokens
 from .widgets import set_class
 
 SPARK_W, SPARK_H = 96, 24
-BAR_CHART_MIN_H = 120
+BAR_CHART_MIN_H = 140  # 스펙 §16.5: 120 → 140
+BAR_TOP_RADIUS = 4  # 막대는 위쪽 모서리만 둥글게
+BAR_STAGGER_MS = 30  # 막대마다 지연 (A13)
+HEAT_COL_DELAY_MS, HEAT_COL_FADE_MS = 450, 250  # 잔디 열 채움: 열마다 지연 ≤ 450ms, 열당 250ms (A11)
+
+
+def number_parts(text: str) -> tuple[str, float, str] | None:
+    """"3문제" → ("", 3.0, "문제"), "85%" → ("", 85.0, "%"). 숫자가 하나가 아니면 None (카운트업 대상 아님)."""
+    m = re.fullmatch(r"(\D*?)(\d+(?:\.\d+)?)(\D*)", text.strip())
+    return (m.group(1), float(m.group(2)), m.group(3)) if m else None
 
 
 def week_label(d: date) -> str:
@@ -36,10 +47,32 @@ class BarChart(QWidget):
         self.values: list[float] = []
         self.labels: list[str] = []
         self.highlight = -1
+        self._grow = 1.0  # 0..1 전체 진행 (A13). 1 이면 완성 상태
         self.set_data([], [], -1)
+
+    def _bar_progress(self, i: int, n: int) -> float:
+        """막대 i 의 0..1 진행 (막대마다 30ms 지연, 400ms OutCubic)."""
+        if self._grow >= 1.0:
+            return 1.0
+        total = motion.MOTION_BAR + BAR_STAGGER_MS * max(n - 1, 0)
+        t = (self._grow * total - BAR_STAGGER_MS * i) / motion.MOTION_BAR
+        return QEasingCurve(QEasingCurve.Type.OutCubic).valueForProgress(max(0.0, min(1.0, t)))
+
+    def _set_grow(self, v: float) -> None:
+        self._grow = v
+        self.update()
+
+    def play_grow(self) -> None:
+        """막대 높이 0→목표. 모션이 꺼져 있으면 즉시 완성."""
+        n = max(len(self.values), 1)
+        total = motion.MOTION_BAR + BAR_STAGGER_MS * (n - 1)
+        anim = motion.tween(self, 0.0, 1.0, total, self._set_grow, QEasingCurve.Type.Linear, on_finished=lambda: self._set_grow(1.0), key="grow")
+        self._grow = 1.0 if anim is None else 0.0
+        self.update()
 
     def set_data(self, values: list[float], labels: list[str], highlight: int = -1, name: str = "주별 Pass 문제 수") -> None:
         n = min(len(values), len(labels)) if labels else len(values)
+        old = list(self.values)
         self.values = [max(0.0, float(v or 0)) for v in values[:n]]
         self.labels = list(labels[:n]) + [""] * (len(self.values) - len(labels[:n]))
         self.highlight = highlight if 0 <= highlight < len(self.values) else -1
@@ -47,7 +80,10 @@ class BarChart(QWidget):
         self.setAccessibleName(name)
         self.setAccessibleDescription(desc)
         self.setToolTip(f"{name}\n{desc}")
-        self.update()
+        if old != self.values and self.values and self.isVisible():
+            self.play_grow()  # 값이 바뀐 경우에만 (보이지 않을 때는 생략)
+        else:
+            self.update()
 
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
@@ -79,18 +115,30 @@ class BarChart(QWidget):
         for i, v in enumerate(self.values):
             cx = rect.left() + slot * (i + 0.5)
             hl = i == self.highlight
-            h = plot_h * v / vmax
+            prog = self._bar_progress(i, n)
+            h = plot_h * v / vmax * prog
             color = QColor(pal.primary if hl else pal.border_strong)
             if v > 0:
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(color)
-                p.drawRoundedRect(QRectF(cx - bar_w / 2, base_y - h, bar_w, h), tokens.RADIUS_SM, tokens.RADIUS_SM)
+                bar = QRectF(cx - bar_w / 2, base_y - h, bar_w, h)
+                path = QPainterPath()  # 위쪽 모서리만 둥글게 (아래는 기준선에 붙는다)
+                r = min(BAR_TOP_RADIUS, bar.width() / 2, bar.height())
+                path.moveTo(bar.left(), bar.bottom())
+                path.lineTo(bar.left(), bar.top() + r)
+                path.quadTo(bar.left(), bar.top(), bar.left() + r, bar.top())
+                path.lineTo(bar.right() - r, bar.top())
+                path.quadTo(bar.right(), bar.top(), bar.right(), bar.top() + r)
+                path.lineTo(bar.right(), bar.bottom())
+                path.closeSubpath()
+                p.drawPath(path)
             else:
                 p.setPen(QPen(color, 2))
                 p.drawLine(QPointF(cx - bar_w / 2, base_y - 1), QPointF(cx + bar_w / 2, base_y - 1))
             p.setFont(bold if hl else small)
             p.setPen(QColor(pal.text if hl else pal.text_2))
-            p.drawText(QRectF(cx - slot / 2, base_y - h - top_pad, slot, top_pad), Qt.AlignmentFlag.AlignCenter, f"{v:g}")
+            if prog >= 1.0:  # 막대가 다 자란 뒤에 값 글자
+                p.drawText(QRectF(cx - slot / 2, base_y - h - top_pad, slot, top_pad), Qt.AlignmentFlag.AlignCenter, f"{v:g}")
             if hl or i % step == (n - 1) % step:
                 p.setPen(QColor(pal.text if hl else pal.text_3))
                 p.drawText(QRectF(cx - slot / 2, base_y + 2, slot, label_h), Qt.AlignmentFlag.AlignCenter, self.labels[i])
@@ -160,13 +208,14 @@ class SparkLine(QWidget):
 
 
 class RateBar(QWidget):
-    """가로 막대 (0~max_value). 길이는 참고용이고 값은 옆 글자에 병기한다."""
+    """가로 막대 (0~max_value). 길이는 참고용이고 값은 옆 글자에 병기한다. kind: primary | warning(약점) | success(강점)."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, kind: str = "primary") -> None:
         super().__init__(parent)
-        self.setFixedHeight(8)
+        self.setFixedHeight(10)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.fraction = 0.0
+        self.kind = kind
 
     def set_fraction(self, f: float) -> None:
         self.fraction = max(0.0, min(1.0, float(f or 0)))
@@ -179,10 +228,10 @@ class RateBar(QWidget):
         r = QRectF(self.rect())
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(pal.surface_alt))
-        p.drawRoundedRect(r, 4, 4)
+        p.drawRoundedRect(r, 5, 5)
         if self.fraction > 0:
-            p.setBrush(QColor(pal.primary))
-            p.drawRoundedRect(QRectF(r.left(), r.top(), max(r.width() * self.fraction, 8.0), r.height()), 4, 4)
+            p.setBrush(QColor({"warning": pal.warning, "success": pal.success}.get(self.kind, pal.primary)))
+            p.drawRoundedRect(QRectF(r.left(), r.top(), max(r.width() * self.fraction, 10.0), r.height()), 5, 5)
         p.end()
 
 
@@ -193,29 +242,72 @@ def _label(text: str = "", cls: str = "muted", wrap: bool = False) -> QLabel:
     return lab
 
 
-class MetricRowWidget(QWidget):
-    """지표 1행: 이름 · 값 · 변화 글자 · 스파크라인."""
+class MetricRowWidget(QFrame):
+    """지표 타일 1개 (스펙 §16.5): 이름(sm) → 값(xl 700) → 변화(xs, 글자+화살표) + 우하단 스파크라인.
+    animate_from 이 있고 값이 "3문제"/"85%" 처럼 숫자 하나면 그 값에서 600ms 카운트업 (접근성 설명은 즉시 최종값)."""
 
-    def __init__(self, row: growth.MetricRow, parent=None) -> None:
+    def __init__(self, row: growth.MetricRow, parent=None, animate_from: float | None = None) -> None:
         super().__init__(parent)
+        set_class(self, "tile")
         self.setObjectName(f"MetricRow_{row.key}")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, tokens.SPACE // 2, 0, tokens.SPACE // 2)
+        lay.setContentsMargins(tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2)
         lay.setSpacing(tokens.SPACE)
-        self.name = _label(row.label, wrap=True)
-        self.name.setFixedWidth(132)
-        self.value = _label(row.value, "section", wrap=True)  # 줄바꿈 허용: 긴 값("힌트 2 · 정답 풀이 0")이 페이지를 가로로 넓히지 않게
-        self.value.setFixedWidth(112)
-        self.change = _label(row.change, "hint", wrap=True)
+        left = QVBoxLayout()
+        left.setSpacing(tokens.SPACE // 2)
+        self.name = _label(row.label, "hint", wrap=True)
+        self.value = _label(row.value, "section" if " · " in row.value else "metric-value", wrap=True)  # 복합 값은 md (xl 이면 두 줄로 꺾인다)  # 줄바꿈 허용: 긴 값("힌트 2 · 정답 풀이 0")이 페이지를 가로로 넓히지 않게
+        self.change = _label(row.change, "caption", wrap=True)
         self.change.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        left.addWidget(self.name)
+        left.addWidget(self.value)
+        left.addWidget(self.change)
+        left.addStretch(1)
         self.spark = SparkLine()
         self.spark.set_data(row.series, row.invert, row.label)
-        lay.addWidget(self.name)
-        lay.addWidget(self.value)
-        lay.addWidget(self.change, 1)
-        lay.addWidget(self.spark)
+        right = QVBoxLayout()
+        right.addStretch(1)
+        right.addWidget(self.spark, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+        lay.addLayout(left, 1)
+        lay.addLayout(right)
         self.setAccessibleName(row.label)
         self.setAccessibleDescription(f"{row.value}. {row.change}")
+        self.final_value = row.value
+        self._animate_from = animate_from
+
+    def showEvent(self, e) -> None:  # noqa: N802
+        super().showEvent(e)
+        if self._animate_from is not None:  # 보이는 순간 한 번만
+            start, self._animate_from = self._animate_from, None
+            parts = number_parts(self.final_value)
+            if parts is not None and start != parts[1]:
+                pre, to, suf = parts
+                fmt = (lambda v: f"{pre}{v:.0f}{suf}") if float(to).is_integer() else (lambda v: f"{pre}{v:.1f}{suf}")
+                motion.count_up(self.value, to, fmt, start=start, accessible=self.final_value)
+
+
+class BulletLabel(QLabel):
+    """항목 앞에 6px 색 점을 그리는 라벨 ("·" 글리프 대신). 글자가 항상 같이 있어 색 단독 전달이 아니다. text() 는 점을 뺀 본문."""
+
+    DOT = 6
+    INDENT = 16
+
+    def __init__(self, text: str = "", kind: str = "text_3", parent=None) -> None:
+        super().__init__(text, parent)
+        self.kind = kind  # tokens.Palette 필드 이름 (success | warning | error | text_3)
+        set_class(self, "body-2")
+        self.setWordWrap(True)
+        self.setContentsMargins(self.INDENT, 0, 0, 0)
+
+    def paintEvent(self, e) -> None:  # noqa: N802
+        super().paintEvent(e)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(getattr(tokens.current(), self.kind, tokens.current().text_3)))
+        line_h = self.fontMetrics().height()
+        painter.drawEllipse(QRectF(3, (line_h - self.DOT) / 2 + 1, self.DOT, self.DOT))
+        painter.end()
 
 
 class CategoryRowWidget(QWidget):
@@ -223,7 +315,7 @@ class CategoryRowWidget(QWidget):
 
     MAX_STRENGTH = 3.0  # 응답당 평균 강도의 최대 (막대 길이 기준)
 
-    def __init__(self, row: growth.CategoryRow, parent=None) -> None:
+    def __init__(self, row: growth.CategoryRow, parent=None, kind: str = "primary") -> None:
         super().__init__(parent)
         self.setObjectName(f"CategoryRow_{row.cid}")
         lay = QHBoxLayout(self)
@@ -233,7 +325,7 @@ class CategoryRowWidget(QWidget):
         self.name.setFixedWidth(132)
         mid = QVBoxLayout()
         mid.setSpacing(2)
-        self.bar = RateBar()
+        self.bar = RateBar(kind=kind)
         self.bar.set_fraction((row.rate or 0.0) / self.MAX_STRENGTH)
         self.value = _label(row.value, "hint", wrap=True)
         mid.addWidget(self.bar)
@@ -292,7 +384,27 @@ class HeatmapWidget(QWidget):
         self.today = date.today()
         self.base = solved.DEFAULT_HEAT_COLOR
         self.selected: date | None = None
+        self._reveal = 1.0  # 0..1 채움 진행 (A11). 1 이면 완성
         self.set_data({}, self.today, self.base)
+
+    # --- 채움 애니메이션 (A11) ---
+    def _set_reveal(self, v: float) -> None:
+        self._reveal = v
+        self.update()
+
+    def play_reveal(self) -> None:
+        """열(주)이 왼쪽→오른쪽으로 차례로 나타난다 (총 700ms). 꺼져 있으면 즉시 완성."""
+        anim = motion.tween(self, 0.0, 1.0, motion.MOTION_HEAT, self._set_reveal, QEasingCurve.Type.Linear, on_finished=lambda: self._set_reveal(1.0), key="reveal")
+        self._reveal = 1.0 if anim is None else 0.0
+        self.update()
+
+    def _col_opacity(self, col: int, cols: int) -> float:
+        if self._reveal >= 1.0:
+            return 1.0
+        total = motion.MOTION_HEAT
+        delay = HEAT_COL_DELAY_MS * col / max(cols - 1, 1)
+        t = (self._reveal * total - delay) / HEAT_COL_FADE_MS
+        return QEasingCurve(QEasingCurve.Type.OutCubic).valueForProgress(max(0.0, min(1.0, t)))
 
     # --- 데이터 ---
     def set_data(self, counts: dict[date, int], today: date, base: str | None = None) -> None:
@@ -424,18 +536,20 @@ class HeatmapWidget(QWidget):
             prev_month = sunday.month
         p.setPen(Qt.PenStyle.NoPen)
         for col in range(cols):
+            p.setOpacity(self._col_opacity(col, cols))
             for row in range(7):
                 d = first + timedelta(days=col * 7 + row)
                 if d > self.today:
                     continue
                 p.setBrush(colors[solved.level(self.counts.get(d, 0))])
-                p.drawRoundedRect(QRectF(HEAT_LEFT_PAD + col * pitch, HEAT_TOP_PAD + row * pitch, cell, cell), 2, 2)
+                p.drawRoundedRect(QRectF(HEAT_LEFT_PAD + col * pitch, HEAT_TOP_PAD + row * pitch, cell, cell), 3, 3)
+        p.setOpacity(1.0)
         p.setBrush(Qt.BrushStyle.NoBrush)
         for d, color, w, inset in ((self.today, pal.text, 1.5, 0.0), (self.selected, pal.primary, 2.0, 1.0)):
             r = self.cell_rect(d) if d is not None else None
             if r is not None:
                 p.setPen(QPen(QColor(color), w))
-                p.drawRoundedRect(r.adjusted(inset, inset, -inset, -inset), 2, 2)
+                p.drawRoundedRect(r.adjusted(inset, inset, -inset, -inset), 3, 3)
         p.end()
 
 

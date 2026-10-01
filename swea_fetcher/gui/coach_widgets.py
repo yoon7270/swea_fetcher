@@ -19,7 +19,8 @@ from ..ai_engine import AI_TIMEOUT, ENGINE_LABELS, ENGINE_SHORT, install_hint
 from ..ai_prompts import MAX_HINT_LEVEL
 from ..service import CoachAnswer
 from .theme import tokens
-from .widgets import Badge, Button, ElidedLabel, svg_icon, set_class
+from . import motion
+from .widgets import Badge, Button, ElidedLabel, Skeleton, svg_icon, set_class
 
 KIND_TITLES = {"review": "코드 평가", "hint": "힌트", "solution": "정답 풀이", "ping": "연결 테스트"}
 CONSENT_PREFIX = "coach/consent/"
@@ -105,12 +106,11 @@ class CoachBar(QFrame):
         m = tokens.SPACE * 2
         lay.setContentsMargins(m, tokens.SPACE * 3 // 2, m, tokens.SPACE * 3 // 2)
         lay.setSpacing(tokens.SPACE)
-        self.text = QLabel()
-        set_class(self.text, "muted")
+        self.text = QLabel()  # 본문 승격: 기본 글자(text) — 카드 안의 한 줄 안내 (스펙 §16.5)
         self.text.setWordWrap(True)
         lay.addWidget(self.text)
         row = QHBoxLayout()
-        row.setSpacing(tokens.SPACE)
+        row.setSpacing(tokens.BTN_GAP)
         self.review_btn = Button("코드 평가 받기")
         self.review_btn.setToolTip("풀이 코드를 AI 에게 보내 복잡도·가독성 평가를 받습니다")
         self.hint_btn = Button("힌트")
@@ -119,6 +119,8 @@ class CoachBar(QFrame):
         self.hint_btn.setAccessibleName("힌트 받기")
         self.solution_btn = Button("정답 풀이 보기")
         self.solution_btn.setToolTip("설명과 정답 코드를 화면에 표시합니다 (파일로 저장하지 않습니다)")
+        for b in (self.review_btn, self.hint_btn, self.solution_btn):
+            set_class(b, "tonal")  # 바닥 위 AI 제안 버튼 (스펙 §16.5)
         self.later_btn = Button("다음에")
         set_class(self.later_btn, "link")
         self._buttons = (self.review_btn, self.hint_btn, self.solution_btn, self.later_btn)
@@ -222,7 +224,10 @@ class CoachBar(QFrame):
         for b in self._buttons:
             if b is not self.hint_btn:
                 b.setEnabled(not self._requesting)
+        was_hidden = not self.isVisible()
         self.show()
+        if was_hidden:
+            motion.fade_in(self)  # 등장 페이드 (A5)
 
 
 # --- 응답 표시 ----------------------------------------------------------------------------
@@ -279,30 +284,46 @@ class EnginePane(QFrame):
         lay.setContentsMargins(m, m, m, m)
         lay.setSpacing(tokens.SPACE)
         head = QHBoxLayout()
-        head.setSpacing(tokens.SPACE)
+        head.setSpacing(tokens.BTN_GAP_SM)
         self.title = QLabel(self.label)
         self.title.setObjectName("CoachPaneTitle")
         set_class(self.title, "section")
-        self.meta = ElidedLabel()  # 좁은 좌우 배치에서 가로 스크롤을 만들지 않게 줄여 쓴다 (툴팁 = 전문)
+        self.meta = ElidedLabel(mode=Qt.TextElideMode.ElideRight)
+        self.meta.setObjectName("CoachPaneMeta")  # 좁으면 시각 부분부터 빼고, 그래도 안 되면 오른쪽 말줄임 (가운데 말줄임 금지). 툴팁 = 전문
         set_class(self.meta, "muted")
         self.cache_badge = Badge("캐시", "idle")
         self.cache_badge.hide()
         self.retry_btn = Button("다시 받기")
         self.retry_btn.setObjectName("CoachPaneRetry")
         self.retry_btn.setAccessibleName(f"{self.short} 다시 받기")
-        head.addWidget(self.title)
-        head.addWidget(self.meta, 1)
-        head.addWidget(self.cache_badge)
-        head.addWidget(self.retry_btn)
+        set_class(self.retry_btn, "sm")
+        left = QVBoxLayout()  # 제목 아래에 메타(시각·소요시간)+캐시 배지 — 좁은 패널에서도 가운데가 잘리지 않는다
+        left.setSpacing(2)
+        left.addWidget(self.title)
+        meta_row = QHBoxLayout()
+        meta_row.setSpacing(tokens.BTN_GAP_SM)
+        meta_row.addWidget(self.meta, 1)
+        meta_row.addWidget(self.cache_badge)
+        left.addLayout(meta_row)
+        head.addLayout(left, 1)
+        head.addWidget(self.retry_btn, 0, Qt.AlignmentFlag.AlignTop)
         lay.addLayout(head)
         # 본문 스택: 0 로딩 · 1 답 · 2 오류 · 3 미설치 · 4 취소
         self.body = QWidget()
         self.body.setObjectName("CoachPaneBody")
         self.stack = QStackedLayout(self.body)
+        loading = QWidget()  # 기존 "묻는 중… 0:12 · 최대 5분" 텍스트 라벨은 그대로 두고 아래에 스켈레톤 막대 (A9)
+        ll = QVBoxLayout(loading)
+        ll.setContentsMargins(0, 0, 0, 0)
+        ll.setSpacing(tokens.SPACE * 2)
         self.loading_label = QLabel()
         set_class(self.loading_label, "muted")
         self.loading_label.setWordWrap(True)
         self.loading_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.skeleton = Skeleton()
+        ll.addWidget(self.loading_label)
+        ll.addWidget(self.skeleton)
+        ll.addStretch(1)
         self.browser = AnswerBrowser()
         self.browser.setAccessibleName(f"{self.label} 답변")
         err = QWidget()
@@ -334,7 +355,7 @@ class EnginePane(QFrame):
         self.cancelled_label = QLabel("취소했습니다")
         set_class(self.cancelled_label, "muted")
         self.cancelled_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        for w in (self.loading_label, self.browser, err, miss, self.cancelled_label):
+        for w in (loading, self.browser, err, miss, self.cancelled_label):
             self.stack.addWidget(w)
         lay.addWidget(self.body, 1)
         foot = QHBoxLayout()
@@ -356,8 +377,11 @@ class EnginePane(QFrame):
         self.retry_btn.setEnabled(False)
 
     def _enter(self, state: str, index: int) -> None:
+        changed = state != self.state
         self.state = state
         self.stack.setCurrentIndex(index)
+        if changed and index != 0:
+            motion.fade_in(self.body)  # 상태 전환(로딩 → 답/오류) 페이드 (A5)
         self.cache_badge.hide()
         self.notes.hide()
         self.copy_btn.hide()
@@ -379,7 +403,7 @@ class EnginePane(QFrame):
     def set_done(self, answer: CoachAnswer, kind_title: str) -> None:
         when = datetime.now().strftime("%H:%M")
         took = "" if answer.from_cache or not answer.elapsed else f" · {answer.elapsed:.1f}초"
-        self.meta.setText(f"{kind_title} · {when}{took}")
+        self.meta.set_parts([kind_title, when, took.removeprefix(" · ")])  # 좁으면 시각부터 생략
         self.browser.set_markdown(answer.markdown)
         self._enter("done", 1)
         self.cache_badge.setVisible(answer.from_cache)

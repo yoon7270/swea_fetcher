@@ -24,7 +24,8 @@ from ... import content_cache, service, storage
 from ...config import Settings
 from ...service import FetchOptions, FetchOutcome
 from ..theme import tokens
-from ..widgets import Badge, Banner, Button, ElidedLabel, LogView, make_busy_bar, open_in_editor, open_in_explorer, editor_tooltip, set_class, set_invalid, svg_icon
+from .. import motion
+from ..widgets import Badge, Banner, Button, ElidedLabel, LogView, PageColumn, make_busy_bar, open_in_editor, open_in_explorer, editor_tooltip, set_class, set_invalid, set_size, svg_icon
 from ..workers import FetchWorker
 
 
@@ -55,13 +56,10 @@ class FetchPage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        inner = QWidget()
-        inner.setObjectName("page")
-        scroll.setWidget(inner)
+        col = PageColumn()  # 본문 최대 폭 840 + 가운데 정렬 (스펙 §16.5)
+        scroll.setWidget(col)
         outer.addWidget(scroll)
-        root = QVBoxLayout(inner)
-        m = tokens.SPACE * 3
-        root.setContentsMargins(m, m, m, m)
+        root = col.body
         root.setSpacing(tokens.SPACE * 2)
 
         head = QHBoxLayout()
@@ -80,11 +78,9 @@ class FetchPage(QWidget):
 
         card = QFrame()
         set_class(card, "card")
-        form = QGridLayout(card)
-        form.setContentsMargins(tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2)
-        form.setHorizontalSpacing(tokens.SPACE * 2)
-        form.setVerticalSpacing(tokens.SPACE)
-        form.setColumnMinimumWidth(0, 72)
+        form = QVBoxLayout(card)  # 레이블은 입력 위 (스펙 §16.5·§16.6)
+        form.setContentsMargins(tokens.SPACE * 3, tokens.SPACE * 3, tokens.SPACE * 3, tokens.SPACE * 3)
+        form.setSpacing(tokens.SPACE)
         self.target = QLineEdit()
         self.target.setObjectName("TargetInput")
         set_class(self.target, "mono")
@@ -101,20 +97,21 @@ class FetchPage(QWidget):
         set_class(topic_hint, "hint")
         l1, l2 = QLabel("문제 번호"), QLabel("주제")
         for lab, w in ((l1, self.target), (l2, self.topic)):
-            lab.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             set_class(lab, "muted")
             lab.setBuddy(w)
-        form.addWidget(l1, 0, 0)
-        form.addWidget(self.target, 0, 1, 1, 2)
-        form.addWidget(l2, 1, 0)
-        form.addWidget(self.topic, 1, 1)
-        form.addWidget(topic_hint, 1, 2)
+        form.addWidget(l1)
+        form.addWidget(self.target)
+        form.addSpacing(tokens.SPACE)
+        form.addWidget(l2)
+        form.addWidget(self.topic)
+        form.addWidget(topic_hint)
         self.err_label = QLabel()
         set_class(self.err_label, "error")
         self.err_label.hide()
-        form.addWidget(self.err_label, 2, 1, 1, 2)
+        form.addWidget(self.err_label)
+        form.addSpacing(tokens.SPACE)
         opts = QHBoxLayout()
-        opts.setSpacing(tokens.SPACE * 2)
+        opts.setSpacing(tokens.SPACE * 3)
         self.force = QCheckBox("덮어쓰기")
         self.force.setToolTip("input.txt / output.txt 를 덮어씁니다. {번호}.py 는 유지")
         self.skeleton = QCheckBox("뼈대만")
@@ -124,17 +121,19 @@ class FetchPage(QWidget):
         for w in (self.force, self.skeleton, self.refresh):
             opts.addWidget(w)
         opts.addStretch(1)
-        form.addLayout(opts, 3, 1, 1, 2)
+        form.addLayout(opts)
+        form.addSpacing(tokens.SPACE)
         btns = QHBoxLayout()
+        btns.setSpacing(tokens.BTN_GAP)  # 나란한 버튼 간격 12
         self.run_btn = Button("저장")
         set_class(self.run_btn, "primary")
+        set_size(self.run_btn, "lg")  # 큰 CTA 52px
         self.run_btn.setDefault(True)
         self.preview_btn = Button("미리보기")
-        btns.addWidget(self.run_btn)
-        btns.addWidget(self.preview_btn)
-        btns.addStretch(1)
-        form.addLayout(btns, 4, 1, 1, 2)
-        form.setColumnStretch(2, 1)
+        set_size(self.preview_btn, "lg")
+        btns.addWidget(self.run_btn, 2)  # 저장이 가로로 넓다 (2 : 1)
+        btns.addWidget(self.preview_btn, 1)
+        form.addLayout(btns)
         root.addWidget(card)
 
         # 결과 카드 (§5.10)
@@ -166,6 +165,7 @@ class FetchPage(QWidget):
         self.card_note.hide()
         cl.addWidget(self.card_note)
         cb = QHBoxLayout()
+        cb.setSpacing(tokens.BTN_GAP)
         self.open_dir_btn = Button("폴더 열기")
         self.open_py_btn = Button("에디터에서 열기")
         self.commit_btn = Button("이대로 저장")
@@ -213,9 +213,16 @@ class FetchPage(QWidget):
         self.target.setFocus()
 
     def _set_busy(self, busy: bool) -> None:
-        for w in (self.preview_btn, self.target, self.topic, self.force, self.skeleton, self.refresh):
+        for w in (self.target, self.topic, self.force, self.skeleton, self.refresh):
             w.setEnabled(not busy)
-        self.run_btn.setEnabled(not busy)
+        dry = bool(self._last_args and self._last_args[2].dry_run)
+        for btn, spinning in ((self.run_btn, busy and not dry), (self.preview_btn, busy and dry)):  # 진행 중인 쪽 버튼에 스피너
+            if spinning:
+                btn.set_busy(True)
+            else:
+                if btn.is_busy():
+                    btn.set_busy(False)
+                btn.setEnabled(not busy)
         if busy:
             self.setFocus()
         self.run_btn.setText("저장 중…" if busy and self._last_args and not self._last_args[2].dry_run else "저장")
@@ -385,6 +392,7 @@ class FetchPage(QWidget):
             self.commit_btn.hide()
             self.view_btn.hide()
             self.card.show()
+            motion.fade_in(self.card)  # 결과 카드 등장 페이드 (A5)
             self.status_message.emit(f"저장 완료 · {info.num}")
             self.saved.emit(outcome)
         else:
@@ -409,6 +417,7 @@ class FetchPage(QWidget):
             self.commit_btn.show()
             self.view_btn.setVisible(outcome.content is not None)
             self.card.show()
+            motion.fade_in(self.card)  # 결과 카드 등장 페이드 (A5)
             self.status_message.emit("미리보기 — 저장하지 않았습니다")
         if outcome.content is not None:  # 저장 결과 카드를 먼저 갱신한 뒤 문제 탭에 넘긴다 (자동 전환은 MainWindow 몫)
             self.problem_ready.emit(outcome)

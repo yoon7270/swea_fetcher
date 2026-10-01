@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QStackedLayout,
     QTabWidget,
     QVBoxLayout,
@@ -29,7 +30,7 @@ from ...errors import AiError
 from ..coach_widgets import CoachBar, CoachTab, ask_consent, has_consent, set_consent
 from ..theme import tokens
 from ..git_dialog import ask_push
-from ..widgets import Badge, Banner, Button, DiffView, EmptyState, make_busy_bar, set_class, set_invalid
+from ..widgets import Badge, Banner, Button, DiffView, EmptyState, PageColumn, make_busy_bar, set_class, set_invalid, set_size
 from ... import lookup  # noqa: F401  (cached label 은 service 경유)
 from ..workers import CheckWorker, CoachWorker, FuncWorker, GitWorker, SubmitWorker
 
@@ -68,11 +69,18 @@ class CheckPage(QWidget):
         self._build()
 
     def _build(self) -> None:
-        root = QVBoxLayout(self)
-        m = tokens.SPACE * 3
-        root.setContentsMargins(m, m, m, m)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()  # 720x480 에서 코치 바 + 결과가 겹치지 않고 스크롤되도록 (컨트롤이 44px 로 커짐 — 스펙 §16.10)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        col = PageColumn()  # 본문 최대 폭 840 + 가운데 정렬 (스펙 §16.5)
+        scroll.setWidget(col)
+        outer.addWidget(scroll)
+        root = col.body
         root.setSpacing(tokens.SPACE * 2)
         head = QHBoxLayout()
+        head.setSpacing(tokens.BTN_GAP_SM)
         title = QLabel("풀이 검증")
         set_class(title, "title")
         self.badge = Badge()
@@ -110,7 +118,7 @@ class CheckPage(QWidget):
         set_class(self.form_card, "card")
         grid = QGridLayout(self.form_card)
         grid.setContentsMargins(tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2)
-        grid.setHorizontalSpacing(tokens.SPACE)
+        grid.setHorizontalSpacing(tokens.BTN_GAP)  # 나란한 버튼·입력 사이 12
         grid.setVerticalSpacing(tokens.SPACE)
         self.topic = QComboBox()
         self.topic.setObjectName("TopicCombo")
@@ -122,6 +130,7 @@ class CheckPage(QWidget):
         self.num.setObjectName("NumInput")
         set_class(self.num, "mono")
         self.num.setPlaceholderText("번호")
+        set_size(self.num, "md")  # 이 줄의 다른 입력과 같은 44px (번호 단독 입력의 52px 가 아님)
         self.num.setFixedWidth(100)
         self.num.setAccessibleName("문제 번호")
         self.run_btn = Button("실행")
@@ -140,10 +149,15 @@ class CheckPage(QWidget):
         grid.addWidget(self.topic, 0, 1)
         grid.addWidget(ln, 0, 2)
         grid.addWidget(self.num, 0, 3)
-        grid.addWidget(self.run_btn, 0, 4)
-        grid.addWidget(self.cancel_btn, 0, 5, 1, 1, Qt.AlignmentFlag.AlignLeft)
-        grid.addWidget(self.submit_btn, 0, 6, 1, 1, Qt.AlignmentFlag.AlignLeft)
-        grid.setColumnStretch(7, 1)
+        self.btn_box = QWidget()  # [실행] [취소] [SWEA 제출] — 한 묶음으로 옮긴다 (숨은 [취소] 가 간격을 두 배로 만들지 않게)
+        bb = QHBoxLayout(self.btn_box)
+        bb.setContentsMargins(0, 0, 0, 0)
+        bb.setSpacing(tokens.BTN_GAP)
+        bb.addWidget(self.run_btn)
+        bb.addWidget(self.cancel_btn)
+        bb.addWidget(self.submit_btn)
+        grid.addWidget(self.btn_box, 0, 4)
+        grid.setColumnStretch(5, 1)
         self._grid = grid
         self._run_on_row2 = False
         # 입력창이 드롭을 가로채 파일 경로를 텍스트로 넣지 않도록 — 드롭은 페이지(dropEvent)가 처리한다
@@ -161,7 +175,7 @@ class CheckPage(QWidget):
 
         holder = QWidget()
         self.stack = QStackedLayout(holder)
-        self.empty = EmptyState("실행하면 결과가 여기에 표시됩니다", "최근 페이지에서 문제를 우클릭 → 검증하기 로도 됩니다")
+        self.empty = EmptyState("실행하면 결과가 여기에 표시됩니다", "최근 페이지에서 문제를 우클릭 → 검증하기 로도 됩니다", icon="nav-check")
         self.tabs = QTabWidget()
         self.diff = DiffView()
         self.stderr = QPlainTextEdit()
@@ -173,6 +187,7 @@ class CheckPage(QWidget):
         self.git_log.setObjectName("log")
         self.stack.addWidget(self.empty)
         self.stack.addWidget(self.tabs)
+        holder.setMinimumHeight(220)  # 좁은 창에서는 결과 영역을 줄이지 않고 페이지가 스크롤된다
         root.addWidget(holder, 1)
 
         self.run_btn.clicked.connect(self.start)
@@ -223,17 +238,11 @@ class CheckPage(QWidget):
         super().resizeEvent(e)
         narrow = self.width() < 700
         if narrow != self._run_on_row2:
-            self._grid.removeWidget(self.run_btn)
-            self._grid.removeWidget(self.cancel_btn)
-            self._grid.removeWidget(self.submit_btn)
+            self._grid.removeWidget(self.btn_box)
             if narrow:
-                self._grid.addWidget(self.run_btn, 1, 1, 1, 1, Qt.AlignmentFlag.AlignLeft)
-                self._grid.addWidget(self.cancel_btn, 1, 2, 1, 2, Qt.AlignmentFlag.AlignLeft)
-                self._grid.addWidget(self.submit_btn, 1, 4, 1, 3, Qt.AlignmentFlag.AlignLeft)
+                self._grid.addWidget(self.btn_box, 1, 1, 1, 4, Qt.AlignmentFlag.AlignLeft)
             else:
-                self._grid.addWidget(self.run_btn, 0, 4)
-                self._grid.addWidget(self.cancel_btn, 0, 5, 1, 1, Qt.AlignmentFlag.AlignLeft)
-                self._grid.addWidget(self.submit_btn, 0, 6, 1, 1, Qt.AlignmentFlag.AlignLeft)
+                self._grid.addWidget(self.btn_box, 0, 4)
             self._run_on_row2 = narrow
 
     def _clear_invalid(self) -> None:
@@ -279,7 +288,7 @@ class CheckPage(QWidget):
     def _set_busy(self, busy: bool) -> None:
         for w in (self.topic, self.num):
             w.setEnabled(not busy)
-        self.run_btn.setEnabled(not busy)
+        self.run_btn.set_busy(busy)  # 비활성 + 왼쪽 스피너
         self.submit_btn.setEnabled(not busy and self._submit_worker is None)
         self.cancel_btn.setVisible(busy)
         self.cancel_btn.setEnabled(busy)

@@ -67,7 +67,7 @@ def test_heat_card_on_top_with_title_and_53_weeks(gw):
     seed(gw.settings)
     p = page_of(gw)
     hm = p.heatmap
-    assert p.heat_card.isVisible() and p.heat_title.text() == "지난 1년간 5문제 해결"
+    assert p.heat_card.isVisible() and p.heat_title.accessibleName() == "지난 1년간 5문제 해결"
     assert p.heat_card.mapTo(p, QPoint(0, 0)).y() < p.stack.parentWidget().mapTo(p, QPoint(0, 0)).y()  # 리포트 영역보다 위
     assert hm.visible_weeks() == 53
     first, today_rect = hm.cell_rect(hm.first_day()), hm.cell_rect(TODAY)
@@ -81,7 +81,7 @@ def test_heat_card_on_top_with_title_and_53_weeks(gw):
 
 def test_empty_state_shows_zero_title_and_empty_grid(gw):
     p = page_of(gw)
-    assert p.heat_card.isVisible() and p.heat_title.text() == "지난 1년간 0문제 해결"
+    assert p.heat_card.isVisible() and p.heat_title.accessibleName() == "지난 1년간 0문제 해결"
     assert p.day_list.isHidden() and not p.heat_hint.isHidden()
 
 
@@ -149,7 +149,7 @@ def test_selection_survives_refresh_and_follows_new_records(gw):
     assert p.day_list.count() == 1
     put(gw.settings, 106, datetime(2026, 10, 1, 9))
     p.refresh()
-    assert p.day_list.count() == 2 and p.heat_title.text() == "지난 1년간 6문제 해결"
+    assert p.day_list.count() == 2 and p.heat_title.accessibleName() == "지난 1년간 6문제 해결"
 
 
 def test_list_item_click_opens_problem_tab(gw, qtbot):
@@ -188,7 +188,7 @@ def test_no_horizontal_scroll_at_720_and_latest_weeks_visible(gw):
     assert 6 <= hm.visible_weeks() < 53  # 오래된 주부터 잘리고
     assert hm.cell_rect(TODAY) is not None and hm.cell_rect(D1) is not None  # 최신 주는 항상 보인다
     assert hm.cell_rect(TODAY).right() <= hm.width()
-    assert p.heat_title.text() == "지난 1년간 5문제 해결"  # 제목은 1년 전체
+    assert p.heat_title.accessibleName() == "지난 1년간 5문제 해결"  # 제목은 1년 전체
 
 
 # --- 설정: 색 -----------------------------------------------------------------------------------
@@ -267,10 +267,10 @@ def test_clear_growth_button_empties_heatmap(gw, monkeypatch):
 
     seed(gw.settings)
     p = page_of(gw)
-    assert p.heat_title.text() == "지난 1년간 5문제 해결"
+    assert p.heat_title.accessibleName() == "지난 1년간 5문제 해결"
     monkeypatch.setattr(settings_page_mod, "QMessageBox", FakeBox)
     FakeBox.choose = "지우기"
     gw.settings_page.growth_clear_btn.click()
     p.refresh()
-    assert p.heat_title.text() == "지난 1년간 0문제 해결"
+    assert p.heat_title.accessibleName() == "지난 1년간 0문제 해결"
     assert not (gw.config_dir / "coach" / "profile" / "solved.json").exists()

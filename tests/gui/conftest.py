@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("SWEA_GUI_MOTION", "off")  # 모션은 기본 off — 애니메이션을 기다리지 않게 (M21-C). 모션 자체 테스트만 켠다
 
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
