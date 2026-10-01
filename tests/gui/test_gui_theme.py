@@ -383,3 +383,40 @@ def test_toast_measures_with_styled_font(qtbot):
     pill = toast.pill_rect()
     avail = pill.right() - toast.PAD_X - (pill.left() + toast.PAD_X + toast._icon_w())
     assert fm.horizontalAdvance(toast.message()) <= avail
+
+
+def test_nav_fits_inside_sidebar_and_theme_name(main_window, qapp):
+    """내비 목록이 사이드바보다 넓어 선택 알약 오른쪽이 잘리던 회귀 + 기본 테마 이름에 상표명 없음."""
+    from PySide6.QtWidgets import QFrame
+
+    from swea_fetcher.gui.theme import tokens
+
+    qapp.setStyleSheet(tokens.build_qss())
+    try:
+        main_window.resize(960, 680)
+        main_window.show()
+        qapp.processEvents()
+        sidebar = main_window.findChild(QFrame, "Sidebar")
+        nav = main_window.nav
+        assert nav.geometry().right() < sidebar.width()
+        assert nav.viewport().geometry().right() < sidebar.width()
+    finally:
+        qapp.setStyleSheet("")
+    assert all("토스" not in t.label for t in tokens.THEMES)
+
+
+def test_nav_focus_ring_only_for_keyboard_focus(main_window, qtbot):
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QFocusEvent
+
+    from PySide6.QtWidgets import QApplication
+
+    nav = main_window.nav
+    delegate = nav.itemDelegate()
+    send = lambda t, r: QApplication.sendEvent(nav, QFocusEvent(t, r))  # noqa: E731 — 이벤트 필터를 거치게
+    send(QEvent.Type.FocusIn, Qt.FocusReason.MouseFocusReason)
+    assert delegate._kbd_focus is False
+    send(QEvent.Type.FocusIn, Qt.FocusReason.TabFocusReason)
+    assert delegate._kbd_focus is True
+    send(QEvent.Type.FocusOut, Qt.FocusReason.MouseFocusReason)
+    assert delegate._kbd_focus is False

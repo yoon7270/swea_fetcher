@@ -160,7 +160,7 @@ class Theme:
 # 테마 목록 (표시 순서). 값은 스펙 §17.5 표 그대로. 모든 팔레트가 test_gui_theme 의 대비 표(§17.6)를 통과해야 한다.
 THEMES: tuple[Theme, ...] = (
     Theme(
-        "blue", "토스 블루",
+        "blue", "오션 블루",
         _make_light(("#F2F4F6", "#FFFFFF", "#F9FAFB", "#F2F4F6", "#E5E8EB", "#D1D6DB"),
                     "#3182F6", "#1F6FE8", "#1B64DA", "#1957C2", "#E8F3FF", "#D3E8FF", "#C0DDFF", "#1957C2"),
         _make_dark(("#14171C", "#191C22", "#1E222A", "#242A33", "#29303A", "#333B47", "#3D4655", "#2E3541", "#444E5C"),
@@ -406,7 +406,7 @@ QLabel[class="app-title"] {{ font-size: {FONT_SIZE_MD}pt; font-weight: 700; padd
 QFrame#Sidebar {{ background: {p.sidebar}; border: none; }}
 QListWidget#nav {{
     background: {p.sidebar}; border: none;
-    padding: 0 {s}px; min-width: {SIDEBAR_W}px; max-width: {SIDEBAR_W}px; outline: 0;
+    padding: 0 {s}px; min-width: {SIDEBAR_W - 2*s}px; max-width: {SIDEBAR_W - 2*s}px; outline: 0;  /* 폭은 padding 제외 — 합계가 사이드바 폭과 같아야 오른쪽이 안 잘린다 */
 }}
 
 /* ---------- 진행 막대 (헤더 아래, 진행 중에만 표시) ---------- */

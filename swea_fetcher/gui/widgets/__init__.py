@@ -1301,7 +1301,18 @@ class NavDelegate(QStyledItemDelegate):
         self._view = view
         self._anim_y: float | None = None  # 이동 중인 알약의 위쪽 y (viewport 좌표). None = 현재 항목에 정지
         self._prev_row: int | None = None
+        self._kbd_focus = False  # 키보드(Tab·Shift+Tab) 로 들어온 포커스인가 — 마우스 클릭 포커스에는 링을 그리지 않는다
         view.currentRowChanged.connect(self._on_row_changed)
+        view.installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if obj is self._view:
+            t = event.type()
+            if t == QEvent.Type.FocusIn:
+                self._kbd_focus = event.reason() in (Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason)
+            elif t in (QEvent.Type.FocusOut, QEvent.Type.MouseButtonPress):
+                self._kbd_focus = False
+        return super().eventFilter(obj, event)
 
     def _pill_for(self, row: int) -> QRectF:
         r = QRectF(self._view.visualRect(self._view.model().index(row, 0)))
@@ -1375,7 +1386,7 @@ class NavDelegate(QStyledItemDelegate):
         painter.setPen(QColor(p.primary_soft_text if selected else (p.text if hover else p.text_2)))
         tr = QRectF(slot.left() + self.PAD_X + self.ICON + self.ICON_GAP, slot.top(), slot.width() - self.PAD_X * 2 - self.ICON - self.ICON_GAP, slot.height())
         painter.drawText(tr, int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), str(index.data(Qt.ItemDataRole.DisplayRole) or ""))
-        if selected and (option.state & QStyle.StateFlag.State_HasFocus):  # 키보드 포커스 링 (§10)
+        if selected and self._kbd_focus and (option.state & QStyle.StateFlag.State_HasFocus):  # 키보드 포커스 링 (§10) — 클릭에는 없음
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(QPen(QColor(p.primary), 2))
             painter.drawRoundedRect(slot.adjusted(1, 1, -1, -1), radius, radius)
