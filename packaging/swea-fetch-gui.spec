@@ -6,6 +6,12 @@ r"""PyInstaller 스펙 — swea-fetch-gui (M4c).
 onefile + windowed. 백신 오탐 시 아래 ONEFILE 을 False 로 바꿔 onedir 로.
 """
 from pathlib import Path
+import os
+
+# Qt는 Windows ICU를 사용한다. 다른 앱의 PATH에 있는 동명 ICU/UCRT를
+# 수집하면 QtCore import가 실패하므로 시스템 DLL 경로를 먼저 검색한다.
+if os.name == "nt":
+    os.environ["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32") + os.pathsep + os.environ.get("PATH", "")
 
 ROOT = Path(SPECPATH).parent
 

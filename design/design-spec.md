@@ -1047,3 +1047,4 @@ QSS·토큰만으로 끝나는 변경이 기본이다. 위젯 구조가 바뀌�
 - 버튼 간격 토큰 `BTN_GAP=12`, `BTN_GAP_SM=8`. 설정 "위험 영역" 카드에 세션 삭제·계정 삭제(danger)·AI 기록 지우기·성장 기록 지우기를 모음. `ReduceMotionToggle` 은 QSettings `ui/reduce_motion`.
 - 번들: `packaging/swea-fetch-gui.spec` 가 `qsvg.dll`·`qsvgicon.dll` 을 binaries 로 명시.
 - 마감 검토: 지연 시작·일시 정지 모션도 교체 시 끝값과 정리 콜백을 적용하고, 취소된 지연 타이머는 재시작하지 않는다. 모션 off 전환 후 같은 키를 요청하면 이전 모션을 먼저 종료한다. 회귀 테스트 2건 추가.
+- 2026-10-01 검증: main 전체 1,433개 테스트 통과. 960×680·720×480 캡처와 150% offscreen 캡처 레이아웃 확인. 실제 exe 자가진단 exit 0, Pretendard Regular/Bold·SVG 아이콘·MainWindow 초기화 확인(로그인 네트워크 검증은 하지 않음). 빌드 PATH의 외부 `icuuc.dll` 충돌은 System32 우선 검색으로 수정. Narrator·고대비·실사용 프레임 성능 검증은 미실시.
