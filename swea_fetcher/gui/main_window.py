@@ -32,7 +32,7 @@ from .pages.history_page import HistoryPage
 from .pages.problem_page import ProblemPage
 from .pages.settings_page import SettingsPage
 from .theme import tokens
-from .widgets import nav_icon, set_class
+from .widgets import Button, Toast, nav_icon, set_class
 from .workers import FetchWorker, FuncWorker, GrowthWorker
 
 PAGES = (
@@ -62,6 +62,7 @@ class MainWindow(QMainWindow):
         self._growth_queued: date | None = None  # 워커 실행 중에 들어온 수동 코멘트 요청
         self._growth_unseen = 0
         self.autosync = None  # AutoSyncController (M11) — _build 뒤 생성
+        tokens.set_theme(str(self.qs.value(tokens.THEME_SETTING_KEY, tokens.DEFAULT_THEME) or tokens.DEFAULT_THEME))
         self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(*tokens.WINDOW_MIN)
         self.resize(*tokens.WINDOW_DEFAULT)
@@ -93,7 +94,7 @@ class MainWindow(QMainWindow):
         self.nav.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         for label, _key, icon in PAGES:
             item = QListWidgetItem(nav_icon(icon), label)
-            item.setSizeHint(QSize(0, tokens.NAV_ITEM_H))
+            item.setSizeHint(QSize(0, tokens.NAV_ITEM_H + tokens.NAV_GAP))  # 항목 높이 + 사이 간격
             self.nav.addItem(item)
         sl.addWidget(self.nav, 1)
         lay.addWidget(sidebar)
@@ -109,6 +110,7 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(p)
         lay.addWidget(self.stack, 1)
         self.setCentralWidget(central)
+        self.toast = Toast(central)  # 끝난 일의 확인 알림 (스펙 §16.5) — notify() 로 띄운다
 
         # 상태바 (§3): 좌 로그인 상태 · 중 임시 메시지 · 우 루트 경로
         self.status_login = QLabel("○ 세션 없음")
@@ -117,25 +119,25 @@ class MainWindow(QMainWindow):
         self.status_root = QLabel("")  # 상태바 permanent 위젯은 Ignored 정책이 0폭으로 눌리므로 고정폭 elide 사용
         set_class(self.status_root, "hint")
         self.status_root.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.update_badge = QPushButton("")  # 새 버전 배지 (M6 §4): 클릭 → Release 페이지
+        self.update_badge = Button("")  # 새 버전 배지 (M6 §4): 클릭 → Release 페이지
         self.update_badge.setObjectName("UpdateBadge")
         set_class(self.update_badge, "link")
         self.update_badge.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update_badge.hide()
         self.update_badge.clicked.connect(self._open_release)
-        self.autosync_badge = QPushButton("")  # 자동 동기화 상태 (M11): 클릭 → 설정
+        self.autosync_badge = Button("")  # 자동 동기화 상태 (M11): 클릭 → 설정
         self.autosync_badge.setObjectName("AutoSyncBadge")
         set_class(self.autosync_badge, "link")
         self.autosync_badge.setCursor(Qt.CursorShape.PointingHandCursor)
         self.autosync_badge.hide()
         self.autosync_badge.clicked.connect(lambda: self.goto("settings"))
-        self.review_badge = QPushButton("")  # 복습할 문제 (M17 AI 코치): 클릭 → 최근 탭의 복습 카드
+        self.review_badge = Button("")  # 복습할 문제 (M17 AI 코치): 클릭 → 최근 탭의 복습 카드
         self.review_badge.setObjectName("ReviewBadge")
         set_class(self.review_badge, "link")
         self.review_badge.setCursor(Qt.CursorShape.PointingHandCursor)
         self.review_badge.hide()
         self.review_badge.clicked.connect(lambda: self.goto("history"))
-        self.growth_badge = QPushButton("")  # 새 성장 리포트 (M19): 클릭 → 성장 탭
+        self.growth_badge = Button("")  # 새 성장 리포트 (M19): 클릭 → 성장 탭
         self.growth_badge.setObjectName("GrowthBadge")
         set_class(self.growth_badge, "link")
         self.growth_badge.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -154,7 +156,7 @@ class MainWindow(QMainWindow):
         for p in (self.fetch_page, self.check_page, self.settings_page):
             p.busy_changed.connect(self._set_busy)
         for p in self._pages():
-            p.status_message.connect(self.flash)
+            p.status_message.connect(self._on_page_message)
         for p in (self.fetch_page, self.problem_page, self.check_page, self.history_page, self.growth_page):
             p.goto_requested.connect(self.goto)
         self.growth_page.seen_changed.connect(self._refresh_growth_badge)
@@ -162,6 +164,7 @@ class MainWindow(QMainWindow):
         self.growth_page.cancel_requested.connect(self._growth_cancel)
         self.growth_page.problem_requested.connect(self._open_recent_problem)  # 풀이 잔디의 날짜 목록 → 문제 탭
         self.settings_page.heat_color_changed.connect(self.growth_page.apply_heat_color)
+        self.settings_page.theme_changed.connect(self.apply_theme)
         self.fetch_page.problem_ready.connect(self._on_problem_ready)
         self.fetch_page.cached_problem_requested.connect(self._show_cached_problem)
         self.history_page.problem_requested.connect(self._open_recent_problem)
@@ -332,8 +335,38 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_TITLE} — {suffix}" if busy and suffix else APP_TITLE)
 
     def flash(self, msg: str, ms: int = 4000) -> None:
-        """상태바 임시 메시지 (토스트 대용, 스펙 §3)."""
+        """상태바 임시 메시지 (진행 중·안내 — 토스트 없음)."""
         self.statusBar().showMessage(msg, ms)
+
+    def notify(self, msg: str, kind: str = "success", ms: int = 2400) -> None:
+        """끝난 일의 확인: 토스트 + 상태바 메시지 (스크린리더·기존 테스트 호환을 위해 상태바에도 항상 남긴다).
+        오류·선택 필요·결과는 토스트가 아니라 배너/카드로 알린다."""
+        if kind == "warning":
+            ms = max(ms, 4000)
+        self.toast.show_message(msg, kind, ms)
+        self.statusBar().showMessage(msg, ms)
+
+    # 페이지가 status_message 로 내보내는 문구 중 "끝난 일" 로 보는 것 (토스트 대상). 진행 중·실패 문구는 상태바만
+    _DONE_SUFFIXES = ("했습니다", "켰습니다", "껐습니다", "지웠습니다", "열었습니다", "바꿨습니다")
+
+    def _on_page_message(self, msg: str) -> None:
+        done = (msg.endswith(self._DONE_SUFFIXES) and "못했습니다" not in msg) or msg.startswith("저장 완료")
+        if done:
+            self.notify(msg)
+        else:
+            self.flash(msg)
+
+    def apply_theme(self, key: str) -> None:
+        """테마(색 조합) 전환: 전체 QSS 를 다시 만들어 적용하고 색을 캐시한 위젯(내비 아이콘)을 갱신한다. 재시작 불필요."""
+        theme = tokens.set_theme(key)
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(tokens.build_qss())
+        for i, (_label, _key, icon) in enumerate(PAGES):
+            self.nav.item(i).setIcon(nav_icon(icon))
+        for w in self.findChildren(QWidget):  # 직접 그리는 위젯(Button·Toggle·잔디·차트)이 새 색으로 다시 그리도록
+            w.update()
+        self.qs.setValue(tokens.THEME_SETTING_KEY, theme.key)
 
     # --- 설정 -------------------------------------------------------------------------
     def reload_settings(self, first_run: bool = False, stay: bool = False) -> None:

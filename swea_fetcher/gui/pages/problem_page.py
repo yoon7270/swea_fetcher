@@ -20,7 +20,7 @@ from ...models import ProblemContent
 from ...service import FetchOutcome
 from ...storage import normalize_text
 from ..theme import tokens
-from ..widgets import Badge, Banner, ElidedLabel, EmptyState, editor_tooltip, open_in_editor, open_in_explorer, set_class
+from ..widgets import Badge, Banner, Button, ElidedLabel, EmptyState, editor_tooltip, open_in_editor, open_in_explorer, set_class
 
 ZOOM_MIN, ZOOM_MAX = -3, 8
 _IMG_RE = re.compile(r'<img\b[^>]*?\bsrc="(swea-img:\d+)"[^>]*>')
@@ -67,7 +67,7 @@ class _StatementBrowser(QTextBrowser):
         self._resize_timer.setSingleShot(True)
         self._resize_timer.setInterval(_RESIZE_DEBOUNCE_MS)
         self._resize_timer.timeout.connect(self._rerender_if_needed)
-        self.apply_palette(tokens.LIGHT)
+        self.apply_palette(tokens.current())
 
     # 다크 팔레트 도입 시 build_qss 와 함께 다시 호출한다
     def apply_palette(self, palette: tokens.Palette) -> None:
@@ -214,10 +214,10 @@ class ProblemPage(QWidget):
         root.addWidget(self.banner)
 
         bar = QHBoxLayout()
-        self.open_dir_btn = QPushButton("폴더 열기")
-        self.open_py_btn = QPushButton("에디터에서 열기")
-        self.zoom_out_btn = QPushButton("글자 −")
-        self.zoom_in_btn = QPushButton("글자 +")
+        self.open_dir_btn = Button("폴더 열기")
+        self.open_py_btn = Button("에디터에서 열기")
+        self.zoom_out_btn = Button("글자 −")
+        self.zoom_in_btn = Button("글자 +")
         self.zoom_out_btn.setToolTip("글자 작게 (Ctrl+−)")
         self.zoom_in_btn.setToolTip("글자 크게 (Ctrl++)")
         bar.addWidget(self.open_dir_btn)

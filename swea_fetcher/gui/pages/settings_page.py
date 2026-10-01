@@ -32,7 +32,7 @@ from ...config import Settings
 from ...errors import AiError
 from ..coach_widgets import ask_consent, has_consent, reset_consents
 from ..theme import tokens
-from ..widgets import Banner, make_busy_bar, set_class, set_invalid
+from ..widgets import Banner, Button, ThemeChip, Toggle, make_busy_bar, set_class, set_invalid
 from ..workers import CoachWorker, FuncWorker, LoginWorker
 
 
@@ -53,6 +53,7 @@ class SettingsPage(QWidget):
     timeout_changed = Signal(float)
     cache_settings_changed = Signal()  # 지문 캐시 사용 토글 (문제 탭 안내문 갱신용)
     heat_color_changed = Signal()  # 풀이 잔디 색 변경 (M20) — 성장 탭이 즉시 다시 칠한다
+    theme_changed = Signal(str)  # 화면 테마(색 조합) 변경 (M21) — 메인이 QSS 를 다시 적용한다. 인자 = 테마 key
     coach_settings_changed = Signal()  # AI 코치 설정·기록 변경 (엔진·오답 기준·복습일·기록 지우기) — 메인이 설정 객체·배지를 갱신
 
     def __init__(self, qsettings: QSettings, config_dir: Path | None = None, parent=None) -> None:
@@ -108,7 +109,7 @@ class SettingsPage(QWidget):
         self.root_edit = QLineEdit()
         self.root_edit.setObjectName("RootInput")
         self.root_edit.setPlaceholderText("예: C:\\Users\\<you>\\Desktop\\swea")
-        browse = QPushButton("찾아보기")
+        browse = Button("찾아보기")
         browse.clicked.connect(self._browse)
         row = QHBoxLayout()
         row.addWidget(self.root_edit, 1)
@@ -163,9 +164,9 @@ class SettingsPage(QWidget):
         g.addWidget(self.pw_err, r + 1, 1)
         r += 2
         btns = QHBoxLayout()
-        self.save_btn = QPushButton("저장 후 로그인 확인")
+        self.save_btn = Button("저장 후 로그인 확인")
         set_class(self.save_btn, "primary")
-        self.save_only_btn = QPushButton("저장만")
+        self.save_only_btn = Button("저장만")
         btns.addWidget(self.save_btn)
         btns.addWidget(self.save_only_btn)
         btns.addStretch(1)
@@ -228,7 +229,7 @@ class SettingsPage(QWidget):
         tpl_hint = QLabel("변수: {num} {title} {topic} {date} — 비우면 기본값. 입력 후 Enter 또는 포커스 이동으로 저장")
         set_class(tpl_hint, "hint")
         tpl_hint.setWordWrap(True)
-        self.auto_push = QCheckBox("GitHub 자동 동기화 켜기")
+        self.auto_push = Toggle("GitHub 자동 동기화 켜기")
         auto_hint = QLabel("선택한 시점마다 확인 없이 GitHub 에 올라갑니다. 공용 PC 에선 자리 반납 시 logout --all 과 git 자격증명 정리를 잊지 마세요")
         set_class(auto_hint, "hint")
         auto_hint.setWordWrap(True)
@@ -261,7 +262,7 @@ class SettingsPage(QWidget):
         when_wrap = QWidget()
         when_wrap.setLayout(when_box)
         self.sync_on_close = QCheckBox("앱 종료 시 남은 변경 동기화")
-        self.sync_now_btn = QPushButton("지금 동기화")
+        self.sync_now_btn = Button("지금 동기화")
         l_scope = QLabel("범위")
         l_when = QLabel("시점")
         for lb in (l_scope, l_when):
@@ -299,7 +300,7 @@ class SettingsPage(QWidget):
         cache_hint = QLabel("지문은 풀이 폴더에 저장되지 않으며 GitHub 로 올라가지 않습니다. 캐시는 설정 폴더(~/.swea-fetch/cache)에만 있습니다")
         set_class(cache_hint, "hint")
         cache_hint.setWordWrap(True)
-        self.cache_clear_btn = QPushButton("캐시 지우기")
+        self.cache_clear_btn = Button("캐시 지우기")
         g6.addWidget(self.auto_open_problem, 0, 0, 1, 2)
         g6.addWidget(self.cache_enabled, 1, 0)
         g6.addWidget(self.cache_clear_btn, 1, 1)
@@ -346,8 +347,8 @@ class SettingsPage(QWidget):
         self.ai_status = QLabel("확인 중…")
         self.ai_status.setWordWrap(True)
         self.ai_status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.ai_detect_btn = QPushButton("다시 감지")
-        self.ai_test_btn = QPushButton("연결 테스트")
+        self.ai_detect_btn = Button("다시 감지")
+        self.ai_test_btn = Button("연결 테스트")
         self.ai_test_btn.setToolTip("테스트 문장만 보내 엔진이 응답하는지 확인합니다 (코드·지문은 보내지 않음)")
         self.ai_note = QLabel()  # 환경변수 API 키 경고 / 설치 안내
         set_class(self.ai_note, "hint")
@@ -365,8 +366,8 @@ class SettingsPage(QWidget):
         self.review_days.setSuffix(" 일")
         self.review_days.setFixedWidth(96)
         self.review_days.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self.ai_consent_reset_btn = QPushButton("AI 전송 동의 초기화")
-        self.ai_clear_btn = QPushButton("AI 기록 지우기")
+        self.ai_consent_reset_btn = Button("AI 전송 동의 초기화")
+        self.ai_clear_btn = Button("AI 기록 지우기")
         self.ai_clear_btn.setToolTip("응답 캐시·오답 횟수·복습 일정·성장 기록을 지웁니다")
         th_hint = QLabel("이 횟수 이상 틀리면 정답 풀이를 제안합니다")
         rv_hint = QLabel("정답 풀이를 본 뒤 다시 풀기를 권유할 때까지의 일수")
@@ -412,10 +413,10 @@ class SettingsPage(QWidget):
         g8 = QVBoxLayout(card8)
         g8.setContentsMargins(tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2)
         g8.setSpacing(tokens.SPACE // 2)
-        self.growth_enabled = QCheckBox("성장 기록 사용")
+        self.growth_enabled = Toggle("성장 기록 사용")
         self.growth_enabled.setObjectName("GrowthEnabledCheck")
         gh1 = QLabel("AI 코치 응답에서 분류 태그만 저장합니다(코드·지문 저장 안 함). 끄면 태그 요청과 기록을 모두 멈춥니다.")
-        self.growth_comment = QCheckBox("주간 AI 코멘트 자동 생성")
+        self.growth_comment = Toggle("주간 AI 코멘트 자동 생성")
         self.growth_comment.setObjectName("GrowthCommentCheck")
         gh2 = QLabel("주 1회, 집계 숫자와 분류 이름만 AI 로 보냅니다. 코드·지문·문제 번호는 보내지 않습니다.")
         gh3 = QLabel("기록은 ~/.swea-fetch/coach/profile 에만 있고 GitHub 로 올라가지 않습니다. 풀이 잔디(하루에 푼 문제)도 여기에 저장됩니다.")
@@ -423,7 +424,7 @@ class SettingsPage(QWidget):
         for h in (gh1, gh2, gh3, gh4):
             set_class(h, "hint")
             h.setWordWrap(True)
-        self.growth_clear_btn = QPushButton("성장 기록 지우기")
+        self.growth_clear_btn = Button("성장 기록 지우기")
         self.growth_clear_btn.setToolTip("분류 기록·주간 리포트·풀이 잔디를 지웁니다 (AI 응답 캐시·복습 일정은 그대로)")
         heat_row = QHBoxLayout()
         heat_row.setSpacing(tokens.SPACE)
@@ -449,7 +450,7 @@ class SettingsPage(QWidget):
         self.heat_custom_swatch.setAccessibleName("풀이 잔디 색: 직접 고른 색")
         self.heat_custom_swatch.hide()
         heat_row.addWidget(self.heat_custom_swatch)
-        self.heat_custom_btn = QPushButton("직접 고르기")
+        self.heat_custom_btn = Button("직접 고르기")
         self.heat_custom_btn.setObjectName("HeatCustomButton")
         self.heat_custom_btn.setToolTip("원하는 색을 직접 고릅니다")
         heat_row.addWidget(self.heat_custom_btn)
@@ -468,6 +469,40 @@ class SettingsPage(QWidget):
         g8.addWidget(gh3)
         root.addWidget(card8)
 
+        # --- 화면 (M21): 테마(색 조합). 선택 즉시 전체 QSS 재적용, QSettings ui/theme 에 저장
+        sec9 = QLabel("화면")
+        set_class(sec9, "section")
+        root.addWidget(sec9)
+        card9 = QFrame()
+        set_class(card9, "card")
+        g9 = QVBoxLayout(card9)
+        g9.setContentsMargins(tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2)
+        g9.setSpacing(tokens.SPACE)
+        theme_label = QLabel("테마 색")
+        set_class(theme_label, "section")
+        g9.addWidget(theme_label)
+        self.theme_group = QButtonGroup(self)
+        self.theme_group.setExclusive(True)
+        self.theme_chips: dict[str, ThemeChip] = {}
+        saved_theme = tokens.get_theme(str(self.qs.value(tokens.THEME_SETTING_KEY, tokens.DEFAULT_THEME) or tokens.DEFAULT_THEME)).key
+        theme_grid = QGridLayout()
+        theme_grid.setHorizontalSpacing(tokens.SPACE)
+        theme_grid.setVerticalSpacing(tokens.SPACE)
+        for i, t in enumerate(tokens.THEMES):
+            chip = ThemeChip(t.key, t.label, t.palette)
+            chip.setChecked(t.key == saved_theme)
+            chip.clicked.connect(lambda _c=False, k=t.key: self._set_theme(k))
+            self.theme_group.addButton(chip)
+            self.theme_chips[t.key] = chip
+            theme_grid.addWidget(chip, i // 3, i % 3)
+        theme_grid.setColumnStretch(3, 1)
+        g9.addLayout(theme_grid)
+        theme_hint = QLabel("버튼·선택 표시의 색 조합입니다. 고르면 바로 바뀌고 다음 실행에도 유지됩니다. 풀이 잔디 색은 위 성장 기록에서 따로 고릅니다.")
+        set_class(theme_hint, "hint")
+        theme_hint.setWordWrap(True)
+        g9.addWidget(theme_hint)
+        root.addWidget(card9)
+
         # --- 진단·업데이트 (M6 §3·§4)
         sec4 = QLabel("진단·업데이트")
         set_class(sec4, "section")
@@ -480,7 +515,7 @@ class SettingsPage(QWidget):
         d4 = QLabel("문의할 때 이슈에 붙여넣을 진단 정보 (버전·Python·설정 상태). 비밀번호·쿠키는 포함되지 않습니다")
         set_class(d4, "muted")
         d4.setWordWrap(True)
-        self.doctor_btn = QPushButton("진단 정보 복사")
+        self.doctor_btn = Button("진단 정보 복사")
         self.doctor_btn.setToolTip("swea-fetch doctor 와 같은 내용을 클립보드로 복사합니다")
         self.update_check = QCheckBox("새 버전 알림 (하루 1회 GitHub Release 확인)")
         self.update_check.setChecked(not update.is_disabled(self.config_dir))
@@ -504,8 +539,8 @@ class SettingsPage(QWidget):
         for d in (d1, d2):
             set_class(d, "muted")
             d.setWordWrap(True)
-        self.logout_btn = QPushButton("세션 삭제")
-        self.logout_all_btn = QPushButton("계정 정보까지 삭제")
+        self.logout_btn = Button("세션 삭제")
+        self.logout_all_btn = Button("계정 정보까지 삭제")
         set_class(self.logout_all_btn, "danger")
         g3.addWidget(d1, 0, 0)
         g3.addWidget(self.logout_btn, 0, 1)
@@ -1017,6 +1052,13 @@ class SettingsPage(QWidget):
         self._paint_heat_buttons()
         self.heat_color_changed.emit()
 
+    def _set_theme(self, key: str) -> None:
+        """테마 칩 선택: 저장하고 메인에 알린다 (QSS 재적용은 MainWindow.apply_theme)."""
+        theme = tokens.get_theme(key)
+        self.qs.setValue(tokens.THEME_SETTING_KEY, theme.key)
+        self.theme_changed.emit(theme.key)
+        self.status_message.emit(f"테마를 바꿨습니다 — {theme.label}")
+
     def _pick_heat_color(self) -> None:
         c = QColorDialog.getColor(QColor(self.heat_color), self, "풀이 잔디 색")
         if c.isValid():
@@ -1024,7 +1066,7 @@ class SettingsPage(QWidget):
 
     def _paint_heat_buttons(self) -> None:
         """프리셋 버튼을 색 칩으로 칠한다. 현재 색과 같은 칩은 굵은 테두리 — 프리셋이 아니면 [직접 고르기] 앞에 그 색의 칩이 선택 상태로 나온다."""
-        pal = tokens.DARK or tokens.LIGHT
+        pal = tokens.current()
         self.heat_group.setExclusive(False)  # 프리셋이 아닌 색이면 모두 해제해야 한다 (배타 그룹은 마지막 하나를 못 끈다)
         for hexv, b in self.heat_buttons.items():
             on = hexv == self.heat_color

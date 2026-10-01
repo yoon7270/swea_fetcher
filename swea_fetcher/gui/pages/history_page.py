@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 from ... import service
 from ...config import Settings
 from ..theme import tokens
-from ..widgets import Banner, EmptyState, open_in_editor, open_in_explorer, editor_tooltip, set_class
+from ..widgets import Banner, Button, EmptyState, open_in_editor, open_in_explorer, editor_tooltip, set_class
 
 LIMIT = 20
 REVIEW_MAX_ROWS = 5  # 복습 카드에 보여줄 최대 항목 (나머지는 "외 N개")
@@ -55,7 +55,7 @@ class HistoryPage(QWidget):
         self.count_label = QLabel(f"최근 {LIMIT}개")
         set_class(self.count_label, "hint")
         self.count_label.hide()
-        self.refresh_btn = QPushButton("새로고침")
+        self.refresh_btn = Button("새로고침")
         self.refresh_btn.setToolTip("F5")
         head.addWidget(title)
         head.addStretch(1)
@@ -141,10 +141,10 @@ class HistoryPage(QWidget):
         title = QLabel("복습")
         set_class(title, "section")
         self._review_lay.addWidget(title)
-        p = tokens.LIGHT
+        p = tokens.current()
         for it in items[:REVIEW_MAX_ROWS]:
             row = QHBoxLayout()
-            btn = QPushButton(f"{it.num}. {it.title or '—'}")
+            btn = Button(f"{it.num}. {it.title or '—'}")
             set_class(btn, "link")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setToolTip("검증 탭에서 이 문제를 엽니다")
@@ -185,7 +185,7 @@ class HistoryPage(QWidget):
     def _fill(self, items: list[service.RecentItem]) -> None:
         self._items = list(items)
         self.table.setRowCount(len(items))
-        p = tokens.LIGHT
+        p = tokens.current()
         for i, it in enumerate(items):
             vals = (str(it.num), it.title or "—", it.topic, it.saved_at.strftime("%m-%d %H:%M"))
             for col, val in enumerate(vals):

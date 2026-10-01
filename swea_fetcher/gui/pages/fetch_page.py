@@ -24,7 +24,7 @@ from ... import content_cache, service, storage
 from ...config import Settings
 from ...service import FetchOptions, FetchOutcome
 from ..theme import tokens
-from ..widgets import Badge, Banner, ElidedLabel, LogView, make_busy_bar, open_in_editor, open_in_explorer, editor_tooltip, set_class, set_invalid, svg_icon
+from ..widgets import Badge, Banner, Button, ElidedLabel, LogView, make_busy_bar, open_in_editor, open_in_explorer, editor_tooltip, set_class, set_invalid, svg_icon
 from ..workers import FetchWorker
 
 
@@ -126,10 +126,10 @@ class FetchPage(QWidget):
         opts.addStretch(1)
         form.addLayout(opts, 3, 1, 1, 2)
         btns = QHBoxLayout()
-        self.run_btn = QPushButton("저장")
+        self.run_btn = Button("저장")
         set_class(self.run_btn, "primary")
         self.run_btn.setDefault(True)
-        self.preview_btn = QPushButton("미리보기")
+        self.preview_btn = Button("미리보기")
         btns.addWidget(self.run_btn)
         btns.addWidget(self.preview_btn)
         btns.addStretch(1)
@@ -166,12 +166,12 @@ class FetchPage(QWidget):
         self.card_note.hide()
         cl.addWidget(self.card_note)
         cb = QHBoxLayout()
-        self.open_dir_btn = QPushButton("폴더 열기")
-        self.open_py_btn = QPushButton("에디터에서 열기")
-        self.commit_btn = QPushButton("이대로 저장")
+        self.open_dir_btn = Button("폴더 열기")
+        self.open_py_btn = Button("에디터에서 열기")
+        self.commit_btn = Button("이대로 저장")
         set_class(self.commit_btn, "primary")
         self.commit_btn.setFixedHeight(tokens.CONTROL_H_SM)
-        self.view_btn = QPushButton("문제 보기")  # 미리보기 결과에서 문제 탭으로 (M12)
+        self.view_btn = Button("문제 보기")  # 미리보기 결과에서 문제 탭으로 (M12)
         self.view_btn.hide()
         cb.addWidget(self.open_dir_btn)
         cb.addWidget(self.open_py_btn)
@@ -345,7 +345,7 @@ class FetchPage(QWidget):
             self.topic.addItem(outcome.topic)
         self.topic.setCurrentText(outcome.topic)
         info, s = outcome.info, self.settings
-        p = tokens.LIGHT
+        p = tokens.current()
         if outcome.notices:
             self.banner.show_message("warning", " · ".join(outcome.notices))
         if outcome.result is not None:

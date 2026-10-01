@@ -19,7 +19,7 @@ from ..ai_engine import AI_TIMEOUT, ENGINE_LABELS, ENGINE_SHORT, install_hint
 from ..ai_prompts import MAX_HINT_LEVEL
 from ..service import CoachAnswer
 from .theme import tokens
-from .widgets import Badge, ElidedLabel, svg_icon, set_class
+from .widgets import Badge, Button, ElidedLabel, svg_icon, set_class
 
 KIND_TITLES = {"review": "코드 평가", "hint": "힌트", "solution": "정답 풀이", "ping": "연결 테스트"}
 CONSENT_PREFIX = "coach/consent/"
@@ -111,15 +111,15 @@ class CoachBar(QFrame):
         lay.addWidget(self.text)
         row = QHBoxLayout()
         row.setSpacing(tokens.SPACE)
-        self.review_btn = QPushButton("코드 평가 받기")
+        self.review_btn = Button("코드 평가 받기")
         self.review_btn.setToolTip("풀이 코드를 AI 에게 보내 복잡도·가독성 평가를 받습니다")
-        self.hint_btn = QPushButton("힌트")
+        self.hint_btn = Button("힌트")
         self.hint_btn.setIcon(svg_icon("coach-hint", None, 16))
         self.hint_btn.setToolTip("이 코드에 대한 힌트를 받습니다 (정답 코드는 보여주지 않아요)")
         self.hint_btn.setAccessibleName("힌트 받기")
-        self.solution_btn = QPushButton("정답 풀이 보기")
+        self.solution_btn = Button("정답 풀이 보기")
         self.solution_btn.setToolTip("설명과 정답 코드를 화면에 표시합니다 (파일로 저장하지 않습니다)")
-        self.later_btn = QPushButton("다음에")
+        self.later_btn = Button("다음에")
         set_class(self.later_btn, "link")
         self._buttons = (self.review_btn, self.hint_btn, self.solution_btn, self.later_btn)
         for b in self._buttons:
@@ -237,7 +237,7 @@ class AnswerBrowser(QTextBrowser):
         self.setOpenLinks(False)
         self.setOpenExternalLinks(False)
         self.setReadOnly(True)
-        self.document().setDefaultStyleSheet(tokens.build_statement_css(tokens.LIGHT))
+        self.document().setDefaultStyleSheet(tokens.build_statement_css(tokens.current()))
 
     def loadResource(self, _type, _url):  # noqa: N802
         return None
@@ -287,7 +287,7 @@ class EnginePane(QFrame):
         set_class(self.meta, "muted")
         self.cache_badge = Badge("캐시", "idle")
         self.cache_badge.hide()
-        self.retry_btn = QPushButton("다시 받기")
+        self.retry_btn = Button("다시 받기")
         self.retry_btn.setObjectName("CoachPaneRetry")
         self.retry_btn.setAccessibleName(f"{self.short} 다시 받기")
         head.addWidget(self.title)
@@ -328,7 +328,7 @@ class EnginePane(QFrame):
             w.setWordWrap(True)
             w.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             ml.addWidget(w)
-        self.settings_btn = QPushButton("설정으로 이동")
+        self.settings_btn = Button("설정으로 이동")
         ml.addWidget(self.settings_btn, 0, Qt.AlignmentFlag.AlignLeft)
         ml.addStretch(1)
         self.cancelled_label = QLabel("취소했습니다")
@@ -342,7 +342,7 @@ class EnginePane(QFrame):
         set_class(self.notes, "hint")
         self.notes.setWordWrap(True)
         self.notes.hide()
-        self.copy_btn = QPushButton("코드 복사")
+        self.copy_btn = Button("코드 복사")
         self.copy_btn.setToolTip("정답 코드를 클립보드로 복사합니다 (파일로 저장하지 않습니다)")
         self.copy_btn.setAccessibleName(f"{self.short} 코드 복사")
         self.copy_btn.hide()
@@ -432,7 +432,7 @@ class CoachTab(QWidget):
         top = QHBoxLayout()
         self.title = QLabel()
         set_class(self.title, "muted")
-        self.cancel_btn = QPushButton("취소")
+        self.cancel_btn = Button("취소")
         self.cancel_btn.setToolTip("AI 요청을 중단합니다 (이미 도착한 답은 남습니다)")
         self.cancel_btn.hide()
         top.addWidget(self.title)

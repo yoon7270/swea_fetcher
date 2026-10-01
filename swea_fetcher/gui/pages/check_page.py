@@ -29,7 +29,7 @@ from ...errors import AiError
 from ..coach_widgets import CoachBar, CoachTab, ask_consent, has_consent, set_consent
 from ..theme import tokens
 from ..git_dialog import ask_push
-from ..widgets import Badge, Banner, DiffView, EmptyState, make_busy_bar, set_class, set_invalid
+from ..widgets import Badge, Banner, Button, DiffView, EmptyState, make_busy_bar, set_class, set_invalid
 from ... import lookup  # noqa: F401  (cached label 은 service 경유)
 from ..workers import CheckWorker, CoachWorker, FuncWorker, GitWorker, SubmitWorker
 
@@ -87,7 +87,7 @@ class CheckPage(QWidget):
         self.submit_badge.hide()
         self.git_badge = Badge()  # "푸시됨 abc1234" / "커밋만" / "변경 없음" / 오류 (M7)
         self.git_badge.hide()
-        self.push_btn = QPushButton("커밋 + 푸시")  # 실행 후 항상 표시. 통과면 primary, 실패면 보조 스타일
+        self.push_btn = Button("커밋 + 푸시")  # 실행 후 항상 표시. 통과면 primary, 실패면 보조 스타일
         self.push_btn.hide()
         head.addWidget(title)
         head.addStretch(1)
@@ -124,12 +124,12 @@ class CheckPage(QWidget):
         self.num.setPlaceholderText("번호")
         self.num.setFixedWidth(100)
         self.num.setAccessibleName("문제 번호")
-        self.run_btn = QPushButton("실행")
+        self.run_btn = Button("실행")
         set_class(self.run_btn, "primary")
-        self.cancel_btn = QPushButton("취소")
+        self.cancel_btn = Button("취소")
         self.cancel_btn.setToolTip("실행 중인 풀이 프로세스를 중단합니다")
         self.cancel_btn.hide()
-        self.submit_btn = QPushButton("SWEA 제출")  # M8: 제출 → 채점 → Pass 면 (자동) 커밋+푸시
+        self.submit_btn = Button("SWEA 제출")  # M8: 제출 → 채점 → Pass 면 (자동) 커밋+푸시
         self.submit_btn.setToolTip("SWEA 에 제출해 채점받습니다 (제출 횟수 1회 소모). Pass 면 커밋 + 푸시로 이어집니다")
         lt, ln = QLabel("주제"), QLabel("번호")
         set_class(lt, "muted")

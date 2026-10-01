@@ -196,7 +196,7 @@ swea-fetch check IM_test 25730
 
 ### 설정
 
-루트·ID·비밀번호, 검증 타임아웃, GitHub 연동(커밋 메시지·자동 푸시), **[진단 정보 복사]**, 새 버전 알림, 세션/계정 삭제.
+루트·ID·비밀번호, 검증 타임아웃, GitHub 연동(커밋 메시지·자동 푸시), **[진단 정보 복사]**, 새 버전 알림, 세션/계정 삭제, **화면 테마 색**(6종, 고르면 바로 적용).
 
 ![설정](docs/gui-screenshots/6-settings-doctor.png)
 
@@ -485,3 +485,7 @@ pytest
 ## 라이선스
 
 [MIT](LICENSE)
+
+### 글꼴
+
+GUI 는 [Pretendard](https://github.com/orioncactus/pretendard) (Regular · Bold, 원본 그대로) 를 앱에 포함해 사용합니다. Copyright (c) 2021 Kil Hyung-jin, [SIL Open Font License 1.1](https://scripts.sil.org/OFL) — 라이선스 전문은 `swea_fetcher/gui/theme/fonts/Pretendard-LICENSE.txt`. 글꼴 파일이 없으면 Malgun Gothic 으로 대신 표시됩니다.

@@ -1,6 +1,6 @@
 """성장 탭 위젯 (M19, 스펙 §6.7): BarChart · SparkLine (QPainter, 외부 차트 라이브러리 없음), 지표 행 · 카테고리 행. 풀이 잔디 HeatmapWidget · HeatLegend (M20, 스펙 §6.8).
 
-- 색은 tokens.LIGHT 만 참조한다 (하드코딩 금지). 색으로만 의미를 전달하지 않는다 — 값·변화는 옆 글자에 있고 접근성 설명에도 있다.
+- 색은 tokens.current() 만 참조한다 (하드코딩 금지). 색으로만 의미를 전달하지 않는다 — 값·변화는 옆 글자에 있고 접근성 설명에도 있다.
 - 모든 위젯은 빈 값·0·None·1개짜리 시계열에서도 예외 없이 그려진다.
 """
 
@@ -52,7 +52,7 @@ class BarChart(QWidget):
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pal = tokens.LIGHT
+        pal = tokens.current()
         n = len(self.values)
         rect = QRectF(self.rect())
         label_h, top_pad = 16.0, 16.0
@@ -124,7 +124,7 @@ class SparkLine(QWidget):
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pal = tokens.LIGHT
+        pal = tokens.current()
         real = [v for v in self.values if v is not None]
         if len(real) < 2:
             p.setPen(QColor(pal.text_3))
@@ -175,7 +175,7 @@ class RateBar(QWidget):
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pal = tokens.LIGHT
+        pal = tokens.current()
         r = QRectF(self.rect())
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(pal.surface_alt))
@@ -267,7 +267,7 @@ def day_text(d: date) -> str:
 
 def heat_palette() -> tuple[str, str]:
     """(0칸 색, 농도 색을 섞을 배경). 다크 팔레트가 생기면 그쪽을 쓴다."""
-    pal = tokens.DARK or tokens.LIGHT
+    pal = tokens.current()
     return pal.surface_alt, pal.surface
 
 
@@ -400,7 +400,7 @@ class HeatmapWidget(QWidget):
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pal = tokens.DARK or tokens.LIGHT
+        pal = tokens.current()
         colors = [QColor(c) for c in self.level_colors()]
         cell, cols, _o = self._layout()
         first = self.first_day()

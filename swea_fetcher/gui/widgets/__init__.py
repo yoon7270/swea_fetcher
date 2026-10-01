@@ -11,11 +11,13 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPixmap
+from PySide6.QtCore import QByteArray, QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QApplication,
+    QCheckBox,
     QFrame,
     QStyledItemDelegate,
     QStyle,
@@ -81,7 +83,7 @@ def svg_icon(name: str, color: str | None = None, size: int = 20) -> QIcon:
 
 def nav_icon(name: str) -> QIcon:
     """내비 아이콘: 기본 text_2, 선택(On) 시 primary_soft_text, 비활성은 text_disabled (스펙 §12)."""
-    p = tokens.LIGHT
+    p = tokens.current()
     icon = svg_icon(name, None)
     on = svg_icon(name, p.primary_soft_text)
     dis = svg_icon(name, p.text_disabled)
@@ -103,6 +105,393 @@ def make_busy_bar() -> QProgressBar:
     return bar
 
 
+# --- Button (§16.5) -------------------------------------------------------------------
+
+
+class Button(QPushButton):
+    """면·포커스 링을 직접 그리는 버튼. 글자·패딩·크기는 QSS(class 속성), 색은 현재 테마 팔레트에서 읽는다.
+
+    class → 면: primary(주색 면) / tonal(연한 주색) / danger(투명, hover 시 연한 빨강) / link(투명) / 기본(회색 secondary).
+    배너 안 버튼은 흰 면. 키보드 포커스일 때만 2px 링 (마우스 클릭 포커스에는 그리지 않는다).
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._busy = False
+        self._kb_focus = False
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+
+    # busy: 작업 중에는 비활성으로 보이고 눌러도 반응하지 않는다 (스피너는 M21-C)
+    def set_busy(self, busy: bool) -> None:
+        self._busy = bool(busy)
+        self.setEnabled(not self._busy)
+        self.update()
+
+    def is_busy(self) -> bool:
+        return self._busy
+
+    def _on_banner(self) -> bool:
+        w = self.parent()
+        while w is not None:
+            if w.property("class") == "banner":
+                return True
+            w = w.parent()
+        return False
+
+    def face_color(self) -> QColor | None:
+        """현재 상태(class·hover·pressed·disabled)의 면 색. 면이 없으면(투명) None. 테스트·캡처에서도 쓴다."""
+        p = tokens.current()
+        cls = str(self.property("class") or "")
+        enabled, down, hover = self.isEnabled(), self.isDown(), self.underMouse()
+        if self._on_banner():
+            if not enabled:
+                return QColor(p.bg_subtle)
+            return QColor(p.secondary if down else p.bg_subtle if hover else p.surface)
+        if cls == "primary":
+            if not enabled:
+                return QColor(p.border)
+            return QColor(p.primary_pressed if down else p.primary_hover if hover else p.primary_action)
+        if cls == "tonal":
+            if not enabled:
+                return QColor(p.bg_subtle)
+            return QColor(p.primary_soft_pressed if down else p.primary_soft_hover if hover else p.primary_soft)
+        if cls == "danger":
+            if not enabled:
+                return None
+            return QColor(p.danger_pressed if down else p.error_bg) if (down or hover) else None
+        if cls == "link":
+            if not enabled:
+                return None
+            return QColor(p.secondary_hover if down else p.secondary) if (down or hover) else None
+        if not enabled:
+            return QColor(p.bg_subtle)
+        return QColor(p.secondary_pressed if down else p.secondary_hover if hover else p.secondary)
+
+    def paintEvent(self, e) -> None:  # noqa: N802
+        face = self.face_color()
+        ring = self._kb_focus and self.isEnabled()
+        if face is not None or ring:
+            p = tokens.current()
+            cls = str(self.property("class") or "")
+            radius = tokens.RADIUS_SM if cls in ("sm", "link") or self._on_banner() else tokens.RADIUS_MD
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            r = QRectF(self.rect())
+            inset = (3.0 if r.height() >= tokens.CONTROL_H_SM else 2.0) if ring else 0.0
+            if face is not None:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(face)
+                painter.drawRoundedRect(r.adjusted(inset, inset, -inset, -inset), radius, radius)
+            if ring:
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(QColor(p.primary), 2))
+                painter.drawRoundedRect(r.adjusted(1, 1, -1, -1), radius + 1, radius + 1)
+            painter.end()
+        super().paintEvent(e)  # 글자·아이콘 (QSS 배경은 투명)
+
+    def focusInEvent(self, e) -> None:  # noqa: N802
+        self._kb_focus = e.reason() in (
+            Qt.FocusReason.TabFocusReason,
+            Qt.FocusReason.BacktabFocusReason,
+            Qt.FocusReason.ShortcutFocusReason,
+        )
+        super().focusInEvent(e)
+        self.update()
+
+    def focusOutEvent(self, e) -> None:  # noqa: N802
+        self._kb_focus = False
+        super().focusOutEvent(e)
+        self.update()
+
+
+# --- Toggle (§16.5) -------------------------------------------------------------------
+
+
+class Toggle(QCheckBox):
+    """즉시 저장되는 켜기/끄기 스위치 (QCheckBox 서브클래스 — isChecked/setChecked/toggled/objectName 그대로).
+
+    왼쪽 글자 + 오른쪽 44×26 스위치. 행 전체가 클릭 영역이다.
+    """
+
+    TRACK_W, TRACK_H, KNOB, GAP = 44, 26, 20, 12
+
+    def __init__(self, text: str = "", parent=None) -> None:
+        super().__init__(text, parent)
+        self._kb_focus = False
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        text_w = self.fontMetrics().horizontalAdvance(self.text()) if self.text() else 0
+        return QSize(text_w + (self.GAP if text_w else 0) + self.TRACK_W + 4, max(self.fontMetrics().height() + 12, 36))
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return QSize(self.TRACK_W + 4 + 80, 36)
+
+    def hitButton(self, pos) -> bool:  # noqa: N802
+        return self.rect().contains(pos)
+
+    def track_rect(self) -> QRectF:
+        h = self.height()
+        return QRectF(self.width() - self.TRACK_W - 2, (h - self.TRACK_H) / 2, self.TRACK_W, self.TRACK_H)
+
+    def paintEvent(self, e) -> None:  # noqa: N802
+        p = tokens.current()
+        enabled = self.isEnabled()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        track = self.track_rect()
+        # 글자
+        painter.setPen(QColor(p.text if enabled else p.text_disabled))
+        avail = max(int(track.left()) - self.GAP, 10)
+        elided = self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, avail)
+        painter.drawText(QRectF(0, 0, avail, self.height()), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), elided)
+        # 트랙·손잡이
+        on = self.isChecked()
+        painter.setOpacity(1.0 if enabled else 0.5)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(p.primary if on else p.toggle_off))
+        painter.drawRoundedRect(track, self.TRACK_H / 2, self.TRACK_H / 2)
+        pad = (self.TRACK_H - self.KNOB) / 2
+        kx = track.right() - pad - self.KNOB if on else track.left() + pad
+        painter.setBrush(QColor(p.surface))
+        painter.drawEllipse(QRectF(kx, track.top() + pad, self.KNOB, self.KNOB))
+        painter.setOpacity(1.0)
+        if self._kb_focus and enabled:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(p.primary), 2))
+            painter.drawRoundedRect(track.adjusted(-1, -1, 1, 1), (self.TRACK_H + 2) / 2, (self.TRACK_H + 2) / 2)
+        painter.end()
+
+    def focusInEvent(self, e) -> None:  # noqa: N802
+        self._kb_focus = e.reason() in (
+            Qt.FocusReason.TabFocusReason,
+            Qt.FocusReason.BacktabFocusReason,
+            Qt.FocusReason.ShortcutFocusReason,
+        )
+        super().focusInEvent(e)
+        self.update()
+
+    def focusOutEvent(self, e) -> None:  # noqa: N802
+        self._kb_focus = False
+        super().focusOutEvent(e)
+        self.update()
+
+    def nextCheckState(self) -> None:  # noqa: N802
+        super().nextCheckState()
+        self.update()
+
+
+# --- ThemeChip (설정 > 화면) ------------------------------------------------------------
+
+
+class ThemeChip(QAbstractButton):
+    """테마 선택 칩: 그 테마의 색 원 + 이름. 칩 자체의 색은 해당 테마 팔레트로 고정 (미리보기), 선택 링만 현재 테마를 따른다."""
+
+    W, H = 150, 44
+
+    def __init__(self, key: str, label: str, palette: tokens.Palette, parent=None) -> None:
+        super().__init__(parent)
+        self.key = key
+        self._pal = palette
+        self.setText(label)
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setFixedSize(self.W, self.H)
+        self.setObjectName(f"ThemeChip_{key}")
+        self.setAccessibleName(f"테마: {label}")
+        self._kb_focus = False
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return QSize(self.W, self.H)
+
+    def paintEvent(self, e) -> None:  # noqa: N802
+        cur = tokens.current()
+        pal = self._pal
+        on = self.isChecked()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        painter.setPen(QPen(QColor(cur.primary), 2) if on else Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(pal.primary_soft if on else (cur.secondary_hover if self.underMouse() else cur.secondary)))
+        painter.drawRoundedRect(r, tokens.RADIUS_MD, tokens.RADIUS_MD)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(pal.primary_action))  # 버튼 면 색 = 앱에서 가장 많이 보이는 주색
+        cy = self.height() / 2
+        painter.drawEllipse(QPointF(26, cy), 10, 10)
+        painter.setPen(QColor(cur.text))
+        f = self.font()
+        f.setBold(on)
+        painter.setFont(f)
+        painter.drawText(QRectF(46, 0, self.width() - 54, self.height()), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), self.text())
+        if self._kb_focus:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(cur.primary), 2))
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), tokens.RADIUS_MD, tokens.RADIUS_MD)
+        painter.end()
+
+    def focusInEvent(self, e) -> None:  # noqa: N802
+        self._kb_focus = e.reason() in (
+            Qt.FocusReason.TabFocusReason,
+            Qt.FocusReason.BacktabFocusReason,
+            Qt.FocusReason.ShortcutFocusReason,
+        )
+        super().focusInEvent(e)
+        self.update()
+
+    def focusOutEvent(self, e) -> None:  # noqa: N802
+        self._kb_focus = False
+        super().focusOutEvent(e)
+        self.update()
+
+
+# --- Toast (§16.5) --------------------------------------------------------------------
+
+
+class Toast(QWidget):
+    """끝난 일의 확인 알림 (하단 중앙, 한 번에 1개). 오류·선택 필요·결과에는 쓰지 않는다 (배너/카드).
+
+    부모(중앙 위젯) 위에 떠 있고 리사이즈 때 다시 배치한다. 클릭하면 닫히고 포커스를 가져가지 않는다.
+    그림자는 paintEvent 로 3겹 (QGraphicsDropShadowEffect 금지 — 글자가 흐려진다).
+    """
+
+    MAX_W = 480
+    MARGIN = 24  # 그림자가 번질 여백
+    BOTTOM = 24  # 중앙 위젯 하단에서 띄우는 거리
+    PAD_X, PAD_Y = 20, 14
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("Toast")
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._text = ""
+        self._kind = "success"
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.dismiss)
+        parent.installEventFilter(self)
+        self.hide()
+
+    def message(self) -> str:
+        return self._text
+
+    def kind(self) -> str:
+        return self._kind
+
+    def show_message(self, text: str, kind: str = "success", ms: int = 2400) -> None:
+        """새 메시지는 기존 것을 즉시 교체한다. ms 뒤 자동으로 사라진다."""
+        self._text, self._kind = text, kind
+        self.setAccessibleName(text)
+        self._relayout()
+        self.show()
+        self.raise_()
+        self._timer.start(max(ms, 500))
+
+    def dismiss(self) -> None:
+        self._timer.stop()
+        self.hide()
+
+    def _icon_w(self) -> int:
+        return 24 if self._kind == "success" else 0
+
+    def _relayout(self) -> None:
+        fm = self.fontMetrics()
+        text_w = min(fm.horizontalAdvance(self._text), self.MAX_W - 2 * self.PAD_X - self._icon_w())
+        w = text_w + 2 * self.PAD_X + self._icon_w() + 2 * self.MARGIN
+        h = fm.height() + 2 * self.PAD_Y + 2 * self.MARGIN
+        self.resize(w, h)
+        self._reposition()
+
+    def _reposition(self) -> None:
+        par = self.parentWidget()
+        if par is None:
+            return
+        x = (par.width() - self.width()) // 2
+        y = par.height() - self.height() + self.MARGIN - self.BOTTOM
+        self.move(max(x, 0), max(y, 0))
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if obj is self.parentWidget() and event.type() == QEvent.Type.Resize and self.isVisible():
+            self._reposition()
+        return super().eventFilter(obj, event)
+
+    def pill_rect(self) -> QRectF:
+        m = self.MARGIN
+        return QRectF(m, m, self.width() - 2 * m, self.height() - 2 * m)
+
+    def paintEvent(self, e) -> None:  # noqa: N802
+        p = tokens.current()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pill = self.pill_rect()
+        painter.setPen(Qt.PenStyle.NoPen)
+        for grow, alpha in ((18, 4), (10, 6), (4, 9)):  # 바깥 → 안쪽, 겹칠수록 진해짐 (스펙 §16.4 의 3겹 근사)
+            c = QColor(0, 0, 0, alpha)
+            painter.setBrush(c)
+            r = pill.adjusted(-grow, -grow + 6, grow, grow + 6)
+            painter.drawRoundedRect(r, tokens.RADIUS + grow, tokens.RADIUS + grow)
+        painter.setBrush(QColor(p.toast_bg))
+        painter.drawRoundedRect(pill, tokens.RADIUS, tokens.RADIUS)
+        painter.setPen(QColor(p.toast_text))
+        x = pill.left() + self.PAD_X
+        if self._kind == "success":  # 흰 체크 글리프 (색 단독이 아니라 글자와 함께)
+            painter.setPen(QPen(QColor(p.toast_text), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+            cy = pill.center().y()
+            painter.drawPolyline([QPointF(x, cy), QPointF(x + 5, cy + 5), QPointF(x + 14, cy - 5)])
+            painter.setPen(QColor(p.toast_text))
+            x += self._icon_w()
+        text_w = pill.right() - self.PAD_X - x
+        elided = self.fontMetrics().elidedText(self._text, Qt.TextElideMode.ElideRight, int(text_w))
+        painter.drawText(QRectF(x, pill.top(), text_w, pill.height()), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), elided)
+        painter.end()
+
+    def mousePressEvent(self, e) -> None:  # noqa: N802
+        if self.pill_rect().contains(e.position()):
+            self.dismiss()
+            e.accept()
+        else:
+            e.ignore()
+
+
+# --- PageColumn (§16.4 간격) ----------------------------------------------------------
+
+
+class PageColumn(QWidget):
+    """페이지 본문을 최대 폭(840)으로 제한하고 가운데 정렬하는 컨테이너. 내용은 `body`(QVBoxLayout)에 넣는다.
+
+    폭이 800 미만이면 좌우 여백을 32 → 24 로 줄인다 (resizeEvent).
+    """
+
+    MAX_W = 840
+    NARROW_W = 800
+    MARGIN = 32
+    MARGIN_NARROW = 24
+    BOTTOM = 24
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addStretch(1)
+        self.column = QWidget()
+        self.column.setObjectName("page")
+        self.column.setMaximumWidth(self.MAX_W + 2 * self.MARGIN)
+        self.column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        outer.addWidget(self.column, 100)
+        outer.addStretch(1)
+        self.body = QVBoxLayout(self.column)
+        self._apply_margins(self.MARGIN)
+
+    def _apply_margins(self, m: int) -> None:
+        self.body.setContentsMargins(m, m, m, self.BOTTOM)
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        self._apply_margins(self.MARGIN_NARROW if self.width() < self.NARROW_W else self.MARGIN)
+
+
 # --- Banner (§5.6) ------------------------------------------------------------------
 
 
@@ -117,7 +506,7 @@ class Banner(QFrame):
         super().__init__(parent)
         set_class(self, "banner", "info")
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 12, 12, 12)
+        outer.setContentsMargins(16, 16, 16, 16)
         outer.setSpacing(tokens.SPACE // 2)
         head = QHBoxLayout()
         head.setSpacing(tokens.SPACE)
@@ -168,7 +557,7 @@ class Banner(QFrame):
             b.deleteLater()
         self._buttons = []
         for key, label in (actions or [])[:max_actions]:
-            b = QPushButton(label)
+            b = Button(label)
             set_class(b, "sm")
             b.clicked.connect(lambda _=False, k=key: self.action_clicked.emit(k))
             self.btn_row.addWidget(b)
@@ -234,12 +623,37 @@ class ElidedLabel(QLabel):
 # --- EmptyState (§5.11) ---------------------------------------------------------------
 
 
+class _IconCircle(QWidget):
+    """64px 원형 배경(primary_soft) + 28px 아이콘(primary_soft_text 로 재착색). 색은 그릴 때 현재 테마에서 읽는다."""
+
+    def __init__(self, icon_name: str, parent=None) -> None:
+        super().__init__(parent)
+        self._icon = icon_name
+        self.setFixedSize(64, 64)
+
+    def paintEvent(self, e) -> None:  # noqa: N802
+        p = tokens.current()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(p.primary_soft))
+        painter.drawEllipse(self.rect())
+        pm = svg_icon(self._icon, p.primary_soft_text, 28).pixmap(28, 28)
+        painter.drawPixmap(18, 18, pm)
+        painter.end()
+
+
 class EmptyState(QWidget):
-    def __init__(self, title: str, body: str = "", button: str | None = None, parent=None) -> None:
+    def __init__(self, title: str, body: str = "", button: str | None = None, parent=None, icon: str | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("EmptyState")
         lay = QVBoxLayout(self)
         lay.addStretch(1)
+        self.icon: _IconCircle | None = None
+        if icon:
+            self.icon = _IconCircle(icon)
+            lay.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignCenter)
+            lay.addSpacing(tokens.SPACE * 2)
         t = QLabel(title)
         t.setAlignment(Qt.AlignmentFlag.AlignCenter)
         set_class(t, "empty-title")
@@ -251,10 +665,11 @@ class EmptyState(QWidget):
             set_class(b, "empty-body")
             lay.addSpacing(tokens.SPACE)
             lay.addWidget(b)
-        self.button: QPushButton | None = None
+        self.button: Button | None = None
         if button:
-            self.button = QPushButton(button)
-            lay.addSpacing(tokens.SPACE * 2)
+            self.button = Button(button)
+            set_class(self.button, "primary")
+            lay.addSpacing(tokens.SPACE * 3)
             lay.addWidget(self.button, 0, Qt.AlignmentFlag.AlignCenter)
         lay.addStretch(1)
 
@@ -268,9 +683,14 @@ class LogView(QWidget):
     def __init__(self, qsettings=None, key: str = "log/expanded", parent=None) -> None:
         super().__init__(parent)
         self.qs, self.key = qsettings, key
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(tokens.SPACE // 2)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        card = QFrame()  # 로그 전체를 카드로 (스펙 §16.5): 머리글 행 + 회색 필드
+        set_class(card, "card")
+        outer.addWidget(card)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2)
+        lay.setSpacing(tokens.SPACE)
         head = QHBoxLayout()
         self.toggle = QToolButton()
         self.toggle.setObjectName("LogToggle")
@@ -279,8 +699,8 @@ class LogView(QWidget):
         self.toggle.toggled.connect(self._toggled)
         head.addWidget(self.toggle)
         head.addStretch(1)
-        self.clear_btn = QToolButton()
-        self.clear_btn.setText("지우기")
+        self.clear_btn = Button("지우기")
+        set_class(self.clear_btn, "link")
         self.clear_btn.clicked.connect(self.clear)
         head.addWidget(self.clear_btn)
         lay.addLayout(head)
@@ -310,7 +730,7 @@ class LogView(QWidget):
         stamp = datetime.now().strftime("%H:%M:%S")
         ts = f"<span style='font-family:{tokens.FONT_MONO}'>{stamp}</span>"
         if error:
-            self.text.appendHtml(f"<span style='color:{tokens.LIGHT.error_text}'>{ts}  {_esc(msg)}</span>")
+            self.text.appendHtml(f"<span style='color:{tokens.current().error_text}'>{ts}  {_esc(msg)}</span>")
         else:
             self.text.appendHtml(f"{ts}  {_esc(msg)}")
         if not self.toggle.isChecked():
@@ -343,7 +763,7 @@ class _BackgroundDelegate(QStyledItemDelegate):
         super().paint(painter, opt, index)
         if selected and index.column() == 0:  # 선택 표시: 행 왼쪽 2px primary 세로선 (diff 색을 덮지 않게, 스펙 §5.9)
             r = option.rect
-            painter.fillRect(r.left(), r.top(), 2, r.height(), QColor(tokens.LIGHT.primary))
+            painter.fillRect(r.left(), r.top(), 2, r.height(), QColor(tokens.current().primary))
 
 
 class DiffView(QTableWidget):
@@ -378,7 +798,7 @@ class DiffView(QTableWidget):
 
     def set_rows(self, rows: list[tuple[str, str | None, str | None]]) -> int:
         """행을 채우고 첫 불일치 행 인덱스(없으면 -1)를 돌려준다. 첫 불일치 행으로 스크롤·선택."""
-        p = tokens.LIGHT
+        p = tokens.current()
         colors = {"same": QColor(p.diff_same), "changed": QColor(p.diff_changed), "missing": QColor(p.diff_missing), "extra": QColor(p.diff_extra)}
         shown = rows[: self.MAX_ROWS]
         self.setRowCount(len(shown) + (1 if len(rows) > self.MAX_ROWS else 0))

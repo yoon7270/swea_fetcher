@@ -15,7 +15,11 @@ a = Analysis(
     [str(ROOT / "packaging" / "launch_gui.py")],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[(str(PKG / "gui" / "theme" / "icons"), "swea_fetcher/gui/theme/icons")],
+    datas=[
+        (str(PKG / "gui" / "theme" / "icons"), "swea_fetcher/gui/theme/icons"),
+        # Pretendard 400/700 + OFL 라이선스 (M21, 원본 무수정). 없으면 앱은 Malgun Gothic 폴백으로 실행
+        (str(PKG / "gui" / "theme" / "fonts"), "swea_fetcher/gui/theme/fonts"),
+    ],
     hiddenimports=[
         "keyring.backends.Windows",
         "keyring.backends.chainer",

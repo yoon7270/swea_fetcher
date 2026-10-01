@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QDialog, QFormLayout, QHBoxLayout, QLabel, QLineEd
 
 from .. import gitops, service, storage
 from ..config import Settings
-from .widgets import set_class
+from .widgets import Button, set_class
 
 
 class PushDialog(QDialog):
@@ -57,9 +57,9 @@ class PushDialog(QDialog):
 
         btns = QHBoxLayout()
         btns.addStretch(1)
-        self.cancel_btn = QPushButton("취소")
-        self.commit_btn = QPushButton("커밋만")
-        self.push_btn = QPushButton("커밋 + 푸시")
+        self.cancel_btn = Button("취소")
+        self.commit_btn = Button("커밋만")
+        self.push_btn = Button("커밋 + 푸시")
         set_class(self.push_btn, "primary")
         self.push_btn.setEnabled(bool(repo.remote))
         if not repo.remote:

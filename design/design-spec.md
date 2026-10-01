@@ -2,6 +2,8 @@
 
 기준 문서: `docs/m4-work-order.md` §4·§5. 토큰 파일: `swea_fetcher/gui/theme/tokens.py` (이 문서 §2 와 1:1 — `Palette` 필드명은 builder 의 것을 따르고, 스펙 이름과의 대응은 §2.1 표 괄호 참고). QSS: `tokens.build_qss()` 가 생성 (별도 `.qss` 파일 없음). 목업: `design/mockups/index.html` (브라우저로 열기). 아이콘: `design/icons/`.
 
+> **M21 (§16 토스 스타일 리프레시) 이 이 문서의 §1 "그림자·애니메이션 없음", §2 색·글꼴·간격·라운드 값, §3 "페이지 전환 즉시 / 토스트 없음", §5 컴포넌트 치수를 대체한다. 충돌 시 §16 이 우선. §16 에서 언급하지 않은 규칙(셀렉터 계약 §13, 키보드 §10, 오류 매핑 §9, 폼 UX §8)은 그대로 유효.**
+>
 > 이 문서에 없는 값은 쓰지 않는다. 형용사 대신 토큰 이름과 px 로 말한다. 구현 중 스펙과 충돌하면 코드에 `# 스펙 대체안:` 주석을 남기고 이 문서 §15 에 항목을 추가한다.
 
 ---
@@ -632,5 +634,401 @@ HiDPI: 모든 값 px 토큰 → Qt 가 DPR 로 스케일. SVG 아이콘만 사�
   7. **상태바 진행 메시지**: 워커 progress 를 로그 + `statusBar().showMessage(4s)` 로 그대로 전달 (스펙 §5.5).
   8. **builder QSS 보강** (`gui/app.py::_builder_supplement`): `QFrame#Sidebar`, 드롭 중 카드 테두리 `[state="drop"]`, 미리보기 블록 `QLabel#preview`. 색은 토큰만 사용.
   - 실제 렌더링 캡처: `docs/gui-screenshots/*.png` (offscreen + Windows 글꼴). 디자이너 확인 요청.
+
+---
+
+## 16. M21 토스 스타일 리프레시
+
+**요청**: "전체적인 디자인이나 애니메이션을 개선, 토스(Toss) 앱 같은 깔끔한 UI". 기존 규칙은 §1~§15 가 유효하되 값·치수는 이 절이 덮어쓴다. 토스의 **브랜드 자산(로고·아이콘·일러스트)은 쓰지 않고** 시각 원칙(여백·위계·무테 카드·큰 숫자·부드러운 동작)만 참고한다.
+
+### 16.1 방향 (한 문장)
+
+**"회색 바닥 위에 흰 카드 한 장씩, 한 화면에 질문 하나·행동 하나"** — 테두리 대신 면의 명도 차(`#F2F4F6` 바닥 / `#FFFFFF` 카드)로 층을 만들고, 굵은 큰 제목과 큰 숫자로 위계를 만들며, 상태 변화는 120~250ms 짧은 ease-out 으로 알린다.
+
+근거 (바뀌는 이유)
+- 현재는 모든 박스가 1px 테두리 + 6px 라운드라 "카드 안의 카드 안의 박스"(검증 탭 AI 코치 패널)가 겹쳐 보이고, 글자 위계가 크기 3단계(13/15/17px)뿐이라 어디부터 읽을지 모호하다.
+- 이 앱의 핵심 장면은 "번호 입력 → 저장" 한 동작(3~10초)이다. 토스식 "큰 입력 + 큰 CTA 하나"가 그대로 맞는다. 밀도가 필요한 곳(로그, 설정, diff)은 카드 안에서 유지한다.
+- 사용자(= 이 앱 주인)의 직접 요청. 단, 접근성(AA)은 양보하지 않는다 — 토스 원색 `#3182F6` 위 흰 글자는 3.7:1 이라 **글자가 얹히는 버튼은 한 단계 진한 `primary_action` 을 쓴다**(§16.2 결정 D1).
+
+### 16.2 결정 요약
+
+| # | 결정 | 이유 |
+|---|---|---|
+| D1 | 주색 이원화: `primary #3182F6`(글자 없는 면·링·차트·토글) + `primary_action #1F6FE8`(흰 글자가 얹히는 버튼 면, 4.66:1) | AA. 정확히 토스 파랑을 버튼에도 쓰려면 버튼 글자를 17pt bold 이상(큰 글자 3:1)으로 키워야 해 비현실적. 시각 차이는 미미 |
+| D2 | **Pretendard 번들** (Regular 400 + Bold 700, 원본 무수정) — §16.3 | 한글 가독성·숫자 모양이 토스 느낌의 절반. Malgun Gothic 은 폴백으로 유지 |
+| D3 | 카드 그림자 **사용 안 함** (무테 + 명도 차). 그림자는 토스트만, `paintEvent` 로 직접 그림 | QSS 는 box-shadow 미지원, `QGraphicsDropShadowEffect` 는 자식 글자를 래스터화(ClearType→회색조)해 흐려지고 스크롤 영역에서 느림 |
+| D4 | 라이트 전용 유지. 다크는 **이번 범위 밖** (토큰 이름만 대비) — §16.14 | 팔레트 2벌 검증·캡처가 마일스톤 하나 분량. 새 위젯이 색을 `Palette` 에서만 읽게 해 두면 나중에 `DARK` 만 채우면 됨 |
+| D5 | 내비 선택 = 둥근 알약 배경이 **슬라이드 이동** (색 띠·밑줄 아님) | 토스식 + 애니메이션 요구. 모션 off 면 즉시 이동 |
+| D6 | 즉시 반영되는 "켜기/끄기" 체크박스 → **토글 스위치**, 폼의 일회성 옵션은 **원형 체크박스** 유지 | 토글 = "지금 상태가 바뀐다", 체크 = "이번 실행에만 적용" 의미 구분 |
+| D7 | 성공·확인 알림 = **토스트** 신설. 오류·선택 필요·결과 = 기존 **배너 유지**(조치 버튼이 있으므로). §3 "토스트 없음" 폐기 | 토스트는 사라지므로 조치가 필요한 정보에 부적합 |
+| D8 | 동작 줄이기: OS 설정(Windows 애니메이션 효과) 자동 존중 + 설정 체크박스 + 환경변수. 테스트는 기본 off | §16.9 |
+| D9 | 풀이 잔디 기본색은 **초록 유지** (파랑으로 바꾸지 않음) | "잔디"=초록이라는 은유, 기존 사용자 저장값·테스트 보존. 파랑은 기존 프리셋에 있음 |
+| D10 | 창 기본 880×600 / 최소 720×480 유지. 사이드바 148→**160** | 컨트롤이 커져 폭 여유가 줄어 최소 증가분만 |
+
+### 16.3 글꼴
+
+**결정: Pretendard 번들 (Regular 400 · Bold 700 두 파일).** 이전 §2.2 의 "번들 안 함" 결정을 폐기한다.
+
+| 항목 | 내용 |
+|---|---|
+| 라이선스 | SIL OFL 1.1. 앱에 번들·재배포 허용(폰트 단독 판매만 금지). 조건: 라이선스 전문 동봉, **원본 무수정**(서브셋·이름 변경 금지 — Reserved Font Name 때문. 구현 시 저장소 `LICENSE.txt` 로 RFN 문구 재확인) |
+| 용량 | 정적 OTF 1개 약 1.5~2MB → 2개 약 3~4MB (구현 시 실측해 이 문서에 기입). 현재 onefile exe 의 PySide6 본체 대비 한 자리 % 증가 |
+| 왜 전체 글리프 | 문제 지문·AI 답변이 임의 한글을 렌더링하므로 완성형 11,172자 필요 → GOV/서브셋 불가 |
+| 왜 2웨이트 | Windows·Qt 에서 SemiBold 가 별도 패밀리명("Pretendard SemiBold")으로 등록돼 `font-weight:600` 이 안 먹는 사례가 있다. 400/700 만 쓰면 Malgun 과 같은 선택 로직이라 안전. 가변(Variable) 폰트도 같은 이유로 제외 |
+| 위치 | `swea_fetcher/gui/theme/fonts/Pretendard-Regular.otf`, `Pretendard-Bold.otf`, `Pretendard-LICENSE.txt` |
+| 로딩 | `gui/theme/fonts.py::load_fonts()` — `QApplication` 생성 직후·QSS 적용 전, `QFontDatabase.addApplicationFont`. 실패해도 예외 없이 로그 한 줄 후 폴백(앱은 계속 동작) |
+| 폴백 체인 | `FONT_FAMILY = '"Pretendard", "Malgun Gothic", "Segoe UI", sans-serif'` — 롤백 = 폰트 파일·로딩 호출 제거만 |
+| PyInstaller | `packaging/swea-fetch-gui.spec` 의 `datas` 에 `(str(PKG/"gui"/"theme"/"fonts"), "swea_fetcher/gui/theme/fonts")` 추가 (아이콘과 같은 방식, `Path(__file__).parent` 기준 경로가 onefile 에서도 동작). 빌드 후 exe 에서 한글 렌더·두 웨이트 차이 육안 확인 |
+| 고정폭 | 변경 없음 (Consolas 등). 한글 문장 mono 금지 규칙(§2.2) 유지 |
+| 가중치 규칙 | 400 / 700 두 개뿐. QSS 에서 `font-weight: 600` 금지 → `700` 또는 생략 |
+| 숫자 정렬 | Qt 6 QSS 에 `tnum` 지정 수단이 없다. 카운트업·타이머 라벨은 **우측 정렬 + 최소 폭 고정**(예: 4자리 폭)으로 흔들림 방지 |
+
+### 16.4 디자인 토큰 (LIGHT, `tokens.py` 갱신값)
+
+**색** (`Palette` 필드명 유지, 신규 필드는 기본값 부여해 기존 생성 코드 호환)
+
+| 토큰 (필드) | 값 | 용도 |
+|---|---|---|
+| `bg` | `#F2F4F6` | 창·페이지 바닥 (토스 grey100) |
+| `bg_subtle` (신규) | `#F9FAFB` | 표 hover, 카드 안 보조 면, AnswerBrowser 배경 |
+| `surface` | `#FFFFFF` | 카드·사이드바 |
+| `surface_alt` | `#F2F4F6` | 입력창 채움, 로그 필드, 표 머리글 없음, 0단계 잔디, 스켈레톤 기본 |
+| `border` | `#E5E8EB` | 구분선(표 행, 카드 내 divider)만. 카드 외곽선은 **없음** |
+| `border_strong` | `#D1D6DB` | 스크롤바 핸들, 차트 비선택 막대, 스켈레톤 하이라이트 |
+| `control_border` (신규) | `#8B95A1` | 체크박스·라디오 미선택 테두리(2px) |
+| `text` | `#191F28` | 제목·본문 1단계 |
+| `text_2` | `#4E5968` | 2단계: 레이블, 보조 설명, 로그 본문 |
+| `text_3` | `#636E7C` | 3단계: 힌트, 표 머리글, 상태바. **토스 `#8B95A1` 대신** (아래 대비표: `#8B95A1` 는 회색 바닥 위 2.7:1 로 AA 불가) |
+| `text_placeholder` (신규) · `text_disabled` | `#8B95A1` | 플레이스홀더·비활성·장식 글자 전용 (AA 예외 — 모든 입력은 위에 보이는 레이블이 있어 플레이스홀더는 예시일 뿐) |
+| `primary` | `#3182F6` | 포커스 링, 진행 막대, 토글 ON, 체크 원, 차트 선택, 스피너 (글자 없는 면) |
+| `primary_action` (신규) | `#1F6FE8` | primary 버튼 면 (흰 글자 4.66:1) |
+| `primary_hover` / `primary_pressed` | `#1B64DA` / `#1957C2` | primary 버튼 hover/pressed |
+| `primary_text` | `#FFFFFF` | primary 버튼 글자 |
+| `primary_soft` / `primary_soft_text` | `#E8F3FF` / `#1957C2` | 내비 선택 알약, info 배너, tonal 버튼, running 배지 (5.9:1) |
+| `primary_soft_hover` / `_pressed` (신규) | `#D3E8FF` / `#C0DDFF` | tonal 버튼 |
+| `secondary` / `_hover` / `_pressed` (신규) | `#F2F4F6` / `#E5E8EB` / `#D1D6DB` | 회색 보조 버튼 (글자 `#333D4B`, 9.9:1). **카드 안에서만** 사용 — 바닥(`bg`) 위에서는 같은 색이라 안 보이므로 tonal/link 사용 |
+| `success` / `_bg` / `_text` | `#0A9B5E` / `#E6F8F0` / `#00794A` | 아이콘·점 / 배너·배지 면 / 면 위 글자 |
+| `warning` / `_bg` / `_text` | `#D97800` / `#FFF4E0` / `#8A5100` | 〃 |
+| `error` / `_bg` / `_text` | `#F04452` / `#FFEEEE` / `#C62B38` | 〃 (invalid 입력 2px 테두리는 `error`) |
+| `toast_bg` / `toast_text` (신규) | `#333D4B` / `#FFFFFF` | 토스트·툴팁 (11:1) |
+| `diff_*` | same `#FFFFFF` / changed = `warning_bg` / missing = `error_bg` / extra = `primary_soft` | 기존 규칙 유지 |
+
+대비 검증 (계산값, WCAG AA 4.5:1 글자 / 3:1 그래픽)
+
+| 조합 | 비율 | 판정 |
+|---|---|---|
+| `text` on `surface` / on `bg` | 16.6 / 14.9 | OK |
+| `text_2` on `surface` / `bg` | 7.1 / 6.4 | OK |
+| `text_3 #636E7C` on `surface` / `bg` | 5.2 / 4.7 | OK (가장 약한 조합 — 이보다 연한 글자 금지) |
+| (참고) 토스 `#8B95A1` on `bg` | 2.7 | **불가** → `text_placeholder` 전용 |
+| `primary_text` on `primary_action` | 4.66 | OK |
+| (참고) 흰 글자 on `#3182F6` | 3.7 | 글자 불가, 그래픽 OK |
+| `primary` 링/면 on `surface` | 3.7 | 그래픽 3:1 OK |
+| `primary_soft_text` on `primary_soft` | 5.9 | OK |
+| `success_text` on `success_bg` / `warning_text` on `warning_bg` / `error_text` on `error_bg` | 5.0 / 5.9 / 4.9 | OK |
+| 토스트 `toast_text` on `toast_bg` | 11 | OK |
+| 입력 채움 `surface_alt` on `surface` 경계 | 1.1 | **수용된 예외** — 레이블이 항상 보이고, 포커스 시 2px `primary`(3.7) 링, 오류 시 `error` 링 + 문구 |
+| 토글 OFF 트랙 `#B0B8C1`, 체크 원 | — | 의미는 손잡이 위치·체크 글리프·옆 레이블로도 전달 (색 단독 아님) |
+
+**글꼴 크기·굵기** (pt, 96dpi px 환산)
+
+| 토큰 | pt (px) | 굵기 | 용도 |
+|---|---|---|---|
+| `FONT_SIZE_XS` | 9 (12) | 400 | 배지(700), 상태바, 표 머리글, 차트 축 |
+| `FONT_SIZE_SM` | 10 (13) | 400 | 힌트, 로그, 배너 본문, 표 본문 보조 |
+| `FONT_SIZE` | 10.5 (14) | 400 | 본문, 입력, 버튼, 내비, 표 본문 |
+| `FONT_SIZE_MD` | 12 (16) | 700 | 카드 제목, 섹션 제목, 앱 이름, 큰 입력(번호) 글자 |
+| `FONT_SIZE_LG` | 17 (≈23) | 700 | 페이지 제목 |
+| `FONT_SIZE_XL` (신규) | 22 (≈29) | 700 | 숫자 강조(잔디 N문제, 지표 값, 리포트 주간 Pass) |
+
+굵기는 400 / 700 두 값만. 본문 줄 간격은 지문·AI 답변 CSS 에서 `line-height:150%`(Qt rich text 지원 부분집합), 일반 라벨은 Qt 기본.
+
+**간격 (4 스케일 확장)**: 4 · 8 · 12 · 16 · 20 · 24 · 32 · 40. (`SPACE`=8 의 배수 + `SPACE*5/2`=20, `SPACE*5`=40 허용 — 20·40 이 신규)
+
+| 용도 | 값 |
+|---|---|
+| 페이지 좌우·상단 여백 | 32 (너비 < 800 이면 24) / 하단 24 |
+| 페이지 제목 ↔ 첫 카드 | 24 |
+| 카드 ↔ 카드 | 16 |
+| 카드 내부 패딩 | 24 (너비 < 800 이면 20) |
+| 섹션 제목(밖) ↔ 카드 | 12, 섹션 ↔ 섹션 32 |
+| 폼 행 ↔ 행 | 20, 레이블 ↔ 입력 8 (레이블은 입력 **위**) |
+| 버튼 사이 | 8 (CTA 줄) |
+| 내용 최대 폭(`PageColumn`) | 840, 가운데 정렬 (저장·검증·성장·설정). 최근·문제 페이지는 전폭 |
+
+**라운드·선·그림자**
+
+| 토큰 | 값 | 용도 |
+|---|---|---|
+| `RADIUS_SM` | 8 | 작은 버튼(sm), 칩, 툴팁, 표 행 hover, 배지 내부 막대 |
+| `RADIUS_MD` | 12 | 입력, 버튼, 내비 알약, 배너, 로그 필드, AnswerBrowser, 토스트 |
+| `RADIUS` (카드) | 16 | 카드, 표 컨테이너, 탭 pane 안 패널 |
+| `RADIUS_PILL` | 999 | 배지, 토글, 원형 체크(반지름 11) |
+| 잔디 칸 | 3 | (기존 2) |
+| 테두리 | 카드·버튼·입력 **없음**. 구분선 1px `border`. 포커스 링 2px `primary`(입력·버튼), 체크박스·토글은 외곽 2px `primary` 링 |
+| 그림자 | 카드 없음. 토스트만 `paintEvent` 로 3겹 둥근 사각(alpha 10/6/3%, 확장 4/10/18px, y오프셋 6). QGraphicsDropShadowEffect **금지** |
+
+**컨트롤 크기**
+
+| 토큰 | px |
+|---|---|
+| `CONTROL_H` (입력·기본 버튼) | 44 |
+| `CONTROL_H_LG` (신규: 번호 입력, 페이지 CTA) | 52 |
+| `CONTROL_H_SM` (배너·표 안 버튼) | 36 |
+| `NAV_ITEM_H` | 44 (항목 사이 gap 4, 알약 좌우 8 마진) |
+| `SIDEBAR_W` | 160 |
+| 표 행 높이 | 52 (최근), 44 (diff) |
+| 상태바 높이 | 32 |
+| `PROGRESS_H` | 4 (라운드 2) |
+| 토글 | 44×26, 손잡이 20 |
+| 원형 체크/라디오 | 22 |
+| 아이콘 | 내비 20, 인라인 16, 빈 상태 원형 배경 64 (아이콘 28) |
+
+최소 클릭 대상: 어떤 컨트롤도 높이 36 미만 금지(아이콘 전용 28×28 예외 유지).
+
+### 16.5 컴포넌트별 변경
+
+공통: 위젯 코드에 색 리터럴·`setStyleSheet` 금지(§13) 유지. 새 커스텀 페인팅 위젯(`Button`, `Toggle`, `Toast`, `Spinner`, `Skeleton`)도 색은 `tokens.LIGHT`(나중엔 현재 팔레트)에서만 읽는다.
+
+**앱 셸·사이드 내비**
+- 사이드바: `surface`, **우측 border 제거**(바닥 `bg` 와의 명도 차로 분리). 앱 이름 `md` 700, 패딩 24/24/16/24.
+- 항목: 높이 44, 아이콘 20 + 글자 `base`, 좌우 패딩 12, 알약 라운드 12, 비선택 글자 `text_2` / 아이콘 `text_2`, hover 배경 `secondary`(#F2F4F6) · 글자 `text`.
+- 선택: 알약 배경 `primary_soft`, 글자·아이콘 `primary_soft_text` 700. **알약은 이동한다**(§16.7 A2): `NavDelegate` 가 항목 사각형과 "움직이는 알약 사각형"의 교집합을 칠한다(항목 간 gap 은 항목 rect 안 투명 여백으로 처리해 이동 중 끊기지 않게). 모션 off 면 즉시 현재 항목에 칠함.
+- 키보드 포커스: Fusion 점선 유지가 아니라 **2px `primary` 라운드 12 링**을 델리게이트가 그림(`State_HasFocus` 일 때, 마우스 선택 시엔 안 그림). §10 "outline 0 금지" 의도(포커스 위치 가시)는 동일.
+
+**버튼** — `widgets.Button(QPushButton)` 서브클래스로 교체(기존 `QPushButton(` 생성부 치환; `QPushButton` 상속이라 테스트의 `findChildren(QPushButton)`·클릭 시뮬레이션은 영향 없음). 배경·포커스 링은 `paintEvent` 가 직접 그려 **hover/pressed 색 보간과 pressed 축소**를 가능하게 하고, 글자·아이콘·패딩·최소 크기는 QSS 가 담당(QSS 에서는 `background: transparent; border: none`).
+
+| class | 높이 | 면(default / hover / pressed) | 글자 | 비고 |
+|---|---|---|---|---|
+| `primary` | 52(`lg` 페이지 CTA) 또는 44 | `primary_action` / `primary_hover` / `primary_pressed` | `primary_text` 700 | 페이지당 1개 규칙 유지. 최소 폭 96, 저장 CTA 는 가로로 늘어남(stretch 2 : 보조 1) |
+| (기본) secondary | 44 | `secondary` / `_hover` / `_pressed` | `#333D4B` | 카드 안 전용 |
+| `tonal` (신규) | 44 | `primary_soft` / `_hover` / `_pressed` | `primary_soft_text` 700 | 바닥 위 버튼, AI 코치 제안 버튼([코드 평가 받기], [힌트], [정답 풀이 보기]) |
+| `danger` | 44 | `error_bg`(저면 투명 → hover 시 `error_bg`) | `error_text` | 텍스트형 위험 버튼. pressed `#FFDDDD` |
+| `link` | 자동 | 투명 / `secondary` / `secondary_hover` | `primary_soft_text` | 라운드 8, 패딩 4×8 |
+| `sm` | 36 | 위 variant 에 동일 | `sm` 크기 | 배너 안 버튼, 표 안 |
+| disabled | — | primary: `border` `#E5E8EB`, 그 외 `bg_subtle` | `text_disabled` | primary disabled 도 면 유지(사라지지 않음) |
+| busy | — | 비활성 + 왼쪽 `Spinner`(16px, 글자색) + 기존 "저장 중…" 라벨 | | `Button.set_busy(bool)` |
+
+- 라운드 12(sm 은 8). 포커스 링 2px `primary`, 면에서 2px 바깥(오프셋)으로 그려 크기 유지(QSS padding 1px 보정 불필요 → §13 의 보정 규칙 폐기).
+- pressed: 면이 중심 기준 **0.97 배 축소**(그림만, 위젯 영역 불변), release 시 복귀.
+
+**입력 (QLineEdit/QComboBox/QSpinBox)**
+- 채움 `surface_alt`, 테두리 없음(투명 2px 로 두께 확보), 라운드 12, 높이 44, 글자 `base`, 좌우 패딩 16, 플레이스홀더 `text_placeholder`.
+- hover: 채움 `#E5E8EB`. focus: 채움 `surface`(흰) + 2px `primary` 테두리 (카드 안에서 떠 보임). invalid: 2px `error` 테두리 + 하단 `error` 문구(§8 유지, 문구는 `error_text`). disabled: 채움 `bg_subtle`, 글자 `text_disabled`.
+- 번호 입력 `QLineEdit[class="mono"]`: 높이 52, 글자 `md`(mono 유지). 레이블은 입력 **위**(QFormLayout `WrapAllRows` — 폼 레이아웃 구조는 유지하고 정책만 변경).
+- 콤보 팝업: 흰 배경, 라운드 12, 항목 높이 40, 선택 `primary_soft`, 테두리 없음.
+
+**체크박스·토글·라디오**
+- 폼의 일회성 옵션(덮어쓰기·뼈대만·색인 새로고침, 비밀번호 표시): 원형 체크 22px — 미선택 2px `control_border` 테두리 흰 면, 선택 `primary` 채움 + 흰 체크(`check-white.svg`), 글자 `base`, 간격 8.
+- **토글** (`widgets.Toggle(QCheckBox)` 서브클래스, 기존 objectName·`toggled`·`isChecked` 유지): 설정 페이지의 즉시 저장 옵션(성장 기록 사용, 주간 AI 코멘트 자동 생성, GitHub 자동 동기화 켜기, 동작 줄이기). 행 = 글자(왼쪽) + 스위치(오른쪽, 44×26 · OFF 트랙 `#B0B8C1`, ON 트랙 `primary`, 흰 손잡이 20). 손잡이 이동 180ms(§16.7). 키보드 Space, 포커스 2px 링.
+- 라디오(범위): 원형 22px 동일 문법(선택 시 안쪽 흰 점 8px + 면 `primary`). 시점 같은 다중 선택은 체크박스.
+
+**카드 (`QFrame[class=card]`)**: 면 `surface`, 테두리 **없음**, 라운드 16, 패딩 24. 드롭 상태(`state=drop`)는 2px `primary` 테두리 + 면 `primary_soft`. 카드 안 카드 금지 — 하위 패널은 `surface_alt`/`bg_subtle` 면 + 라운드 12(테두리 없음).
+
+**배너 (Banner, 유지)**: 테두리 제거, 면 `*_bg`(info = `primary_soft`), 라운드 12, 패딩 16, 아이콘 20 + 제목 `base` 700 `*_text` + 본문 `sm` `text_2`, 조치 버튼 `sm`(secondary 대신 면 `surface` 흰 + 글자 `*_text`, hover `bg_subtle`). 닫기 ✕ 는 `QToolButton` 28×28. 등장 = 페이드 180ms(§16.7).
+
+**토스트 (신설 `widgets.Toast`)**
+- 용도: 끝난 일의 확인(폴더를 열었습니다, 로그를 지웠습니다, 복사했어요, 설정을 저장했어요 등 현재 `statusBar().showMessage` 로 내던 성공성 메시지). **오류·선택 필요·결과는 토스트 금지**(배너/카드).
+- 모양: 중앙 창 하단 중앙, 상태바 위 24px 띄움, 면 `toast_bg`, 글자 `toast_text` `base`, 라운드 16, 패딩 14×20, 최대 폭 480(넘으면 elide), 선택적 왼쪽 상태 아이콘 16(success 아이콘 흰색). 그림자 §16.4.
+- 동작: 한 번에 1개(새 메시지는 기존 것을 즉시 교체), 표시 2400ms(경고성은 4000), 클릭하면 닫힘, 포커스를 가져가지 않음. 등장/퇴장 §16.7.
+- API: `MainWindow.notify(message, kind="success", ms=2400)` — **토스트와 함께 기존 `statusBar().showMessage(message, ms)` 도 그대로 호출**한다(스크린리더 접근·기존 테스트 호환). 진행 중 메시지("지문 가져오는 중…")는 토스트 없이 상태바만.
+
+**배지**: pill(999), 패딩 4×10, `xs` 700, 면/글자는 `*_bg`/`*_text`, idle = `surface_alt`/`text_2`. 항상 글자 포함(§10).
+
+**표 (최근 탭, QTableWidget)**: 컨테이너 면 `surface` 라운드 16 무테(바깥 padding 8). 머리글: 면 투명, 글자 `text_3` `xs` 700, 하단 구분선 없음, 높이 36. 행 높이 52, 구분선 1px `border`(좌우 16 안쪽 인셋은 QSS 로 불가 → 전폭 선 허용), hover `bg_subtle`, 선택 `primary_soft`, 번호 열 700. "새로고침"은 바닥 위이므로 `tonal` 으로. "복습" 카드 항목은 행 형태(링크 버튼 + 상태 글자)·✕ 유지. 안내 한 줄("클릭 = …")은 표 **아래** `hint` 로 이동하지 않고 제목 아래 유지(레이아웃 불변).
+
+**탭 (QTabWidget, 검증 결과)**: 탭 바 = 글자만(`base`), 비선택 `text_3`, 선택 `text` 700 + 하단 3px `text` 밑줄(라운드 2), hover `text_2`. **pane 은 면 투명·테두리 없음**(현재 흰 외곽이 EnginePane 카드와 이중 박스를 만듦 — 가장 눈에 띄는 개선점). 탭 사이 gap 20.
+
+**로그 영역 (LogView)**: 로그 전체를 카드(`class=card`, 패딩 16)로 감싸고, 머리글 행 = 토글 "▼ 로그"(`md`) + 오른쪽 텍스트형 "지우기"(`link`, `sm`). 본문 `QPlainTextEdit#log` 는 면 `surface_alt`, 테두리 없음, 라운드 12, 패딩 16, `sm` `text_2`, 줄 간격 150%. 비었을 때 안내 "진행 로그가 여기에 표시됩니다" 는 `text_placeholder`가 아니라 `text_3`. 기본 높이 140(변경 없음).
+
+**상태바**: 면 `bg`(바닥과 동일), 상단 border 제거, 높이 32, 글자 `xs` `text_3`. 로그인 점 라벨: ● `success`(점)+ "로그인됨" `success_text` / ○ `text_3`. 경로 라벨은 그대로. 복습·성장 배지(`link`)는 `tonal` pill 형(`primary_soft`, 라운드 999, 높이 24).
+
+**코치 바 (CoachBar)**: 카드(무테). 문장 `base` `text`(기존 muted → 본문 승격), 버튼은 `tonal`. 문장 앞 16px 전구/체크 아이콘은 추가하지 않는다(범위 밖).
+
+**코치 답변 패널 (EnginePane)**: 카드(무테 16). 머리글 = 엔진 이름 `md` 700 + 메타 `xs` `text_3` + 캐시 배지, 오른쪽 `sm` secondary [다시 받기]. 본문 `AnswerBrowser`: 면 `bg_subtle`, 테두리 없음, 라운드 12, 패딩 16(두 번째 카드 안 박스 대신 **면 구분**). 답변 CSS(`build_statement_css`): h1 `md`(16px) 700, h2 `base`+ 700 15px, h3 14px 700, 본문 14px·`line-height:150%`, 코드 블록 면 `surface_alt` 라운드 불가 → 면+패딩만, 표 테두리 `border`. 로딩 패널은 §16.7 의 스켈레톤.
+
+**성장 탭**
+- 풀이 잔디 카드: 제목 한 줄에 숫자 강조 — "지난 1년간 **178**문제 해결" 에서 숫자만 `xl` 700 `primary_soft_text`, 나머지 `md` 700 `text`(한 라벨에 rich text 한 줄, `#GrowthHeatTitle` 유지, 접근성 이름은 평문). 격자 칸 라운드 3, gap 3, 0단계 `surface_alt`, 요일·월 라벨 `xs` `text_3`. 오늘 칸 테두리 1.5px `text`, 선택 칸 2px `primary`(기존 유지). 범례 `xs`.
+- 리포트 헤더 카드: 주간 범위 `md` 700, 오른쪽 배지. 그 아래 **큰 숫자 줄**: "Pass N문제"(N `xl` 700) + 변화 `sm`("▲ 지난 주보다 +2" `success_text` / "▼ …" `warning_text` / 글자 병기 유지). "좋아진 점/지켜볼 점/약점" 섹션 라벨 `base` 700, 항목은 "·" 대신 6px `*` 색 점 + `base` `text_2`(색 점 + 글자 두 가지로 의미 전달).
+- AI 코멘트 카드: 제목 `md` 700 + `xs` 메타. 본문 `AnswerBrowser`(위 규칙). 상태 문구는 `text_2`.
+- 지표 카드 "이번 주 숫자": **타일 그리드**가 목표 — 2열(< 560px 1열) 타일(면 `bg_subtle`, 라운드 12, 패딩 16): 이름 `sm` `text_3` → 값 `xl` 700 → 변화 `xs` 글자+화살표 → `SparkLine`(우하단 96×24). `BarChart` 는 타일 위 전폭(높이 120→140), 막대 위쪽 모서리 라운드 4, 비선택 `border_strong`, 선택 `primary`. 구현 부담이 크면 **대체안**: 기존 행 레이아웃 유지 + 값 라벨만 `xl`→`md` 700 으로(구조 변경 0). 기존 테스트가 행 구조에 의존하므로 builder 가 판단(§16.11 M21-D 단계에서 결정, 기준 문서에 기록).
+- 강점·약점 카드: `RateBar` 높이 8→10, 라운드 5, 트랙 `surface_alt`, 막대 `primary`(약점은 `warning`, 강점은 `success` — 이름 옆에 "약점/강점" 소제목이 이미 있어 색 단독 아님).
+- 지난 리포트 목록(`QListWidget`): 면 투명, 항목 높이 48, 라운드 12 hover `bg_subtle`·선택 `primary_soft`.
+
+**설정 페이지**: `PageColumn`(최대 840) 안에서 섹션 구조 유지(계정/검증/GitHub 연동/문제 지문/AI 코치/성장 기록 + **신설 "화면" 카드**). 섹션 제목(카드 밖)은 `md` 700 `text`, 카드 패딩 24, 필드는 레이블 위·입력 아래(`WrapAllRows`), 설명 `hint` 입력 아래 4px. 각 섹션의 주 행동 1개만 `primary`(계정의 [저장 후 로그인 확인]), 나머지 secondary. 즉시 저장 옵션은 **행 단위 토글**(글자 + hint 2줄 왼쪽, 스위치 오른쪽) — 행 사이 구분선 1px `border`. [성장 기록 지우기]·[AI 기록 지우기]·[계정 정보 삭제]는 `danger` 텍스트형을 카드 맨 아래 "위험 영역" 소제목 아래에 모은다(스펙 §7 확인 다이얼로그 불변).
+- **신설 "화면" 카드** (맨 아래, 성장 기록 카드 다음): 토글 "동작 줄이기" (`ReduceMotionToggle`) + hint "화면 전환·버튼 효과 같은 움직임을 끕니다. Windows 의 '애니메이션 효과'가 꺼져 있으면 이 설정과 관계없이 항상 꺼집니다." QSettings `ui/reduce_motion`(bool, 기본 False). 변경 즉시 적용(`motion.set_user_reduce(bool)`).
+
+**빈 상태 (EmptyState)**: 선택적 `icon` 인자 추가 — 64px 원(면 `primary_soft`) 안 28px 아이콘(`primary_soft_text` 재착색), 제목 `md` 700 `text`(기존 `empty-title` 를 `md`+700 으로), 본문 `sm` `text_3`, CTA 는 `primary`(있을 때 한 개). 아이콘 인자는 선택이라 기존 호출 불변. 문제 페이지는 `nav-problem`(= nav-fetch 계열 문서 아이콘) 재사용.
+
+**스크롤바**: 폭 8, 핸들 `border_strong` 라운드 4(hover `text_placeholder`), 트랙 투명, 화살표 없음. **툴팁**: 면 `toast_bg`, 글자 `toast_text`, 라운드 8, 패딩 6×10.
+
+**다이얼로그**: `QMessageBox` 면 `surface`, 버튼은 `Button` 규칙(높이 44, 최소 폭 88, 기본 포커스 규칙 §7 유지). 위 규칙 외 변경 없음.
+
+### 16.6 페이지별 before / after
+
+| 페이지 | before | after |
+|---|---|---|
+| 저장 | 테두리 카드, 레이블 좌측 열 96, 32px 컨트롤, 작은 체크박스 3개, 작은 [저장]/[미리보기], 로그가 바닥 회색에 묻힘 | 제목 `lg` + 단축키 안내는 제목 아래 `hint`. 흰 카드 1장: **레이블 위** · 번호 입력 52px(큰 글자) · 주제 입력 44 + 힌트 · 원형 체크 3개 한 줄 · CTA 줄 [저장](primary 52, stretch 2) [미리보기](secondary, stretch 1). 로그는 별도 흰 카드(머리글 + 회색 필드). 결과 카드·배너는 등장 페이드 |
+| 문제 | 중앙 텍스트 + 흰 버튼 | 64px 원형 아이콘 + 굵은 제목 + 회색 본문 + primary [저장 탭으로]. 지문 보기 모드는 카드 안 본문 `base` 줄 간격 150%, 제목 `lg` |
+| 검증 | 코치 바·폼 카드·탭 모두 1px 테두리, 탭 pane 이중 박스, 패널 제목 텍스트가 테두리에 붙음 | 코치 바 카드(tonal 버튼) → 폼 카드(주제/번호 입력 44, [실행] primary 44, [SWEA 제출] secondary) → 밑줄 탭, **pane 투명**, EnginePane 카드 2장 나란히(무테). < 800 에서 [실행]·[SWEA 제출]은 둘째 줄로 |
+| 최근 | 테두리 표, 소형 [새로고침] 아웃라인 | 제목 행 오른쪽 tonal [새로고침]. 흰 표 컨테이너 라운드 16, 행 52, 머리글 회색 소형 글자, 복습 카드 상단 |
+| 성장 | 잔디 카드는 있으나 숫자·제목이 작아 위계 없음, 모든 카드 테두리 | 잔디 카드 제목에 큰 숫자, 칸 라운드 3, 리포트 헤더에 큰 Pass 숫자, 지표 타일(또는 대체안), 막대 차트 라운드 모서리. 모든 카드 무테 흰색 |
+| 설정 | 한 줄 길이 100% 로 늘어난 입력, 구분 약한 섹션, 체크박스 다수 | 최대 폭 840 가운데, 레이블 위 입력, 토글 행, 위험 영역 분리, 신설 "화면" 카드(동작 줄이기) |
+| 공통 | 흰 사이드바 + 우측 선, 선택 = 연파랑 직사각 | 선 없음, 알약 슬라이드, 하단 상태바 선 없음 |
+
+### 16.7 애니메이션
+
+원칙: **의미 있는 변화에만**(위치 이동·등장·완료·로딩), 장식용 반복 금지. 모든 애니메이션은 `gui/motion.py`(신규, Qt 만 사용) 헬퍼를 통해 만들고, 위젯 코드는 `QPropertyAnimation` 을 직접 쓰지 않는다 — 그래야 끄는 지점이 한 곳이다.
+
+| 토큰 | 값 |
+|---|---|
+| `MOTION_FAST` | 120ms (hover 색, 토글 손잡이 일부) |
+| `MOTION_BASE` | 200ms (페이지, 내비 알약, 등장) |
+| `MOTION_EXIT` | 150ms (퇴장) |
+| `MOTION_NUMBER` | 600ms (카운트업만 예외) |
+| `MOTION_HEAT` | 700ms (잔디 전체) |
+| 진입 이징 | `QEasingCurve.OutCubic` (토스풍 감속) |
+| 퇴장 이징 | `InCubic` |
+| 눌림 | `OutQuad` 80ms 축소 / 120ms 복귀 |
+
+| # | 대상 | 동작 | 구현 | 시간·이징 |
+|---|---|---|---|---|
+| A1 | 페이지 전환 | 새 페이지 불투명도 0→1 + 아래 8px→0 슬라이드(이전 페이지는 즉시 숨김; 교차 페이드 없음 — 느려 보임) | `motion.fade_slide_in(page)` — `QGraphicsOpacityEffect` + `pos` 애니메이션, **끝나면 효과 제거**(`setGraphicsEffect(None)`, 글자 ClearType 복원)·`layout().activate()` 로 위치 확정. 연타 시 진행 중인 것을 즉시 끝상태로 | 200ms OutCubic |
+| A2 | 내비 알약 이동 | 선택 알약이 이전 항목 → 새 항목으로 이동(+높이 유지) | `NavDelegate` + `QVariantAnimation`(알약 사각형 y), 각 프레임 `viewport().update()` | 200ms OutCubic |
+| A3 | 버튼 hover | 면 색 보간 | `Button` 의 `QVariantAnimation`(0→1)로 `QColor` 선형 보간 후 `update()` | 120ms OutCubic |
+| A4 | 버튼 press | 0.97 배 축소 후 복귀 | 〃 (`painter.scale` 중심 기준) | 80ms / 120ms |
+| A5 | 카드·배너·결과 등장 | 불투명도 0→1 (이동 없음 — 레이아웃 소유 위젯은 pos 이동 시 충돌) | `motion.fade_in(widget)` (효과 후 제거). 대상: 저장 결과 카드, 배너 show, 코치 바, EnginePane 상태 전환, 성장 리포트 카드(리포트 선택 변경 시) | 180ms OutCubic |
+| A6 | 토스트 | 등장: 불투명도 0→1 + 아래 12px→0, 퇴장: 0으로 + 아래 8px | `Toast` 자체 `QPropertyAnimation`(`windowOpacity` 대신 자체 `_opacity` 프로퍼티 + `move`) | 200ms OutCubic / 150ms InCubic |
+| A7 | 토글 | 손잡이 x 이동 + 트랙 색 보간 | `Toggle` 의 `QVariantAnimation` | 180ms OutCubic |
+| A8 | 진행 — 스피너 | 버튼 busy 시 16px 호 회전 | `Spinner`(QPainter `drawArc`, `QVariantAnimation` 0→360 loop, 선형) | 900ms/회전. **보이지 않으면 정지**(`hideEvent`·창 비활성/최소화) |
+| A9 | 진행 — 스켈레톤 | AI 코치 로딩 패널(기존 "묻는 중… 0:12 · 최대 5분" 텍스트 라벨은 **그대로 유지**) 아래 회색 막대 3줄(100%/92%/64% 폭, 높이 14, 라운드 7)에 하이라이트가 좌→우로 스침 | `Skeleton`(QPainter 그라디언트 `surface_alt`→`border`→`surface_alt`) | 1200ms 루프 선형, 보일 때만 |
+| A10 | 진행 — 막대 | 기존 `QProgressBar#busy` 4px 유지 (Qt 기본 무한 막대) | QSS 만 | — |
+| A11 | 잔디 채움 | 열(주)이 왼쪽→오른쪽으로 차례로 불투명도 0→1(열마다 지연 ≤ 450ms, 열당 250ms). 성장 탭에 **처음 들어올 때 1회**(앱 실행당), 데이터 갱신·hover·칸 선택에서는 재생 안 함 | `HeatmapWidget._reveal` 프로퍼티 + 전체 `update()` (칸 371개, 부담 작음) | 총 700ms OutCubic |
+| A12 | 숫자 카운트업 | 이전 표시값(없으면 0)→목표값. 대상: 잔디 제목 N, 리포트 Pass 수, 지표 값(정수/퍼센트 포맷 콜백). 탭 진입 후 값이 **바뀐 경우에만**, 소수는 포맷 후 표시 | `motion.count_up(label, to, fmt)` — **`accessibleName`·`toolTip` 은 즉시 최종값**, 표시 텍스트만 보간. 우측 정렬 최소 폭 고정 | 600ms OutCubic |
+| A13 | 차트 막대 | 높이 0→목표, 막대마다 지연 30ms | `BarChart._grow` | 400ms OutCubic |
+
+**성능 기준**
+- 동시에 `QGraphicsOpacityEffect` 가 걸린 위젯은 최대 1개(페이지 전환 진행 중 하위 fade_in 은 생략). 종료 시 반드시 효과 제거.
+- 1100×760 에서 프레임당 페인트 ≤ 16ms 목표. `motion.MotionGuard` 가 애니메이션 중 연속 3프레임이 50ms 를 넘으면 그 세션 동안 모션을 자동 비활성(원격 데스크톱·소프트웨어 렌더링 방어). 원격 세션(`GetSystemMetrics(SM_REMOTESESSION)`)은 시작부터 off.
+- 무한 반복(A8·A9)은 위젯이 보이고 창이 활성일 때만. 유휴 시 타이머 0개(CPU 0%).
+- 대형 위젯(`QTextBrowser`·표)에는 효과를 걸지 않는다 — 대신 **페이지 단위**로만(A1) 짧게. 지문 보기 페이지처럼 효과가 깨지는 경우(`QTextBrowser` 이미지 로드 중) A1 생략 가능.
+- 시작 직후 첫 페이지 표시, `restore` 된 창 크기 복원 중에는 애니메이션 없음.
+
+### 16.8 모션 구현 위치
+
+헬퍼는 `swea_fetcher/gui/motion.py` 한 파일: `motion_enabled()`, `set_user_reduce(bool)`, `fade_in(w)`, `fade_slide_in(w)`, `count_up(label, to, fmt)`, `MotionGuard`, 토큰 상수(`MOTION_*`). 커스텀 위젯(`Button`·`Toggle`·`Toast`·`Spinner`·`Skeleton`)은 이 모듈의 `motion_enabled()` 만 조회한다. 애니메이션 객체는 대상 위젯을 부모로 두어 위젯 파괴 시 함께 정리한다.
+
+### 16.9 동작 줄이기 · 테스트 안정성
+
+`motion.motion_enabled()` 는 아래 중 **하나라도 해당하면 False** (우선순위 위→아래):
+
+1. 환경변수 `SWEA_GUI_MOTION` = `off` / `0` / `false` → False. `on` / `1` → (아래 2·3·4 를 무시하고) True — 모션 자체를 테스트하는 테스트 전용.
+2. `QT_QPA_PLATFORM == "offscreen"` (conftest 가 실수로 env 를 빠뜨려도 안전망).
+3. 사용자 설정 `QSettings("swea-fetch","gui")/ui/reduce_motion` = true (설정 "화면" 카드 토글).
+4. OS: Windows `SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION=0x1042)` 가 0 (설정 > 접근성 > 시각 효과 > 애니메이션 효과 끔) 또는 원격 세션. 호출 실패 시 True(켬)로 간주하지 않고 **무시**(= 다른 조건만 따름).
+5. `MotionGuard` 가 성능 문제로 세션 비활성화.
+
+False 일 때 헬퍼의 계약: **애니메이션 객체를 만들지 않고 즉시 최종 상태를 적용**한다(`fade_in` → 불투명 그대로, `count_up` → 최종 텍스트, `Toast.show` → 즉시 표시·`QTimer` 로 소거만, 잔디 `_reveal=1`, 내비 알약 즉시, 스피너·스켈레톤은 **정지 상태 정적 그림**(스피너 3/4 호, 스켈레톤 기본색 막대)). 따라서 테스트에서 `qtbot.wait` 로 애니메이션을 기다릴 필요가 없다.
+
+- `tests/gui/conftest.py`: `os.environ.setdefault("SWEA_GUI_MOTION", "off")` 를 `QApplication` 생성 전에 추가(기존 `QT_QPA_PLATFORM` 줄 옆).
+- 신규 `tests/gui/test_motion.py`: `monkeypatch.setenv("SWEA_GUI_MOTION","on")` 로 (a) off 일 때 헬퍼가 `QVariantAnimation` 을 만들지 않음, (b) `fade_in` 후 `graphicsEffect() is None`, (c) `count_up` 이 끝나면 라벨 텍스트 = 최종값·`accessibleName` 은 시작 즉시 최종값, (d) 연타 시 진행 중 애니메이션이 끝상태로 점프, (e) 설정 토글이 `motion_enabled()` 에 반영, (f) 무한 애니메이션이 `hide()` 후 정지.
+- 접근성: 모션이 꺼져도 정보 손실 없어야 한다(내비 선택은 알약 색, 결과는 즉시 표시).
+
+### 16.10 구조 변경 목록 (테스트 영향 최소화 기준)
+
+QSS·토큰만으로 끝나는 변경이 기본이다. 위젯 구조가 바뀌는 항목은 아래뿐이며 **모두 objectName·텍스트·시그널을 유지**한다.
+
+| # | 변경 | 호환 처리 |
+|---|---|---|
+| S1 | `QPushButton(` → `widgets.Button(`(서브클래스) | `isinstance(…, QPushButton)` 유지 |
+| S2 | 일부 `QCheckBox` → `widgets.Toggle`(서브클래스, 설정 페이지 4개) | `GrowthEnabledCheck` 등 objectName·`isChecked/setChecked/toggled` 유지 |
+| S3 | `PageColumn`(최대 폭 840 컨테이너)으로 페이지 본문 감쌈 (저장·검증·성장·설정) | 기존 위젯 객체는 그대로 자식, `findChild` 로 찾으므로 영향 없음. `QScrollArea` 안/밖 위치만 확인 |
+| S4 | 내비 `NavDelegate` 추가 | `QListWidget#nav` 그대로, `currentRow` 계약 불변 |
+| S5 | `Toast` 위젯·`MainWindow.notify` 신설 | `statusBar().showMessage` 도 계속 호출 |
+| S6 | `LogView` 를 카드로 감싸고 머리글 행 정리 | 내부 `QPlainTextEdit#log`·토글·[지우기] objectName 유지 |
+| S7 | `EmptyState(icon=None)` 인자 추가 | 기존 호출 불변 |
+| S8 | 설정 "화면" 카드·`ReduceMotionToggle` 신설 | 신규라 영향 없음 |
+| S9 | `QFormLayout.setRowWrapPolicy(WrapAllRows)` | 필드 위젯 순서·objectName 불변. 레이블 위젯의 `setBuddy`는 유지 |
+| S10 | (성장) 지표 행 → 타일 그리드 | **선택**. 테스트가 행 구조(고정 폭 132/112, 개수 5)를 단언하면 대체안(값 글자만 키움) 채택 |
+| S11 | `fonts.py` 신설, `FONT_FAMILY` 갱신 | 글꼴 폭이 달라 텍스트 폭 단언이 있는 테스트가 있으면 조정 |
+
+폰트 크기 증가(10→10.5pt, 컨트롤 32→44)로 720×480 에서 내용이 넘칠 수 있다: **저장·설정은 `QScrollArea`(이미 있음)로 스크롤 허용**, 이전 §11 의 "최소 720×480 에서 설정 제외 스크롤 없이" 규칙은 **저장 페이지도 제외**하는 것으로 완화(로그 접힘 시 번호·주제·CTA 는 스크롤 없이 보이게). 검증 페이지는 < 800 에서 [실행]·[SWEA 제출] 줄바꿈.
+
+### 16.11 구현 순서 (마일스톤)
+
+각 단계 끝에 `pytest -q`(전체 1368) 통과 + 해당 화면 캡처를 `docs/gui-screenshots/` 에 갱신. 단계 사이 **커밋을 분리**(롤백 용이).
+
+| 단계 | 내용 | 완료 기준 |
+|---|---|---|
+| M21-A 토큰·QSS·글꼴 | `tokens.py`(Palette 신규 필드·상수·`build_qss` 전면 갱신·`build_statement_css`), `fonts.py`+폰트 파일+라이선스, spec `datas`, 이 문서 §2 와 동기화 | 구조 변경 없이 모든 화면이 새 색·라운드·글꼴로 렌더, 기존 테스트 통과, 한글 글꼴 로드 확인 |
+| M21-B 공용 컴포넌트 | `Button`·`Toggle`·`EmptyState(icon)`·`Banner`·`Badge`·`LogView` 카드화·`PageColumn`·탭/표 QSS·`Toast`(정적 표시)·`notify` | 위젯 단위 테스트(상태·variant), 모션 없이 정적으로 완성 |
+| M21-C 모션 | `motion.py`(헬퍼·`motion_enabled`·`MotionGuard`) + conftest 환경변수 + `Button` 색 보간/눌림, `Toggle`, `Toast` 애니, 내비 알약(A2), 페이지 전환(A1), A5 등장, `Spinner`·`Skeleton` | `test_motion.py`, 모션 off 에서 기존 전 테스트 통과, 설정 "동작 줄이기" |
+| M21-D 페이지 | 저장→검증→최근→문제→성장(잔디 A11, 카운트업 A12, 차트 A13, 타일 결정)→설정(토글 행·위험 영역·"화면" 카드) | 페이지별 before/after 캡처 6장, §16.12 수용 기준 중 해당 항목 |
+| M21-E 마감 | 720×480·1100×760·150% DPI 점검, 대비·키보드 점검, 번들 exe 확인(폰트 포함), `design-spec.md` §2·§3·§5 본문을 §16 과 합쳐 정리(중복 제거), 디자이너 정합성 검토(모드 2) 요청 | 수동 체크리스트 전부 체크, 성능 기준 측정 기록 |
+
+### 16.12 수용 기준 · 수동 검증 체크리스트
+
+수용 기준
+1. 모든 화면에서 카드 외곽 1px 테두리가 없고(구분선 제외) 카드 안 카드 이중 박스가 없다. 위젯 코드에 색 리터럴 0(`grep -nE '#[0-9A-Fa-f]{6}' swea_fetcher/gui --include=*.py` 는 `tokens.py` 밖에서 0건).
+2. 대비표(§16.4)의 모든 글자 조합이 구현값과 일치 — `text_3` 보다 연한 글자는 `text_placeholder`/disabled 외에 없다.
+3. 모든 애니메이션이 `motion.py` 경유, `motion_enabled()==False` 에서 즉시 최종 상태, 기존 테스트 전체(1368) 통과 + 신규 모션 테스트 통과.
+4. 키보드만으로 전 기능 조작 가능, 모든 포커스 가능 위젯에서 포커스 링 가시(§10 불변).
+5. 720×480 에서 가로 스크롤 없음, 텍스트 잘림 없음(스크롤 허용 페이지는 §16.10).
+6. 앱 실행 유휴 상태 CPU ≈ 0%(무한 애니메이션 없음).
+7. onefile exe 에서 Pretendard 로 렌더(폰트 파일 누락 시에도 Malgun 폴백으로 앱 실행).
+
+수동 체크리스트
+- [ ] 저장 페이지: 번호 입력 52px 큰 글자·레이블 위, [저장] 가로로 넓음, Enter/Ctrl+Enter/Esc 동작 불변
+- [ ] 저장 성공 → 결과 카드 페이드 등장, 토스트 아님(결과는 카드). 폴더 열기 → 토스트 + 상태바 메시지
+- [ ] 내비 클릭 → 알약 슬라이드 200ms, 연타해도 튀지 않음, Ctrl+1~6 동일
+- [ ] 페이지 전환 후 글자가 흐리지 않다(효과 제거 확인, 확대해서 ClearType)
+- [ ] 버튼 hover 색 부드럽게, 누르면 살짝 줄었다 복귀, 비활성은 반응 없음, busy 시 스피너
+- [ ] 입력 포커스 흰 면 + 파란 링, invalid 빨간 링 + 오류 문구(색 단독 아님)
+- [ ] 설정: 토글 4개 키보드(Space)·마우스, 상태가 즉시 `.env`/QSettings 반영, "동작 줄이기" 켜면 이후 전환 모두 즉시
+- [ ] Windows 설정에서 "애니메이션 효과" 끄고 앱 재실행 → 모션 없음(앱 설정과 무관)
+- [ ] 검증 → AI 코치 탭: 탭 pane 이중 박스 없음, 로딩 시 스켈레톤 + 기존 텍스트, 완료 시 페이드
+- [ ] 최근: 행 52px, hover·선택 색, 복습 카드, 새로고침 tonal
+- [ ] 성장: 처음 진입 시 잔디 채움·숫자 카운트업 1회, 재진입/hover/칸 선택에서는 재생 없음, 요일·월 라벨 겹침 없음
+- [ ] 720×480 / 880×600 / 1100×760 / 150% DPI 에서 저장·검증·성장·설정 캡처 확인
+- [ ] 화면 낭독기(Narrator) 에서 토스트 메시지가 상태바 경로로 전달됨
+- [ ] 고대비 모드(Windows)에서 글자 가독성 확인(문제 있으면 R8 과 함께 기록)
+
+### 16.13 리스크
+
+| # | 리스크 | 대응 |
+|---|---|---|
+| R1 | QSS 는 box-shadow·transition·transform 미지원 | 그림자는 토스트만 직접 그림, 전환·보간·축소는 `Button`/`Toggle` 페인팅 + `QVariantAnimation` 으로 대체. QSS 로 못 하는 것을 QSS 로 흉내 내지 않는다 |
+| R2 | `QGraphicsDropShadowEffect` 성능·흐림 | 카드에 사용 금지(D3). 리뷰에서 발견 시 Critical |
+| R3 | `QGraphicsOpacityEffect` 가 큰 페이지를 래스터화(글자 회색조, 프레임 저하), 자식 `QComboBox` 팝업·`QTextBrowser` 와 충돌 | 효과는 200ms 동안만, 끝나면 제거, 동시 1개, `MotionGuard` 자동 off |
+| R4 | Pretendard 가 PyInstaller onefile 에서 못 찾음·SemiBold 이름 문제 | 2웨이트(400/700) 고정, `addApplicationFont` 반환값 검사, 폴백 체인, M21-E 에서 exe 실측 |
+| R5 | 폰트·컨트롤 확대로 720×480 에서 넘침, 기존 테스트의 크기/위치 단언 깨짐 | 스크롤 허용 범위 §16.10, 해당 테스트만 수정(값 의도 유지), 구조 단언은 S10 대체안으로 회피 |
+| R6 | 알약 슬라이드(델리게이트)가 QSS 선택 렌더와 충돌, 키보드 포커스 표시 누락 | A2 구현이 불안정하면 **대체안**: 선택 항목 배경만 즉시 전환(슬라이드 생략) — 나머지 모션과 독립이라 단계 M21-C 에서 따로 판단해 이 문서에 기록 |
+| R7 | 토스 파랑 `#3182F6` 와 `primary_action` 이 한 화면에 섞여 어색 | 링·토글·차트는 `primary`, 글자 얹힌 면만 `primary_action`. 두 색 차이를 캡처로 확인 후 불만이면 사용자에게 "버튼 글자 크기 키우고 `#3182F6` 로 통일" 옵션 제시(AA 하향 감수 필요) |
+| R8 | 입력창 무테 채움(경계 대비 1.1:1) 접근성 | 수용된 예외(§16.4), 레이블·링·문구로 보완. 사용자가 불편하면 1px `border_strong` 추가 |
+| R9 | 사용 기록 호환: 사용자가 이미 고른 잔디색(`growth/heat_color`)·창 크기 | 변경 없음(D9, D10) |
+
+### 16.14 다크 모드 판단
+
+**이번 범위 밖.** 이유: 토스풍 정체성은 라이트의 "회색 바닥 + 흰 카드" 명도 차에 있어 다크는 별도 디자인(카드 elevation 을 명도로 재정의)이 필요하고, 팔레트·대비·캡처 검증이 한 마일스톤 분량이다. **대비책**: (1) 새 커스텀 위젯은 색을 `Palette` 에서만 읽는다(Toast·Button·Toggle·Spinner·Skeleton·Heatmap·차트), (2) 신규 토큰은 의미 이름(`bg_subtle`·`toast_bg`·`secondary`…)이라 `DARK` 에 값만 채우면 되며, (3) `DARK` 가 채워지기 전엔 `build_qss(DARK)` 호출 경로를 만들지 않는다.
+
   - M19 성장 페이지 대체안 (builder, 새 토큰 없음): ① "새 리포트" 배지는 Badge 상태 `info` 가 없어 `running`(primary_soft, 같은 색)으로 표시. ② 약점·강점 비율은 100% 를 넘을 수 있어(강도 합 ÷ 분류 건수) % 대신 "응답당 강도 2.0 → 1.0" 문장과 "점수 N · 분류 M건 중" 값으로 표시, 막대 길이는 응답당 평균 강도/3. ③ "AI 분류 기반 참고용" 은 720px 에서 헤더가 가로로 넘치지 않도록 제목 줄 아래 한 줄로 배치. ④ `design/icons/nav-growth.svg` 는 디자이너 산출물 위치에 builder 가 임시로 만든 것 — 디자이너 검토 요청.
   - (없음)
+
+### 16.15 M21 1단계 구현 기록 (builder) — 사용자 결정·스펙 대체안
+
+사용자 결정(스펙보다 우선)
+- **테마(색 조합) 6종 + 설정 변경**: D1 의 파랑은 기본 테마 "토스 블루" 로 유지하고 `tokens.THEMES` 에 5종 추가(숲 그린·라벤더 퍼플·선셋 오렌지·로즈 핑크·먹색 모노). 바뀌는 건 주색 계열 8개(`primary`·`primary_action`·`primary_hover/_pressed`·`primary_soft`·`primary_soft_hover/_pressed`·`primary_soft_text`, `accent`·`diff_extra` 따라감)뿐, 중립·상태색은 공유. 기준 = **버튼 면(`primary_action`) 위 흰 글자 4.5:1 이상**, `primary_soft_text` on `primary_soft` 4.5:1 이상, `primary`(글자 없는 면) on `surface` 3:1 이상 — `tests/gui/test_gui_theme.py` 로 고정. 선택은 즉시 전체 QSS 재적용(`MainWindow.apply_theme`), QSettings `ui/theme`(key). 모르는 key 는 기본 테마. 풀이 잔디 색(`growth/heat_color`)은 별개 설정 유지. 커스텀 페인팅·rich text 는 `tokens.current()`(현재 팔레트)에서 읽는다 — `tokens.LIGHT` 는 기본 테마 고정값(하위 호환 이름).
+- **창 기본 크기 960×680** (D10 의 880×600 대체, 최소 720×480 유지, 저장된 geometry 가 있으면 그대로).
+- 글꼴 Pretendard 는 공식 릴리스 v1.3.9 의 `public/static/Pretendard-Regular.otf`·`Pretendard-Bold.otf`(각 약 1.5MB, 합계 약 3.0MB)와 `LICENSE.txt` 를 무수정으로 번들.
+
+스펙 대체안·보류
+- 설정 "화면" 카드: 이번 단계는 **테마 칩 6개**만. 동작 줄이기 토글(`ReduceMotionToggle`)은 모션 단계(M21-C)에서 함께 추가한다(동작하지 않는 스위치를 먼저 보이지 않기 위해). 카드 위치는 성장 기록 카드 바로 다음.
+- 테마 칩(`widgets.ThemeChip`): 150×44, 해당 테마의 `primary_action` 색 원 + 이름, 선택 시 그 테마의 `primary_soft` 면 + 2px `primary` 링. 3열 격자.
+- `Toggle` 적용은 3개(`GrowthEnabledCheck`·`GrowthCommentCheck`·GitHub 자동 동기화 켜기) — 4번째는 위 사유로 보류.
+- 큰 CTA 높이 52 는 class 가 `primary` 와 겹칠 수 없어 `size="lg"` 동적 속성으로 분리(QSS `QPushButton[size="lg"]`). 페이지 적용은 M21-D.
+- 콤보 팝업은 흰 바탕에 떠 있어 1px `border` 테두리를 유지(§16.5 "테두리 없음" 의 예외).
+- 라디오 선택 표시는 에셋 없이 6px 주색 테두리 + 흰 중심(링 모양)으로 구현. 체크 표시는 `check-white.svg`(QSS `image`).
+- 내비 알약 슬라이드(A2)는 M21-C. 지금은 QSS `::item:selected` 정적 배경(내비 항목 높이 44 + 사이 간격 4).
+- `PageColumn`·`EmptyState(icon)`·`Toast`·`notify` 는 컴포넌트만 완성했고 페이지 적용(S3·S7 호출부)은 M21-D. 단, 성공성 `status_message`(문구가 "~했습니다/켰습니다/껐습니다/지웠습니다/열었습니다/바꿨습니다" 로 끝나거나 "저장 완료" 로 시작)는 `MainWindow._on_page_message` 가 `notify` 로 보내고 그 외는 상태바만.
+- 폼 줄바꿈 정책(S9)은 해당 레이아웃이 QFormLayout 이 아니라 QGridLayout 이어서(`git_dialog` 만 QFormLayout) 페이지 재배치와 함께 M21-D 에서 처리.
+- Pretendard 에는 `✕ ▼ ▶ ● ○ ↗ − ≠ …` 글리프가 없어(`QRawFont.supportsCharacter` 확인) 시스템 폴백 글꼴로 그려진다 — Windows 에서 모양·세로 정렬을 M21-E 에서 확인.

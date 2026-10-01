@@ -5,11 +5,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from .theme import tokens
+from .theme import fonts, tokens
 
 ICON_PATH = Path(__file__).parent / "theme" / "icons" / "app.svg"
 
@@ -21,7 +21,9 @@ def create_app(argv: list[str] | None = None) -> QApplication:
     app.setApplicationName("swea-fetch")
     app.setOrganizationName("swea-fetch")
     app.setStyle("Fusion")  # 플랫폼별 편차를 줄이고 QSS 가 일관되게 먹도록
-    app.setStyleSheet(tokens.build_qss(tokens.LIGHT))
+    fonts.load_fonts()  # Pretendard 등록 (QSS 전에). 실패해도 Malgun Gothic 폴백으로 계속
+    tokens.set_theme(str(QSettings("swea-fetch", "gui").value(tokens.THEME_SETTING_KEY, tokens.DEFAULT_THEME) or tokens.DEFAULT_THEME))
+    app.setStyleSheet(tokens.build_qss())
     if ICON_PATH.exists():
         app.setWindowIcon(QIcon(str(ICON_PATH)))
     return app
@@ -34,6 +36,7 @@ def _selftest(out_path: str) -> int:
     from .widgets import ICON_DIR
 
     lines = [f"frozen={getattr(sys, 'frozen', False)}", f"icon_dir_exists={ICON_DIR.exists()}",
+             f"fonts_loaded={fonts.load_fonts()} pretendard={fonts.is_available()}",
              f"icons={sorted(p.name for p in ICON_DIR.glob('*.svg')) if ICON_DIR.exists() else []}"]
     try:
         kr = config._keyring()

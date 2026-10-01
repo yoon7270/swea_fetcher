@@ -30,7 +30,7 @@ from ...config import Settings
 from ..coach_widgets import AnswerBrowser, growth_consent_ok, set_growth_consent
 from ..growth_widgets import BarChart, CategoryRowWidget, HeatLegend, HeatmapWidget, MetricRowWidget, day_text, week_label
 from ..theme import tokens
-from ..widgets import Badge, Banner, EmptyState, set_class
+from ..widgets import Badge, Banner, Button, EmptyState, set_class
 
 REFERENCE_NOTE = "AI 분류 기반 참고용"
 EMPTY_TITLE = "아직 기록이 없어요"
@@ -297,11 +297,11 @@ class GrowthPage(QWidget):
         self.comment_text.setObjectName("GrowthCommentText")
         cl.addWidget(self.comment_text)
         btns = QHBoxLayout()
-        self.comment_btn = QPushButton("코멘트 받기")
+        self.comment_btn = Button("코멘트 받기")
         self.comment_btn.setObjectName("GrowthCommentButton")
-        self.comment_cancel_btn = QPushButton("취소")
+        self.comment_cancel_btn = Button("취소")
         self.comment_cancel_btn.setObjectName("GrowthCommentCancel")
-        self.comment_settings_btn = QPushButton("설정으로 이동")
+        self.comment_settings_btn = Button("설정으로 이동")
         self.comment_settings_btn.setObjectName("GrowthCommentSettings")
         for b in (self.comment_btn, self.comment_cancel_btn, self.comment_settings_btn):
             btns.addWidget(b)
