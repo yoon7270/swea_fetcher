@@ -36,6 +36,16 @@ from ..widgets import Banner, make_busy_bar, set_class, set_invalid
 from ..workers import CoachWorker, FuncWorker, LoginWorker
 
 
+
+def _swatch_qss(color: str, on: bool, pal) -> str:
+    """원형 색 칩 (24px). 선택이면 굵은 테두리. QSS 의 min/max 크기는 테두리 안쪽 — 전역 버튼 최소 높이(30)를 덮어 원형 유지."""
+    bw = 3 if on else 1
+    inner = 24 - 2 * bw
+    return (
+        f"QPushButton {{ background: {color}; border: {bw}px solid {pal.text if on else pal.border}; border-radius: 12px; "
+        f"min-width: {inner}px; max-width: {inner}px; min-height: {inner}px; max-height: {inner}px; padding: 0px; }}"
+    )
+
 class SettingsPage(QWidget):
     busy_changed = Signal(bool, str)
     settings_changed = Signal()  # 저장/삭제 후 MainWindow 가 load_settings 를 다시 시도
@@ -432,6 +442,13 @@ class SettingsPage(QWidget):
             self.heat_group.addButton(b)
             self.heat_buttons[hexv] = b
             heat_row.addWidget(b)
+        # 직접 고른 색: 프리셋과 같은 원형 칩으로 보여 준다 (프리셋이 아닌 색일 때만). 누르면 다시 고르기
+        self.heat_custom_swatch = QPushButton()
+        self.heat_custom_swatch.setObjectName("HeatCustomSwatch")
+        self.heat_custom_swatch.setFixedSize(24, 24)
+        self.heat_custom_swatch.setAccessibleName("풀이 잔디 색: 직접 고른 색")
+        self.heat_custom_swatch.hide()
+        heat_row.addWidget(self.heat_custom_swatch)
         self.heat_custom_btn = QPushButton("직접 고르기")
         self.heat_custom_btn.setObjectName("HeatCustomButton")
         self.heat_custom_btn.setToolTip("원하는 색을 직접 고릅니다")
@@ -518,6 +535,7 @@ class SettingsPage(QWidget):
         self.growth_comment.toggled.connect(lambda on: self._growth_toggled("SWEA_GROWTH_COMMENT", on))
         self.growth_clear_btn.clicked.connect(self._clear_growth)
         self.heat_custom_btn.clicked.connect(self._pick_heat_color)
+        self.heat_custom_swatch.clicked.connect(self._pick_heat_color)
         self._paint_heat_buttons()
         self.commit_template.editingFinished.connect(self._save_template)
         self.auto_push.clicked.connect(self._auto_push_clicked)
@@ -1005,21 +1023,19 @@ class SettingsPage(QWidget):
             self._set_heat_color(c.name())
 
     def _paint_heat_buttons(self) -> None:
-        """프리셋 버튼을 색 칩으로 칠한다. 현재 색과 같은 프리셋은 체크(굵은 테두리) — 프리셋이 아니면 [직접 고르기] 버튼이 그 색을 띤다."""
+        """프리셋 버튼을 색 칩으로 칠한다. 현재 색과 같은 칩은 굵은 테두리 — 프리셋이 아니면 [직접 고르기] 앞에 그 색의 칩이 선택 상태로 나온다."""
         pal = tokens.DARK or tokens.LIGHT
         self.heat_group.setExclusive(False)  # 프리셋이 아닌 색이면 모두 해제해야 한다 (배타 그룹은 마지막 하나를 못 끈다)
         for hexv, b in self.heat_buttons.items():
             on = hexv == self.heat_color
             b.setChecked(on)
-            bw = 3 if on else 1
-            inner = 24 - 2 * bw  # QSS 의 min/max-height 는 테두리 안쪽 크기 — 전역 버튼 최소 높이(30)를 덮어 원형 24px 유지
-            b.setStyleSheet(
-                f"QPushButton {{ background: {hexv}; border: {bw}px solid {pal.text if on else pal.border}; border-radius: 12px; "
-                f"min-width: {inner}px; max-width: {inner}px; min-height: {inner}px; max-height: {inner}px; padding: 0px; }}"
-            )
+            b.setStyleSheet(_swatch_qss(hexv, on, pal))
         self.heat_group.setExclusive(True)
         custom = self.heat_color not in self.heat_buttons
-        self.heat_custom_btn.setStyleSheet(f"QPushButton {{ border-left: 10px solid {self.heat_color}; }}" if custom else "")
+        self.heat_custom_swatch.setVisible(custom)
+        if custom:
+            self.heat_custom_swatch.setStyleSheet(_swatch_qss(self.heat_color, True, pal))
+            self.heat_custom_swatch.setToolTip(f"직접 고른 색 {self.heat_color} — 누르면 다시 고릅니다")
 
     def _clear_growth(self) -> None:
         box = QMessageBox(QMessageBox.Icon.Warning, "성장 기록 지우기", "성장 리포트·분류 기록·풀이 잔디가 삭제됩니다.\nAI 응답 캐시·복습 일정과 풀이 파일은 건드리지 않습니다.", parent=self)

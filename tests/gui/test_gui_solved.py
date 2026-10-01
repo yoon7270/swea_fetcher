@@ -218,9 +218,14 @@ def test_custom_color_dialog(gw, monkeypatch):
     sp.heat_custom_btn.click()
     assert gw.qs.value("growth/heat_color") == "#12AB34" and gw.growth_page.heatmap.level_colors()[3] == "#12AB34"
     assert not any(b.isChecked() for b in sp.heat_buttons.values())
+    # 직접 고른 색은 프리셋과 같은 원형 칩으로 (버튼에 색 띠를 두르지 않는다)
+    assert not sp.heat_custom_swatch.isHidden() and "#12AB34" in sp.heat_custom_swatch.styleSheet()
+    assert sp.heat_custom_btn.styleSheet() == ""
     monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *a, **k: QColor()))  # 취소 = 유효하지 않은 색
     sp.heat_custom_btn.click()
     assert gw.qs.value("growth/heat_color") == "#12AB34"
+    sp.heat_buttons["#2DA44E"].click()  # 프리셋으로 돌아가면 직접 고른 칩은 숨김
+    assert sp.heat_custom_swatch.isHidden()
 
 
 def test_invalid_saved_color_falls_back_to_default(gw):
