@@ -35,7 +35,25 @@ def _isolated_qsettings(tmp_path: Path, monkeypatch):
         return QSettings(str(ini), QSettings.Format.IniFormat)
 
     monkeypatch.setattr(main_window, "QSettings", factory)
+    seed = QSettings(str(ini), QSettings.Format.IniFormat)
+    seed.setValue("ui/color_mode", "light")  # 기존 값 단정이 OS 모드에 흔들리지 않게 라이트 고정 (M22). 다크 테스트는 모드를 직접 지정
+    seed.sync()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _light_tokens():
+    """토큰 전역 상태(테마·모드)를 테스트마다 블루 라이트로 되돌린다 (M22)."""
+    from swea_fetcher.gui.theme import tokens
+
+    def reset() -> None:
+        tokens.set_theme(tokens.DEFAULT_THEME)
+        tokens.set_color_mode("light")
+        tokens.set_system_dark(False)
+
+    reset()
+    yield
+    reset()
 
 
 @pytest.fixture

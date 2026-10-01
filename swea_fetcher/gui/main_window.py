@@ -31,7 +31,9 @@ from .pages.growth_page import GrowthPage
 from .pages.history_page import HistoryPage
 from .pages.problem_page import ProblemPage
 from .pages.settings_page import SettingsPage
-from .theme import tokens
+from .theme import appearance, tokens
+from .theme.bus import bus
+from .theme.qt_palette import qt_palette
 from . import motion
 from .widgets import Button, NavDelegate, StatusDot, Toast, nav_icon, set_class, svg_icon
 from .workers import FetchWorker, FuncWorker, GrowthWorker
@@ -67,12 +69,18 @@ class MainWindow(QMainWindow):
         self._restoring = False  # 시작 페이지 복원 중에는 전환 모션 없음
         self.autosync = None  # AutoSyncController (M11) — _build 뒤 생성
         tokens.set_theme(str(self.qs.value(tokens.THEME_SETTING_KEY, tokens.DEFAULT_THEME) or tokens.DEFAULT_THEME))
+        tokens.set_color_mode(str(self.qs.value(tokens.COLOR_MODE_SETTING_KEY, tokens.DEFAULT_COLOR_MODE) or tokens.DEFAULT_COLOR_MODE))
+        if tokens.color_mode() == "system":
+            tokens.set_system_dark(appearance.detect_system_dark())
         motion.set_user_reduce(bool(self.qs.value(REDUCE_MOTION_KEY, False, type=bool)))  # 설정 > 화면 > 동작 줄이기
         self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(*tokens.WINDOW_MIN)
         self.resize(*tokens.WINDOW_DEFAULT)
         self._build()
         self._restore_state()
+        self._sys_watcher = appearance.SystemWatcher(tokens.color_mode, self)  # Windows 앱 모드 변경 → 시스템 따르기일 때만 즉시 반영
+        self._sys_watcher.changed.connect(self._on_system_scheme)
+        appearance.apply_native_scheme(self)  # 타이틀 바·네이티브 대화상자를 앱 모드에 맞춤 (강제 모드일 때)
         self.reload_settings(first_run=True)
         # 새 버전 확인은 app.main() 이 창을 띄운 뒤 시작한다 (테스트·자가진단에서는 네트워크를 쓰지 않도록)
 
@@ -173,7 +181,7 @@ class MainWindow(QMainWindow):
         self.growth_page.cancel_requested.connect(self._growth_cancel)
         self.growth_page.problem_requested.connect(self._open_recent_problem)  # 풀이 잔디의 날짜 목록 → 문제 탭
         self.settings_page.heat_color_changed.connect(self.growth_page.apply_heat_color)
-        self.settings_page.theme_changed.connect(self.apply_theme)
+        self.settings_page.appearance_changed.connect(self.apply_appearance)
         self.fetch_page.problem_ready.connect(self._on_problem_ready)
         self.fetch_page.cached_problem_requested.connect(self._show_cached_problem)
         self.history_page.problem_requested.connect(self._open_recent_problem)
@@ -352,6 +360,14 @@ class MainWindow(QMainWindow):
     def _set_busy(self, busy: bool, suffix: str) -> None:
         self.setWindowTitle(f"{APP_TITLE} — {suffix}" if busy and suffix else APP_TITLE)
 
+    def _sb_set_visible(self, w, on: bool) -> None:
+        """상태바 일반 위젯(배지)의 표시. 임시 메시지가 떠 있는 동안 Qt 는 일반 위젯을 숨기는데, 그때 show() 하면
+        메시지 글자 위에 겹쳐 그려진다. 메시지 중에는 숨긴 채 "명시적 숨김" 표식만 지워 두면 메시지가 사라질 때 Qt 가 보여 준다."""
+        if on and self.statusBar().currentMessage():
+            w.setAttribute(Qt.WidgetAttribute.WA_WState_ExplicitShowHide, False)
+            return
+        w.setVisible(on)
+
     def flash(self, msg: str, ms: int = 4000) -> None:
         """상태바 임시 메시지 (진행 중·안내 — 토스트 없음)."""
         self.statusBar().showMessage(msg, ms)
@@ -374,20 +390,43 @@ class MainWindow(QMainWindow):
         else:
             self.flash(msg)
 
-    def apply_theme(self, key: str) -> None:
-        """테마(색 조합) 전환: 전체 QSS 를 다시 만들어 적용하고 색을 캐시한 위젯(내비 아이콘)을 갱신한다. 재시작 불필요."""
-        theme = tokens.set_theme(key)
+    def apply_appearance(self, mode: str | None = None, theme_key: str | None = None) -> None:
+        """화면 모드(light|dark|system)·테마 전환 (스펙 §17.14): 토큰 → QPalette → QSS → 아이콘 → ThemeBus → 네이티브 → 저장.
+        재시작 불필요. 앱 기본 글꼴(힌팅 끔)은 건드리지 않는다. 인자 None 은 현재 값 유지(시스템 모드 재감지만)."""
         app = QApplication.instance()
-        if app is not None:
-            app.setStyleSheet(tokens.build_qss())
-        for i, (_label, _key, icon) in enumerate(PAGES):
-            self.nav.item(i).setIcon(nav_icon(icon))
-        for b in self.findChildren(Button):  # 글자 옆 SVG 아이콘 재착색
-            b.refresh_icon()
-        self._on_autosync_status(self._autosync_text)
-        for w in self.findChildren(QWidget):  # 직접 그리는 위젯(Button·Toggle·잔디·차트)이 새 색으로 다시 그리도록
-            w.update()
-        self.qs.setValue(tokens.THEME_SETTING_KEY, theme.key)
+        self.setUpdatesEnabled(False)  # 한 번에 바꿔 깜빡임·중간 상태 방지
+        try:
+            if theme_key is not None:
+                tokens.set_theme(theme_key)
+            if mode is not None:
+                tokens.set_color_mode(mode)
+            if tokens.color_mode() == "system":
+                tokens.set_system_dark(appearance.detect_system_dark())
+            if app is not None:
+                app.setPalette(qt_palette(tokens.current()))
+                app.setStyleSheet(tokens.build_qss())
+            for i, (_label, _key, icon) in enumerate(PAGES):
+                self.nav.item(i).setIcon(nav_icon(icon))
+            for b in self.findChildren(Button):  # 글자 옆 SVG 아이콘 재착색
+                b.refresh_icon()
+            self._on_autosync_status(self._autosync_text)
+            bus().changed.emit()  # 캐시를 가진 위젯(문서 CSS·로그·표·diff·잔디 …)이 스스로 다시 만든다
+            appearance.apply_native_scheme(self)
+            for w in self.findChildren(QWidget):  # 직접 그리는 위젯(Button·Toggle·차트)이 새 색으로 다시 그리도록
+                w.update()
+        finally:
+            self.setUpdatesEnabled(True)
+            self.update()
+        self.qs.setValue(tokens.THEME_SETTING_KEY, tokens.current_theme_key())
+        self.qs.setValue(tokens.COLOR_MODE_SETTING_KEY, tokens.color_mode())
+
+    def apply_theme(self, key: str) -> None:
+        """하위 호환: 테마(색 조합)만 전환."""
+        self.apply_appearance(None, key)
+
+    def _on_system_scheme(self, _dark: bool) -> None:
+        """OS 앱 모드가 바뀜 (시스템 따르기일 때만 이 신호가 온다)."""
+        self.apply_appearance()
 
     # --- 설정 -------------------------------------------------------------------------
     def reload_settings(self, first_run: bool = False, stay: bool = False) -> None:
@@ -433,7 +472,7 @@ class MainWindow(QMainWindow):
         n = service.due_count(self.settings) if self.settings is not None else 0
         self.review_badge.setText(f"복습 {n}개")
         self.review_badge.setToolTip("클릭하면 최근 탭의 복습 목록으로 이동합니다")
-        self.review_badge.setVisible(n > 0)
+        self._sb_set_visible(self.review_badge, n > 0)
         if startup:
             msg = self._notice_text(n, self._growth_unseen > 0)
             if msg:
@@ -456,7 +495,7 @@ class MainWindow(QMainWindow):
         self._growth_unseen = n
         self.growth_badge.setText("새 성장 리포트" if n <= 1 else f"새 성장 리포트 {n}개")
         self.growth_badge.setToolTip("클릭하면 성장 탭으로 이동합니다")
-        self.growth_badge.setVisible(n > 0)
+        self._sb_set_visible(self.growth_badge, n > 0)
 
     # --- 성장 기록 (M19) ---------------------------------------------------------------------
     def _growth_kick(self, force_week: date | None = None) -> None:
@@ -585,7 +624,7 @@ class MainWindow(QMainWindow):
         self.autosync_badge.setText(plain)
         self.autosync_badge.setIcon(svg_icon("status-warning", None, 14) if warn else svg_icon("sync", p.primary_soft_text, 14))
         self.autosync_badge.setIconSize(QSize(14, 14))
-        self.autosync_badge.setVisible(bool(plain))
+        self._sb_set_visible(self.autosync_badge, bool(plain))
 
     def _open_release(self) -> None:
         QDesktopServices.openUrl(QUrl(getattr(self, "_release_url", update.RELEASES_URL)))

@@ -33,6 +33,7 @@ VIA_LABEL = {"swea": "SWEA", "local": "로컬"}
 HEAT_STEPS = (1, 2, 3, 4)
 # 기준색(4단계)을 배경 쪽으로 섞는 비율 (1~4단계). 4단계 = 기준색 그대로
 HEAT_MIX = (0.35, 0.65, 1.0)  # 1~3단계: 배경 → 기준색. 4단계는 기준색을 배경 반대쪽으로 더 민다 (heat_colors)
+HEAT_MIX_DARK = (0.45, 0.72, 1.0)  # 다크: 어두운 바닥에서 1단계가 0단계(surface_alt)와 구분되도록 비율을 올린다 (스펙 §17.10)
 HEAT_DEEPEN = 0.7  # 4단계: 라이트 배경이면 검정 쪽, 다크 배경이면 흰색 쪽으로 30%
 DEFAULT_HEAT_COLOR = "#2DA44E"  # GitHub 초록 느낌
 HEAT_PRESETS = (
@@ -240,12 +241,62 @@ def _luma(color: str) -> float:
     return 0.299 * r + 0.587 * g + 0.114 * b
 
 
-def heat_colors(base: str | None, bg: str) -> list[str]:
+def heat_colors(base: str | None, bg: str, dark: bool = False) -> list[str]:
     """농도 1~4단계 색 4개: 연하게 → 중간 → 기준색 → 기준색보다 한 단계 더 진하게 (GitHub 잔디처럼 단계가 또렷하게).
 
     1~3단계는 배경(카드 surface)에서 기준색으로 섞고, 4단계는 배경의 반대쪽(라이트면 검정, 다크면 흰색)으로 민다 —
-    어느 팔레트에서든 "많이" 쪽이 배경과 가장 멀다.
+    어느 팔레트에서든 "많이" 쪽이 배경과 가장 멀다. dark=True 면 다크용 혼합 비율(HEAT_MIX_DARK)을 쓴다.
     """
     b = parse_hex(base)
     far = "#000000" if _luma(bg) >= 128 else "#FFFFFF"
-    return [*(mix(b, bg, t) for t in HEAT_MIX), mix(b, far, HEAT_DEEPEN)]
+    ratios = HEAT_MIX_DARK if dark else HEAT_MIX
+    return [*(mix(b, bg, t) for t in ratios), mix(b, far, HEAT_DEEPEN)]
+
+
+def rel_luminance(color: str) -> float:
+    """WCAG 상대 휘도 (0~1)."""
+    c = parse_hex(color, "#000000")
+
+    def ch(i: int) -> float:
+        v = int(c[i:i + 2], 16) / 255
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * ch(1) + 0.7152 * ch(3) + 0.0722 * ch(5)
+
+
+DARK_MIN_LUMA = 0.20  # 다크에서 기준색 상대 휘도 하한 (너무 어두우면 카드와 구분 안 됨)
+LIGHT_MAX_LUMA = 0.60  # 라이트에서 상한 (너무 밝으면 흰 카드와 구분 안 됨)
+
+
+def adjust_for_mode(color: str | None, dark: bool) -> str:
+    """고정색을 모드에 맞게 표시용으로 보정한다 (저장값 불변). 다크: 휘도 < 0.20 이면 흰색 쪽으로 5%씩 섞어 0.20 이상,
+    라이트: > 0.60 이면 검정 쪽으로 5%씩 섞어 0.60 이하. 이미 범위 안이면 그대로(대문자 정규화만)."""
+    c = parse_hex(color)
+    if dark:
+        t = 0.0
+        while rel_luminance(c) < DARK_MIN_LUMA and t < 1.0:
+            t = min(1.0, t + 0.05)
+            c = mix("#FFFFFF", parse_hex(color), t)
+        return c
+    t = 0.0
+    while rel_luminance(c) > LIGHT_MAX_LUMA and t < 1.0:
+        t = min(1.0, t + 0.05)
+        c = mix("#000000", parse_hex(color), t)
+    return c
+
+
+HEAT_FOLLOW = "follow"
+HEAT_COLOR_KEY = "growth/heat_color"
+
+
+def heat_base(value: object) -> tuple[str, str | None]:
+    """QSettings growth/heat_color 값 → ("follow", None) | ("fixed", "#RRGGBB"). 키 없음·"follow"·쓰레기 값은 follow,
+    "#RRGGBB" 면 고정색 (기존 사용자가 직접 고른 색을 존중). 설정 페이지·성장 페이지가 공유한다."""
+    v = str(value or "").strip()
+    if len(v) == 7 and v[0] == "#":
+        try:
+            int(v[1:], 16)
+            return "fixed", v.upper()
+        except ValueError:
+            pass
+    return HEAT_FOLLOW, None

@@ -9,7 +9,8 @@ from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from .theme import fonts, tokens
+from .theme import appearance, fonts, tokens
+from .theme.qt_palette import qt_palette
 
 ICON_PATH = Path(__file__).parent / "theme" / "icons" / "app.svg"
 
@@ -23,7 +24,13 @@ def create_app(argv: list[str] | None = None) -> QApplication:
     app.setStyle("Fusion")  # 플랫폼별 편차를 줄이고 QSS 가 일관되게 먹도록
     fonts.load_fonts()  # Pretendard 등록 (QSS 전에). 실패해도 Malgun Gothic 폴백으로 계속
     fonts.apply_app_font(app)  # 힌팅 끔 — 작은 크기에서 ㅡ 획이 사라지는 문제
-    tokens.set_theme(str(QSettings("swea-fetch", "gui").value(tokens.THEME_SETTING_KEY, tokens.DEFAULT_THEME) or tokens.DEFAULT_THEME))
+    qs = QSettings("swea-fetch", "gui")
+    # 위젯을 만들기 전에 모드·테마를 해석해 첫 프레임부터 올바른 색으로 (라이트 번쩍임 방지, 스펙 §17.14)
+    tokens.set_theme(str(qs.value(tokens.THEME_SETTING_KEY, tokens.DEFAULT_THEME) or tokens.DEFAULT_THEME))
+    tokens.set_color_mode(str(qs.value(tokens.COLOR_MODE_SETTING_KEY, tokens.DEFAULT_COLOR_MODE) or tokens.DEFAULT_COLOR_MODE))
+    if tokens.color_mode() == "system":
+        tokens.set_system_dark(appearance.detect_system_dark())
+    app.setPalette(qt_palette(tokens.current()))
     app.setStyleSheet(tokens.build_qss())
     if ICON_PATH.exists():
         app.setWindowIcon(QIcon(str(ICON_PATH)))

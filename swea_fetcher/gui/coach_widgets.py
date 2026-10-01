@@ -19,6 +19,7 @@ from ..ai_engine import AI_TIMEOUT, ENGINE_LABELS, ENGINE_SHORT, install_hint
 from ..ai_prompts import MAX_HINT_LEVEL
 from ..service import CoachAnswer
 from .theme import tokens
+from .theme.bus import bus
 from . import motion
 from .widgets import Badge, Button, ElidedLabel, Skeleton, svg_icon, set_class
 
@@ -137,7 +138,12 @@ class CoachBar(QFrame):
         self.hint_btn.clicked.connect(self.hint_clicked)
         self.solution_btn.clicked.connect(self.solution_clicked)
         self.later_btn.clicked.connect(self.later_clicked)
+        bus().changed.connect(self.refresh_theme)
         self.hide()
+
+    def refresh_theme(self) -> None:
+        """테마·모드 전환 시 힌트 아이콘 재착색."""
+        self.hint_btn.setIcon(svg_icon("coach-hint", None, 16))
 
     # --- 상태 ---
     def show_pass(self) -> None:
@@ -243,19 +249,33 @@ class AnswerBrowser(QTextBrowser):
         self.setOpenExternalLinks(False)
         self.setReadOnly(True)
         self.document().setDefaultStyleSheet(tokens.build_statement_css(tokens.current()))
+        self._source: str | None = None  # 원본 마크다운 — 테마가 바뀌면 이 원본으로 다시 렌더한다 (색이 문서에 구워지므로)
+        bus().changed.connect(self.refresh_theme)
 
     def loadResource(self, _type, _url):  # noqa: N802
         return None
 
+    def refresh_theme(self) -> None:
+        """문서 CSS 를 새 팔레트로 바꾸고 원본을 다시 렌더한다 (스크롤 위치 유지)."""
+        self.document().setDefaultStyleSheet(tokens.build_statement_css(tokens.current()))
+        if self._source is not None:
+            pos = self.verticalScrollBar().value()
+            self._render(self._source)
+            self.verticalScrollBar().setValue(pos)
+
     def set_markdown(self, text: str) -> None:
         """MarkdownNoHTML: 응답 안의 raw HTML(<img>·<br> 등)을 해석하지 않고 글자로 보인다.
         (기본 모드는 raw HTML 태그 뒤의 본문을 통째로 버리는 것을 실측 — 내용 유실 방지 겸 렌더링 차단)"""
-        feats = QTextDocument.MarkdownFeature.MarkdownDialectGitHub | QTextDocument.MarkdownFeature.MarkdownNoHTML
-        self.document().setMarkdown(text, feats)
+        self._source = text
+        self._render(text)
         # 새 답은 항상 맨 위(총평)부터. 패널이 보이며 폭이 바뀌면 재배치 뒤 커서 쪽으로 밀리므로 커서도 처음으로, 한 번 더 늦게 올린다
         self.moveCursor(QTextCursor.MoveOperation.Start)
         self.verticalScrollBar().setValue(0)
         QTimer.singleShot(0, lambda: self.verticalScrollBar().setValue(0))
+
+    def _render(self, text: str) -> None:
+        feats = QTextDocument.MarkdownFeature.MarkdownDialectGitHub | QTextDocument.MarkdownFeature.MarkdownNoHTML
+        self.document().setMarkdown(text, feats)
 
 
 class EnginePane(QFrame):

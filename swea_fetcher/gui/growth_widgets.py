@@ -16,7 +16,8 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QToolTip
 from .. import growth, solved
 from . import motion
 from .theme import tokens
-from .widgets import set_class
+from .theme.bus import bus
+from .widgets import Swatch, set_class
 
 SPARK_W, SPARK_H = 96, 24
 BAR_CHART_MIN_H = 140  # 스펙 §16.5: 120 → 140
@@ -357,10 +358,16 @@ def day_text(d: date) -> str:
     return f"{d.isoformat()} ({WEEKDAY_KO[d.weekday()]})"
 
 
-def heat_palette() -> tuple[str, str]:
-    """(0칸 색, 농도 색을 섞을 배경). 다크 팔레트가 생기면 그쪽을 쓴다."""
+def heat_palette() -> tuple[str, str, bool]:
+    """(0칸 색, 농도 색을 섞을 배경, 다크 여부) — 현재 팔레트 기준 (스펙 §17.10)."""
     pal = tokens.current()
-    return pal.surface_alt, pal.surface
+    return pal.surface_alt, pal.surface, pal.is_dark
+
+
+def heat_level_colors(base: str) -> list[str]:
+    """기준색 → 0~4단계 색 5개 (현재 모드). 잔디·범례·색 패널 미리보기가 같은 계산을 쓴다."""
+    empty, bg, dark = heat_palette()
+    return [empty, *solved.heat_colors(base, bg, dark)]
 
 
 class HeatmapWidget(QWidget):
@@ -506,8 +513,7 @@ class HeatmapWidget(QWidget):
     # --- 그리기 ---
     def level_colors(self) -> list[str]:
         """0~4단계 색 5개."""
-        empty, bg = heat_palette()
-        return [empty, *solved.heat_colors(self.base, bg)]
+        return heat_level_colors(self.base)
 
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
@@ -566,19 +572,19 @@ class HeatLegend(QWidget):
         lay.setSpacing(HEAT_GAP + 1)
         lay.addStretch(1)
         lay.addWidget(_label("적게", "hint"))
-        self.swatches: list[QLabel] = []
+        self.swatches: list[Swatch] = []
         for _ in range(5):
-            sw = QLabel()
-            sw.setFixedSize(self.SWATCH, self.SWATCH)
+            sw = Swatch(self.SWATCH, 2)  # 직접 그리는 칸 (스타일시트 없음 — 테마가 바뀌면 set_base 로 다시 칠한다)
             self.swatches.append(sw)
             lay.addWidget(sw)
         lay.addWidget(_label("많이", "hint"))
         self.colors: list[str] = []
+        self._base = solved.DEFAULT_HEAT_COLOR
         self.setAccessibleName("범례: 적게에서 많이")
-        self.set_base(solved.DEFAULT_HEAT_COLOR)
+        self.set_base(self._base)
 
     def set_base(self, base: str) -> None:
-        empty, bg = heat_palette()
-        self.colors = [empty, *solved.heat_colors(base, bg)]
+        self._base = base
+        self.colors = heat_level_colors(base)
         for sw, c in zip(self.swatches, self.colors):
-            sw.setStyleSheet(f"background: {c}; border-radius: 2px;")
+            sw.set_color(c)

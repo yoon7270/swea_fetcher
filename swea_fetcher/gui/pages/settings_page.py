@@ -5,13 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, Signal
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QButtonGroup,
     QCheckBox,
-    QColorDialog,
-    QComboBox,
     QRadioButton,
     QFileDialog,
     QFrame,
@@ -20,7 +18,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
-    QPushButton,
     QScrollArea,
     QSpinBox,
     QVBoxLayout,
@@ -33,7 +30,23 @@ from ...errors import AiError
 from ..coach_widgets import ask_consent, has_consent, reset_consents
 from .. import motion
 from ..theme import tokens
-from ..widgets import Banner, Button, PageColumn, ThemeChip, Toggle, make_busy_bar, set_class, set_invalid
+from ..theme.bus import bus
+from ..widgets import (
+    Banner,
+    Button,
+    CollapsibleBox,
+    ColorChip,
+    ColorPicker,
+    ComboBox,
+    FollowChip,
+    PageColumn,
+    SegmentedControl,
+    ThemeChip,
+    Toggle,
+    make_busy_bar,
+    set_class,
+    set_invalid,
+)
 from ..workers import CoachWorker, FuncWorker, LoginWorker
 
 
@@ -104,14 +117,6 @@ def _toggle_row(toggle: "Toggle", hint: str) -> QWidget:
     return w
 
 
-def _swatch_qss(color: str, on: bool, pal) -> str:
-    """원형 색 칩 (24px). 선택이면 굵은 테두리. QSS 의 min/max 크기는 테두리 안쪽 — 전역 버튼 최소 높이(30)를 덮어 원형 유지."""
-    bw = 3 if on else 1
-    inner = 24 - 2 * bw
-    return (
-        f"QPushButton {{ background: {color}; border: {bw}px solid {pal.text if on else pal.border}; border-radius: 12px; "
-        f"min-width: {inner}px; max-width: {inner}px; min-height: {inner}px; max-height: {inner}px; padding: 0px; }}"
-    )
 
 class SettingsPage(QWidget):
     busy_changed = Signal(bool, str)
@@ -120,7 +125,8 @@ class SettingsPage(QWidget):
     timeout_changed = Signal(float)
     cache_settings_changed = Signal()  # 지문 캐시 사용 토글 (문제 탭 안내문 갱신용)
     heat_color_changed = Signal()  # 풀이 잔디 색 변경 (M20) — 성장 탭이 즉시 다시 칠한다
-    theme_changed = Signal(str)  # 화면 테마(색 조합) 변경 (M21) — 메인이 QSS 를 다시 적용한다. 인자 = 테마 key
+    theme_changed = Signal(str)  # 테마(색 조합) 변경 (M21, 하위 호환용 — 메인은 appearance_changed 를 쓴다). 인자 = 테마 key
+    appearance_changed = Signal(str, str)  # 화면 모드·테마 변경 (M22) — 메인이 팔레트·QSS 를 다시 적용한다. 인자 = (color_mode, theme_key)
     coach_settings_changed = Signal()  # AI 코치 설정·기록 변경 (엔진·오답 기준·복습일·기록 지우기) — 메인이 설정 객체·배지를 갱신
 
     def __init__(self, qsettings: QSettings, config_dir: Path | None = None, parent=None) -> None:
@@ -296,7 +302,7 @@ class SettingsPage(QWidget):
         # --- AI 코치 (M17)
         section("AI 코치")
         card7, v7 = _card_box()
-        self.ai_engine = QComboBox()
+        self.ai_engine = ComboBox()
         self.ai_engine.setObjectName("AiEngineCombo")
         for value, text in (
             ("auto", "자동 (Codex 우선)"),
@@ -378,47 +384,68 @@ class SettingsPage(QWidget):
         self.growth_clear_btn = Button("성장 기록 지우기")  # 아래 "위험 영역" 카드에 놓인다
         set_class(self.growth_clear_btn, "danger")
         self.growth_clear_btn.setToolTip("분류 기록·주간 리포트·풀이 잔디를 지웁니다 (AI 응답 캐시·복습 일정은 그대로)")
+        # 잔디 색 줄 (스펙 §17.10): [테마 색 따르기] · 프리셋 5색 원형 칩 · [직접 고르기](고정색이 프리셋이 아니면 그 색 칩이 대신함)
         heat_row = QHBoxLayout()
         heat_row.setSpacing(tokens.SPACE)
+        self.heat_follow_chip = FollowChip()
+        self.heat_follow_chip.clicked.connect(self._set_heat_follow)
+        heat_row.addWidget(self.heat_follow_chip)
         self.heat_group = QButtonGroup(self)
-        self.heat_group.setExclusive(True)
-        self.heat_buttons: dict[str, QPushButton] = {}
+        self.heat_group.setExclusive(False)  # 선택 상태는 _paint_heat_buttons 가 직접 관리 (따르기·프리셋·직접 고른 색 중 하나)
+        self.heat_group.addButton(self.heat_follow_chip)
+        self.heat_buttons: dict[str, ColorChip] = {}
         for name, hexv in solved.HEAT_PRESETS:
-            b = QPushButton()
+            b = ColorChip(hexv, name)
             b.setObjectName(f"HeatPreset_{hexv[1:]}")
-            b.setCheckable(True)
-            b.setFixedSize(24, 24)
             b.setToolTip(name)
-            b.setAccessibleName(f"풀이 잔디 색: {name}")
             b.clicked.connect(lambda _c=False, v=hexv: self._set_heat_color(v))
             self.heat_group.addButton(b)
             self.heat_buttons[hexv] = b
             heat_row.addWidget(b)
-        # 직접 고른 색: 프리셋과 같은 원형 칩으로 보여 준다 (프리셋이 아닌 색일 때만). 누르면 다시 고르기
-        self.heat_custom_swatch = QPushButton()
-        self.heat_custom_swatch.setObjectName("HeatCustomSwatch")
-        self.heat_custom_swatch.setFixedSize(24, 24)
-        self.heat_custom_swatch.setAccessibleName("풀이 잔디 색: 직접 고른 색")
-        self.heat_custom_swatch.hide()
-        heat_row.addWidget(self.heat_custom_swatch)
-        self.heat_custom_btn = Button("직접 고르기")
+        # 직접 고르기: 그라디언트 링 칩. 고정색이 프리셋이 아니면 그 색의 원형 칩이 같은 자리·같은 이름으로 대신한다. 누르면 색 패널 펼침/접힘
+        self.heat_custom_btn = ColorChip(None, "직접 고르기")
         self.heat_custom_btn.setObjectName("HeatCustomButton")
         self.heat_custom_btn.setToolTip("원하는 색을 직접 고릅니다")
-        heat_row.addSpacing(tokens.SPACE)
+        self.heat_custom_btn.clicked.connect(self._toggle_heat_picker)
+        self.heat_group.addButton(self.heat_custom_btn)
         heat_row.addWidget(self.heat_custom_btn)
         heat_row.addStretch(1)
-        self.heat_color = solved.parse_hex(str(self.qs.value("growth/heat_color", solved.DEFAULT_HEAT_COLOR) or ""))
+        self.heat_mode, self.heat_color = self._read_heat_setting()
+        self.heat_picker = ColorPicker()
+        self.heat_picker.color_committed.connect(self._set_heat_color)
+        self.heat_picker.reset_requested.connect(self._set_heat_follow)
+        self.heat_picker.close_requested.connect(lambda: self.heat_picker_box.set_open(False))
+        self.heat_picker_box = CollapsibleBox(self.heat_picker)
+        self.heat_picker_box.setObjectName("HeatPickerBox")
+        heat_col = QVBoxLayout()
+        heat_col.setSpacing(tokens.SPACE)
+        heat_col.addLayout(heat_row)
+        heat_col.addWidget(self.heat_picker_box)
+        # 동기화 토글 자리 (스펙 §17.10): 동기화 기능이 연결되기 전에는 행 전체를 숨긴다 (동작하지 않는 스위치 금지)
+        self.heat_sync = Toggle("잔디 기록을 풀이 저장소에 함께 저장")
+        self.heat_sync.setObjectName("HeatSyncToggle")
+        self.heat_sync.setChecked(bool(self.qs.value("growth/heat_sync", False, type=bool)))
+        self.heat_sync_row = _toggle_row(self.heat_sync, "여러 PC 에서 같은 잔디를 보려면 켜세요. 문제 번호·날짜·방식만 저장하고 코드·지문은 올리지 않습니다.")
+        self.heat_sync_row.setObjectName("HeatSyncRow")
+        self.heat_sync_row.setVisible(False)
         v8.addWidget(_toggle_row(self.growth_enabled, "AI 코치 응답에서 분류 태그만 저장합니다(코드·지문 저장 안 함). 끄면 태그 요청과 기록을 모두 멈춥니다."))
         v8.addWidget(_divider())
         v8.addWidget(_toggle_row(self.growth_comment, "주 1회, 집계 숫자와 분류 이름만 AI 로 보냅니다. 코드·지문·문제 번호는 보내지 않습니다."))
         v8.addWidget(_divider())
-        v8.addLayout(_field("풀이 잔디 색", heat_row, _hint("성장 탭 맨 위 풀이 잔디의 색입니다. 고른 색을 기준으로 4단계 농도가 만들어집니다.")))
+        v8.addLayout(_field("풀이 잔디 색", heat_col, _hint("성장 탭 맨 위 풀이 잔디의 색입니다. 기본은 현재 테마 색을 따라가고, 직접 고르면 그 색 하나로 고정됩니다. 기준색에서 4단계 농도가 만들어집니다.")))
+        v8.addWidget(self.heat_sync_row)
         v8.addWidget(gh3)
         root.addWidget(card8)
 
         # --- 화면 (M21): 테마(색 조합) + 동작 줄이기. 선택 즉시 적용, QSettings 에 저장
         section("화면")
         card9, v9 = _card_box()
+        self.mode_seg = SegmentedControl()
+        self.mode_seg.setObjectName("ColorModeSegment")
+        self.mode_seg.set_value(tokens.normalize_color_mode(self.qs.value(tokens.COLOR_MODE_SETTING_KEY, tokens.DEFAULT_COLOR_MODE)))
+        self.mode_seg.selected_changed.connect(self._set_color_mode)
+        v9.addLayout(_field("화면 모드", _left(self.mode_seg), _hint("시스템 따르기는 Windows 설정의 앱 모드를 따라가요.")))
+        v9.addWidget(_divider())
         self.theme_group = QButtonGroup(self)
         self.theme_group.setExclusive(True)
         self.theme_chips: dict[str, ThemeChip] = {}
@@ -434,7 +461,7 @@ class SettingsPage(QWidget):
             self.theme_chips[t.key] = chip
             theme_grid.addWidget(chip, i // 3, i % 3)
         theme_grid.setColumnStretch(3, 1)
-        v9.addLayout(_field("테마 색", theme_grid, _hint("버튼·선택 표시의 색 조합입니다. 고르면 바로 바뀌고 다음 실행에도 유지됩니다. 풀이 잔디 색은 위 성장 기록에서 따로 고릅니다.")))
+        v9.addLayout(_field("테마 색", theme_grid, _hint("버튼·선택 표시·바닥 색의 조합입니다. 고르면 바로 바뀌고 다음 실행에도 유지됩니다. 풀이 잔디 색은 위 성장 기록에서 따로 고릅니다.")))
         v9.addWidget(_divider())
         self.reduce_motion = Toggle("동작 줄이기")
         self.reduce_motion.setObjectName("ReduceMotionToggle")
@@ -506,9 +533,8 @@ class SettingsPage(QWidget):
         self.growth_comment.toggled.connect(lambda on: self._growth_toggled("SWEA_GROWTH_COMMENT", on))
         self.growth_clear_btn.clicked.connect(self._clear_growth)
         self.reduce_motion.toggled.connect(self._reduce_motion_toggled)
-        self.heat_custom_btn.clicked.connect(self._pick_heat_color)
-        self.heat_custom_swatch.clicked.connect(self._pick_heat_color)
         self._paint_heat_buttons()
+        bus().changed.connect(self._paint_heat_buttons)  # 테마·모드가 바뀌면 칩 색(보정 후 색)·따르기 점·패널 미리보기를 다시 칠한다
         self.commit_template.editingFinished.connect(self._save_template)
         self.auto_push.clicked.connect(self._auto_push_clicked)
         self.scope_root.toggled.connect(self._scope_root_toggled)
@@ -982,19 +1008,48 @@ class SettingsPage(QWidget):
         self.status_message.emit("성장 기록 설정을 저장했습니다")
         self.coach_settings_changed.emit()
 
+    def _read_heat_setting(self) -> tuple[str, str]:
+        """QSettings growth/heat_color → (mode, hex). 키 없음·"follow"·쓰레기 값 = follow (hex 는 마지막 고정색 후보로 기본 초록)."""
+        kind, hexv = solved.heat_base(self.qs.value(solved.HEAT_COLOR_KEY, solved.HEAT_FOLLOW))
+        return ("fixed", hexv) if kind == "fixed" and hexv else ("follow", solved.DEFAULT_HEAT_COLOR)
+
     def _set_heat_color(self, value: str) -> None:
-        """풀이 잔디 색 저장 (QSettings growth/heat_color) + 즉시 반영."""
+        """풀이 잔디 고정색 저장 (QSettings growth/heat_color = #RRGGBB) + 즉시 반영."""
         self.heat_color = solved.parse_hex(value)
-        self.qs.setValue("growth/heat_color", self.heat_color)
+        self.heat_mode = "fixed"
+        self.qs.setValue(solved.HEAT_COLOR_KEY, self.heat_color)
         self._paint_heat_buttons()
         self.heat_color_changed.emit()
 
+    def _set_heat_follow(self) -> None:
+        """테마 색 따르기로 복귀 (QSettings growth/heat_color = "follow")."""
+        self.heat_mode = "follow"
+        self.qs.setValue(solved.HEAT_COLOR_KEY, solved.HEAT_FOLLOW)
+        self._paint_heat_buttons()
+        self.heat_color_changed.emit()
+
+    def _toggle_heat_picker(self) -> None:
+        opening = not self.heat_picker_box.is_open()
+        if opening:
+            self.heat_picker.set_color(self.heat_color if self.heat_mode == "fixed" else tokens.current().primary)
+        self._paint_heat_buttons()  # 칩 체크 토글을 실제 상태로 되돌린다
+        self.heat_picker_box.set_open(opening)
+
     def _set_theme(self, key: str) -> None:
-        """테마 칩 선택: 저장하고 메인에 알린다 (QSS 재적용은 MainWindow.apply_theme)."""
+        """테마 칩 선택: 저장하고 메인에 알린다 (재적용은 MainWindow.apply_appearance)."""
         theme = tokens.get_theme(key)
         self.qs.setValue(tokens.THEME_SETTING_KEY, theme.key)
         self.theme_changed.emit(theme.key)
+        self.appearance_changed.emit(self.mode_seg.value(), theme.key)
         self.status_message.emit(f"테마를 바꿨습니다 — {theme.label}")
+
+    def _set_color_mode(self, mode: str) -> None:
+        """화면 모드 세그먼트 선택: 저장하고 메인에 알린다 (즉시 적용, 재시작 불필요)."""
+        mode = tokens.normalize_color_mode(mode)
+        self.qs.setValue(tokens.COLOR_MODE_SETTING_KEY, mode)
+        self.appearance_changed.emit(mode, tokens.get_theme(str(self.qs.value(tokens.THEME_SETTING_KEY, tokens.DEFAULT_THEME))).key)
+        label = {"light": "라이트", "dark": "다크", "system": "시스템 따르기"}[mode]
+        self.status_message.emit(f"화면 모드를 바꿨습니다 — {label}")
 
     def _reduce_motion_toggled(self, on: bool) -> None:
         """동작 줄이기: 이후 모든 애니메이션이 즉시 최종 상태가 된다 (QSettings ui/reduce_motion). OS 설정이 꺼져 있으면 이 값과 무관하게 항상 꺼짐."""
@@ -1002,25 +1057,26 @@ class SettingsPage(QWidget):
         self.qs.setValue(REDUCE_MOTION_KEY, on)
         self.status_message.emit("동작 줄이기를 켰습니다" if on else "동작 줄이기를 껐습니다")
 
-    def _pick_heat_color(self) -> None:
-        c = QColorDialog.getColor(QColor(self.heat_color), self, "풀이 잔디 색")
-        if c.isValid():
-            self._set_heat_color(c.name())
-
     def _paint_heat_buttons(self) -> None:
-        """프리셋 버튼을 색 칩으로 칠한다. 현재 색과 같은 칩은 굵은 테두리 — 프리셋이 아니면 [직접 고르기] 앞에 그 색의 칩이 선택 상태로 나온다."""
-        pal = tokens.current()
-        self.heat_group.setExclusive(False)  # 프리셋이 아닌 색이면 모두 해제해야 한다 (배타 그룹은 마지막 하나를 못 끈다)
+        """잔디 색 칩 선택 표시: 따르기 / 프리셋 / 직접 고른 색 중 하나만 선택. 칩 색은 현재 모드 보정 후 색(툴팁·접근성에는 저장 hex)."""
+        dark = tokens.is_dark()
+        follow = self.heat_mode == "follow"
+        self.heat_follow_chip.setChecked(follow)
         for hexv, b in self.heat_buttons.items():
-            on = hexv == self.heat_color
-            b.setChecked(on)
-            b.setStyleSheet(_swatch_qss(hexv, on, pal))
-        self.heat_group.setExclusive(True)
-        custom = self.heat_color not in self.heat_buttons
-        self.heat_custom_swatch.setVisible(custom)
+            b.set_color(hexv, solved.adjust_for_mode(hexv, dark))
+            b.setChecked(not follow and hexv == self.heat_color)
+        custom = not follow and self.heat_color not in self.heat_buttons
         if custom:
-            self.heat_custom_swatch.setStyleSheet(_swatch_qss(self.heat_color, True, pal))
-            self.heat_custom_swatch.setToolTip(f"직접 고른 색 {self.heat_color} — 누르면 다시 고릅니다")
+            self.heat_custom_btn.set_color(self.heat_color, solved.adjust_for_mode(self.heat_color, dark))
+            self.heat_custom_btn.setToolTip(f"직접 고른 색 {self.heat_color} — 누르면 다시 고릅니다")
+        else:
+            self.heat_custom_btn.set_color(None)
+            self.heat_custom_btn.setToolTip("원하는 색을 직접 고릅니다")
+        self.heat_custom_btn.setChecked(custom)
+        base = tokens.current().primary if follow else solved.adjust_for_mode(self.heat_color, dark)
+        from ..growth_widgets import heat_level_colors
+
+        self.heat_picker.set_levels(heat_level_colors(base))
 
     def _clear_growth(self) -> None:
         box = QMessageBox(QMessageBox.Icon.Warning, "성장 기록 지우기", "성장 리포트·분류 기록·풀이 잔디가 삭제됩니다.\nAI 응답 캐시·복습 일정과 풀이 파일은 건드리지 않습니다.", parent=self)

@@ -24,8 +24,9 @@ from ... import content_cache, service, storage
 from ...config import Settings
 from ...service import FetchOptions, FetchOutcome
 from ..theme import tokens
+from ..theme.bus import bus
 from .. import motion
-from ..widgets import Badge, Banner, Button, ElidedLabel, LogView, PageColumn, make_busy_bar, open_in_editor, open_in_explorer, editor_tooltip, set_class, set_invalid, set_size, svg_icon
+from ..widgets import Badge, Banner, Button, ComboBox, ElidedLabel, LogView, PageColumn, make_busy_bar, open_in_editor, open_in_explorer, editor_tooltip, set_class, set_invalid, set_size, svg_icon
 from ..workers import FetchWorker
 
 
@@ -46,9 +47,18 @@ class FetchPage(QWidget):
         self._last_outcome: FetchOutcome | None = None
         self._last_args: tuple[str, str, FetchOptions] | None = None
         self._existing_dir: Path | None = None  # "이미 저장된 문제" 배너의 에디터/폴더 열기 대상
+        self._rows_builder = None  # 결과 카드의 파일 행을 현재 팔레트로 다시 만드는 함수 (테마 전환용)
         self._build()
+        bus().changed.connect(self.refresh_theme)
 
     # --- UI -----------------------------------------------------------------------
+    def refresh_theme(self) -> None:
+        """테마·모드 전환: 결과 카드의 SVG 아이콘과 rich text 행(색이 글자 안에 있음)을 새 팔레트로 다시 만든다."""
+        if self.card_icon.isVisibleTo(self):
+            self.card_icon.setPixmap(svg_icon("status-success", None, 16).pixmap(16, 16))
+        if self._rows_builder is not None and self.card.isVisibleTo(self):
+            self.card_files.set_rows(self._rows_builder())
+
     def _build(self) -> None:
         # 내용이 창보다 길어지면(결과 카드 + 로그) 겹치지 않고 스크롤되도록 QScrollArea 안에 둔다 (스펙 §11)
         outer = QVBoxLayout(self)
@@ -86,7 +96,7 @@ class FetchPage(QWidget):
         set_class(self.target, "mono")
         self.target.setPlaceholderText("25730  또는 문제 URL / contestProbId")
         self.target.setAccessibleName("문제 번호")
-        self.topic = QComboBox()
+        self.topic = ComboBox()
         self.topic.setObjectName("TopicCombo")
         self.topic.setEditable(True)
         self.topic.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -367,24 +377,30 @@ class FetchPage(QWidget):
             skel = self._last_args is not None and self._last_args[2].skeleton_only
             plan = [(s.input_name, info.input_filename), (f"{info.num}.py", None)] if skel else [
                 (s.input_name, info.input_filename), (s.output_name, info.output_filename), (f"{info.num}.py", None)]
-            rows = []
-            for name, src in plan:
-                path = r.problem_dir / name
-                if path in written:
-                    if name.endswith(".py"):
-                        desc = _ui("뼈대 생성")
-                    elif skel:
-                        desc = _ui("빈 파일")
+            def build_rows(plan=plan, r=r, written=written, skipped=skipped, skel=skel) -> list:
+                """결과 파일 행 (글자색이 rich text 안에 있어 테마가 바뀌면 다시 만든다)."""
+                pal = tokens.current()
+                rows = []
+                for name, src in plan:
+                    path = r.problem_dir / name
+                    if path in written:
+                        if name.endswith(".py"):
+                            desc = _ui("뼈대 생성")
+                        elif skel:
+                            desc = _ui("빈 파일")
+                        else:
+                            desc = f"{_fmt_size(path)}, {_ui('원본')} {_esc(src)}"
+                        badge = _badge_html("생성", pal.surface_alt, pal.text_2)
+                    elif path in skipped:
+                        desc = _ui("기존 파일 유지")
+                        badge = _badge_html("유지", pal.surface_alt, pal.text_2)
                     else:
-                        desc = f"{_fmt_size(path)}, {_ui('원본')} {_esc(src)}"
-                    badge = _badge_html("생성", p.surface_alt, p.text_2)
-                elif path in skipped:
-                    desc = _ui("기존 파일 유지")
-                    badge = _badge_html("유지", p.surface_alt, p.text_2)
-                else:
-                    continue
-                rows.append((f"{_pad(name)} ({desc}) {badge}", None))
-            self.card_files.set_rows(rows)
+                        continue
+                    rows.append((f"{_pad(name)} ({desc}) {badge}", None))
+                return rows
+
+            self._rows_builder = build_rows
+            self.card_files.set_rows(build_rows())
             self.card_note.setVisible(skel)
             self.card_note.setText(f"샘플은 문제 페이지에서 직접 {s.input_name} 에 붙여넣으세요")
             self.open_dir_btn.show()
@@ -401,15 +417,20 @@ class FetchPage(QWidget):
             self.card_badge.set_state("미리보기", "idle")
             self.card_title.setText(f"{info.num}. {info.title}")
             self.card_path.setText(f"{pv.get('problem_dir')}\\")
-            labels = {"create": ("생성 예정", p.surface_alt, p.text_2), "create_empty": ("빈 파일 생성 예정", p.surface_alt, p.text_2),
-                      "keep": ("유지", p.surface_alt, p.text_2), "overwrite": ("덮어씀", p.warning_bg, p.warning_text),
-                      "conflict": ("이미 있음", p.warning_bg, p.warning_text)}
-            rows = []
-            for fp in pv.get("files", []):
-                text, bg, fg = labels.get(fp.action, (fp.action, p.surface_alt, p.text_2))
-                src = f"← {_esc(fp.source)} ({fp.size} B)" if fp.source else ""
-                rows.append((f"{_pad(fp.name)} {src} {_badge_html(text, bg, fg)}".replace("  ", " "), fp.preview or None))
-            self.card_files.set_rows(rows)
+            def build_preview_rows(pv=pv) -> list:
+                pal = tokens.current()
+                labels = {"create": ("생성 예정", pal.surface_alt, pal.text_2), "create_empty": ("빈 파일 생성 예정", pal.surface_alt, pal.text_2),
+                          "keep": ("유지", pal.surface_alt, pal.text_2), "overwrite": ("덮어씀", pal.warning_bg, pal.warning_text),
+                          "conflict": ("이미 있음", pal.warning_bg, pal.warning_text)}
+                rows = []
+                for fp in pv.get("files", []):
+                    text, bg, fg = labels.get(fp.action, (fp.action, pal.surface_alt, pal.text_2))
+                    src = f"← {_esc(fp.source)} ({fp.size} B)" if fp.source else ""
+                    rows.append((f"{_pad(fp.name)} {src} {_badge_html(text, bg, fg)}".replace("  ", " "), fp.preview or None))
+                return rows
+
+            self._rows_builder = build_preview_rows
+            self.card_files.set_rows(build_preview_rows())
             self.card_note.hide()
             self.open_dir_btn.hide()
             self.open_py_btn.hide()

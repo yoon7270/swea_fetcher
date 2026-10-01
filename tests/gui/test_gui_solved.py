@@ -11,7 +11,7 @@ import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QColorDialog
+from PySide6.QtWidgets import QLabel
 
 from swea_fetcher import content_cache, growth, service, solved
 from swea_fetcher.gui import growth_widgets
@@ -107,8 +107,8 @@ def test_month_and_weekday_labels_do_not_crash_and_legend_matches(gw):
     p = page_of(gw)
     leg = p.heat_legend
     assert isinstance(leg, HeatLegend) and len(leg.swatches) == 5 and leg.colors == p.heatmap.level_colors()
-    assert leg.findChildren(type(leg.swatches[0]))  # 적게/많이 라벨 + 5칸
-    texts = {lab.text() for lab in leg.findChildren(type(leg.swatches[0]))}
+    assert all(sw.color() == c for sw, c in zip(leg.swatches, leg.colors))  # 칸은 직접 그리는 Swatch (스타일시트 없음)
+    texts = {lab.text() for lab in leg.findChildren(QLabel)}
     assert {"적게", "많이"} <= texts
 
 
@@ -194,10 +194,13 @@ def test_no_horizontal_scroll_at_720_and_latest_weeks_visible(gw):
 # --- 설정: 색 -----------------------------------------------------------------------------------
 
 
-def test_default_color_is_github_green(gw):
+def test_default_color_follows_theme(gw):
+    """키가 없으면 "테마 색 따르기" — 기준색은 현재 테마의 primary (M22), 따르기 칩이 선택돼 있다."""
     p = page_of(gw)
-    assert p.heat_base() == solved.DEFAULT_HEAT_COLOR == "#2DA44E"
-    assert gw.settings_page.heat_buttons["#2DA44E"].isChecked()
+    assert p.heat_setting() == ("follow", None)
+    assert p.heat_base() == tokens.current().primary
+    sp = gw.settings_page
+    assert sp.heat_follow_chip.isChecked() and not any(b.isChecked() for b in sp.heat_buttons.values())
 
 
 def test_preset_saves_to_qsettings_and_applies_instantly(gw):
@@ -212,25 +215,52 @@ def test_preset_saves_to_qsettings_and_applies_instantly(gw):
     assert after != before and after[3] == "#8250DF" and p.heat_legend.colors == after and after[0] == before[0]
 
 
-def test_custom_color_dialog(gw, monkeypatch):
+def test_custom_color_panel_commits_fixed_color(gw):
+    """[직접 고르기] → 인라인 색 패널(QColorDialog 아님) → HEX Enter 로 고정색 저장·즉시 반영."""
     sp = gw.settings_page
-    monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *a, **k: QColor("#12AB34")))
+    sp.show()
     sp.heat_custom_btn.click()
+    assert sp.heat_picker_box.is_open()
+    sp.heat_picker.hex_edit.setText("#12ab34")
+    QTest.keyClick(sp.heat_picker.hex_edit, Qt.Key.Key_Return)
     assert gw.qs.value("growth/heat_color") == "#12AB34" and gw.growth_page.heatmap.level_colors()[3] == "#12AB34"
-    assert not any(b.isChecked() for b in sp.heat_buttons.values())
-    # 직접 고른 색은 프리셋과 같은 원형 칩으로 (버튼에 색 띠를 두르지 않는다)
-    assert not sp.heat_custom_swatch.isHidden() and "#12AB34" in sp.heat_custom_swatch.styleSheet()
-    assert sp.heat_custom_btn.styleSheet() == ""
-    monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *a, **k: QColor()))  # 취소 = 유효하지 않은 색
-    sp.heat_custom_btn.click()
-    assert gw.qs.value("growth/heat_color") == "#12AB34"
-    sp.heat_buttons["#2DA44E"].click()  # 프리셋으로 돌아가면 직접 고른 칩은 숨김
-    assert sp.heat_custom_swatch.isHidden()
+    assert not any(b.isChecked() for b in sp.heat_buttons.values()) and not sp.heat_follow_chip.isChecked()
+    # 직접 고른 색은 프리셋과 같은 원형 칩으로 같은 자리에 (선택 상태, 저장 hex 가 툴팁)
+    assert sp.heat_custom_btn.isChecked() and sp.heat_custom_btn.hex == "#12AB34" and "#12AB34" in sp.heat_custom_btn.toolTip()
+    sp.heat_picker.hex_edit.setText("zzz")  # 잘못된 값은 적용하지 않고 오류 문구
+    QTest.keyClick(sp.heat_picker.hex_edit, Qt.Key.Key_Return)
+    assert gw.qs.value("growth/heat_color") == "#12AB34" and not sp.heat_picker.error.isHidden()
+    sp.heat_buttons["#2DA44E"].click()  # 프리셋으로 돌아가면 직접 고른 칩은 그라디언트 칩으로
+    assert sp.heat_custom_btn.hex is None and not sp.heat_custom_btn.isChecked()
 
 
-def test_invalid_saved_color_falls_back_to_default(gw):
+def test_follow_chip_returns_to_theme_color_and_tracks_theme(gw):
+    seed(gw.settings)
+    sp = gw.settings_page
+    sp.heat_buttons["#8250DF"].click()
+    p = page_of(gw)
+    assert p.heat_setting() == ("fixed", "#8250DF")
+    fixed = p.heatmap.level_colors()
+    gw.apply_appearance(None, "rose")  # 고정색은 테마를 바꿔도 그대로
+    assert p.heatmap.level_colors()[1:] == fixed[1:] or p.heatmap.level_colors()[3] == "#8250DF"
+    sp.heat_follow_chip.click()
+    assert gw.qs.value("growth/heat_color") == "follow" and p.heat_setting() == ("follow", None)
+    assert p.heatmap.level_colors()[3] == tokens.current().primary
+    gw.apply_appearance(None, "green")  # 따르기는 테마를 바꾸면 따라 바뀐다
+    assert p.heatmap.level_colors()[3] == tokens.get_theme("green").light.primary
+    gw.apply_appearance("dark", None)
+    assert p.heatmap.level_colors()[3] == tokens.get_theme("green").dark.primary and p.heat_legend.colors == p.heatmap.level_colors()
+
+
+def test_saved_fixed_color_is_kept_for_existing_users(gw):
+    """이전 버전이 저장한 #RRGGBB 는 그대로 고정색으로 유지된다 (마이그레이션)."""
+    gw.qs.setValue("growth/heat_color", "#d6336c")
+    assert page_of(gw).heat_setting() == ("fixed", "#D6336C")
+
+
+def test_invalid_saved_color_falls_back_to_follow(gw):
     gw.qs.setValue("growth/heat_color", "zzz")
-    assert page_of(gw).heat_base() == solved.DEFAULT_HEAT_COLOR
+    assert page_of(gw).heat_setting() == ("follow", None)
 
 
 def test_color_survives_new_page_and_shows_in_grid(gw):

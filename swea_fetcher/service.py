@@ -800,6 +800,95 @@ def due_count(settings: Settings, today: date | None = None) -> int:
     return coach.due_count(settings, today)
 
 
+# --- 문제별 상태 (M22 최근 탭 상태 칩, 스펙 §17.12) --------------------------------------------------
+
+STATUS_LABELS = {"pass": "Pass", "wrong": "오답", "timeout": "시간 초과", "runtime_error": "런타임 오류", "none": "미제출"}
+STATUS_ORDER = ("pass", "wrong", "timeout", "runtime_error", "none")  # 요약 줄 순서
+
+
+@dataclass(frozen=True)
+class ProblemStatus:
+    """문제 1건의 상태. key ∈ STATUS_ORDER, label = 칩 글자, detail = 툴팁용 세부("SWEA Pass"·"로컬 Pass" 등),
+    review_tag = (글자, 톤) — 톤 "due"(도래·지남) | "upcoming"(예정). 복습 태그는 상태와 독립이다."""
+
+    key: str
+    label: str
+    detail: str = ""
+    review_tag: tuple[str, str] | None = None
+    last_submit: str = ""  # "MM-DD HH:MM" (마지막 제출 — 툴팁용, 기록 없으면 "")
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value) if value else None
+    except ValueError:
+        return None
+
+
+def _solved_not_older(solved_at: str, submit_at: str) -> bool:
+    """solved 기록 시각 ≥ 마지막 제출 시각? 제출 시각이 없거나 읽을 수 없으면 solved 가 더 새롭다고 본다."""
+    a, b = _parse_iso(solved_at), _parse_iso(submit_at)
+    if a is None or b is None:
+        return True
+    try:
+        return a >= b
+    except TypeError:  # naive / aware 혼용
+        return a.replace(tzinfo=None) >= b.replace(tzinfo=None)
+
+
+def review_tag_of(review: "coach.ReviewItem | None") -> tuple[str, str] | None:
+    if review is None:
+        return None
+    n = review.overdue_days
+    if n < 0:
+        return f"복습 {-n}일 뒤", "upcoming"
+    return ("복습 오늘" if n == 0 else f"복습 {n}일 지남"), "due"
+
+
+def problem_status(
+    rec: "coach.ProblemRecord | None",
+    solved_latest: "solved.SolvedItem | None",
+    review: "coach.ReviewItem | None" = None,
+) -> ProblemStatus:
+    """문제 번호 단위 상태 판정 (순수 함수, 스펙 §17.12).
+
+    1. solved 기록이 있고 (rec 없음 | rec 가 pass | rec 가 pass 아니지만 solved 가 마지막 제출보다 새롭거나 같음) → Pass
+    2. rec.last_result 가 wrong / timeout / runtime_error → 각각
+    3. rec.last_result == "pass" 인데 solved 기록이 없음(400일 경과·백필 누락) → Pass
+    4. 그 외(기록 없음, 로컬 검증 실패는 기록이 남지 않음) → 미제출
+    복습 태그는 별개로 붙는다.
+    """
+    tag = review_tag_of(review)
+    last = rec.last_result if rec is not None else ""
+    when = _parse_iso(rec.last_submit_at) if rec is not None else None
+    sub = when.strftime("%m-%d %H:%M") if when else ""
+    if solved_latest is not None and (rec is None or last == "pass" or last not in ("wrong", "timeout", "runtime_error") or _solved_not_older(solved_latest.at, rec.last_submit_at)):
+        detail = {"swea": "SWEA Pass", "local": "로컬 Pass"}.get(solved_latest.via, "Pass")
+        return ProblemStatus("pass", STATUS_LABELS["pass"], detail, tag, sub)
+    if last in ("wrong", "timeout", "runtime_error"):
+        return ProblemStatus(last, STATUS_LABELS[last], STATUS_LABELS[last], tag, sub)
+    if last == "pass":
+        return ProblemStatus("pass", STATUS_LABELS["pass"], "Pass", tag, sub)
+    return ProblemStatus("none", STATUS_LABELS["none"], "아직 제출·검증하지 않음", tag, sub)
+
+
+def problem_statuses(settings: Settings, nums: Sequence[int]) -> dict[int, ProblemStatus]:
+    """번호별 상태 (최근 탭용). solved.json · coach/records.json · 복습 일정을 1회씩 읽는다 (파일 3개, UI 스레드 가능).
+    어떤 파일이든 읽기에 실패하면 빈 dict — 상태는 부가 정보라 칩만 숨기고 표는 정상 표시한다."""
+    try:
+        days = solved.load(settings)
+        records = coach._load_records(settings)
+        reviews = {i.num: i for i in coach.review_items(settings)}
+        latest: dict[int, solved.SolvedItem] = {}
+        for d in sorted(days):
+            for it in days[d]:  # 날짜 오름차순·날 안 시각순 → 마지막이 가장 늦은 항목
+                latest[it.num] = it
+        return {n: problem_status(records.get(str(int(n))), latest.get(int(n)), reviews.get(int(n))) for n in nums}
+    except Exception:  # noqa: BLE001 — 손상·권한 등 무엇이든 상태 표시만 포기
+        log.warning("문제 상태를 읽지 못했습니다", exc_info=True)
+        return {}
+
+
 def dismiss_offer(settings: Settings, num: int) -> None:
     coach.dismiss_offer(settings, num)
 

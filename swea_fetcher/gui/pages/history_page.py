@@ -1,17 +1,20 @@
-"""최근 페이지 (스펙 §6.3): {topic}/{num}/ 를 수정 시각순으로. 더블클릭/Enter → 검증, 우클릭 → 메뉴."""
+"""최근 페이지 (스펙 §6.3·§17.12): {topic}/{num}/ 를 수정 시각순으로. 문제별 상태 칩·왼쪽 띠·복습 태그(M22).
+더블클릭/Enter → 검증, 우클릭 → 메뉴."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QSize, Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QMenu,
-    QPushButton,
     QStackedLayout,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
@@ -22,10 +25,114 @@ from PySide6.QtWidgets import (
 from ... import service
 from ...config import Settings
 from ..theme import tokens
-from ..widgets import Banner, Button, EmptyState, open_in_editor, open_in_explorer, editor_tooltip, set_class, svg_icon
+from ..theme.bus import bus
+from ..widgets import AppMenu, Banner, Button, EmptyState, open_in_editor, open_in_explorer, editor_tooltip, set_class, svg_icon
 
 LIMIT = 20
 REVIEW_MAX_ROWS = 5  # 복습 카드에 보여줄 최대 항목 (나머지는 "외 N개")
+COL_STATUS, COL_NUM, COL_TITLE, COL_TOPIC, COL_TIME = range(5)
+COL_W_STATUS, COL_W_NUM, COL_W_TOPIC, COL_W_TIME, TITLE_MIN_W = 128, 84, 112, 124, 140  # 번호 84: 스펙 72 는 항목 좌우 패딩 16×2 를 빼면 5자리 번호가 잘린다
+TOPIC_HIDE_BELOW = 640  # 표 폭이 이보다 좁으면 주제 열 숨김 (툴팁에는 포함)
+ROLE_STATUS = Qt.ItemDataRole.UserRole + 1  # 첫 열 아이템: 상태 key (service.STATUS_ORDER) — 없으면 칩을 그리지 않는다
+ROLE_REVIEW = Qt.ItemDataRole.UserRole + 2  # 첫 열 아이템: 복습 태그 (글자, 톤)
+
+# 상태 → (아이콘, 칩 면, 칩 글자·아이콘, 왼쪽 띠) 팔레트 필드 이름 (스펙 §17.12 표). 색은 그릴 때 tokens.current() 에서 읽는다
+_STATUS_LOOK = {
+    "pass": ("status-pass", "success_bg", "success_text", "success"),
+    "wrong": ("status-wrong", "error_bg", "error_text", "error"),
+    "timeout": ("status-timeout", "warning_bg", "warning_text", "warning"),
+    "runtime_error": ("status-runtime", "error_bg", "error_text", "error"),
+    "none": ("status-none", "surface_alt", "text_2", None),
+}
+
+
+class StatusDelegate(QStyledItemDelegate):
+    """첫 열: 왼쪽 3px 띠 + 상태 칩(아이콘+글자), 제목 열: 오른쪽 끝 복습 태그를 직접 그린다 (셀에 위젯을 넣지 않음).
+    행 hover·선택 배경은 QSS(::item)가 그리고 칩 색은 그대로 둔다."""
+
+    BAND_X, BAND_W, CHIP_X, CHIP_H, TAG_H = 8, 3, 18, 22, 20
+
+    @staticmethod
+    def _font(base: QFont) -> QFont:
+        f = QFont(base)
+        f.setPointSizeF(float(tokens.FONT_SIZE_XS))
+        f.setBold(True)
+        return f
+
+    def _tag_width(self, option, text: str) -> int:
+        fm = QFontMetrics(self._font(option.font))
+        return 6 + 12 + 4 + fm.horizontalAdvance(text) + 8
+
+    @staticmethod
+    def _review_tag(index):
+        return index.model().index(index.row(), COL_STATUS).data(ROLE_REVIEW)
+
+    def paint(self, painter, option, index) -> None:  # noqa: N802
+        col = index.column()
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        tag = self._review_tag(index) if col == COL_TITLE else None
+        title = opt.text
+        if col == COL_STATUS or tag:
+            opt.text = ""  # 상태 칸의 글자는 칩으로 대신 그린다 (아이템 텍스트는 접근성용). 태그가 있는 제목은 아래에서 직접 말줄임
+        widget = option.widget
+        style = widget.style() if widget is not None else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
+        if col == COL_STATUS:
+            key = index.data(ROLE_STATUS)
+            if key in _STATUS_LOOK:
+                self._paint_chip(painter, option.rect, key)
+        elif tag:
+            fg = index.data(Qt.ItemDataRole.ForegroundRole)
+            painter.save()
+            painter.setFont(option.font)
+            painter.setPen(fg.color() if hasattr(fg, "color") else QColor(tokens.current().text))
+            room = option.rect.width() - 16 - (self._tag_width(option, tag[0]) + 8 + 8)  # 왼쪽 패딩 16, 오른쪽은 태그 폭 + 간격 8 만큼 비운다
+            elided = QFontMetrics(option.font).elidedText(title, Qt.TextElideMode.ElideRight, max(room, 20))
+            painter.drawText(QRectF(option.rect.left() + 16, option.rect.top(), max(room, 20), option.rect.height()), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), elided)
+            painter.restore()
+            self._paint_tag(painter, option, tag)
+
+    def _paint_chip(self, painter: QPainter, rect, key: str) -> None:
+        p = tokens.current()
+        icon, bg, fg, band = _STATUS_LOOK[key]
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        if band:
+            painter.setBrush(QColor(getattr(p, band)))
+            painter.drawRoundedRect(QRectF(rect.left() + self.BAND_X, rect.top() + 8, self.BAND_W, rect.height() - 16), 1.5, 1.5)
+        label = service.STATUS_LABELS[key]
+        font = self._font(painter.font())
+        fm = QFontMetrics(font)
+        w = 6 + 14 + 4 + fm.horizontalAdvance(label) + 8
+        chip = QRectF(rect.left() + self.CHIP_X, rect.center().y() - self.CHIP_H / 2, w, self.CHIP_H)
+        painter.setBrush(QColor(getattr(p, bg)))
+        painter.drawRoundedRect(chip, self.CHIP_H / 2, self.CHIP_H / 2)
+        color = getattr(p, fg)
+        painter.drawPixmap(int(chip.left() + 6), int(chip.center().y() - 7), svg_icon(icon, color, 14).pixmap(14, 14))
+        painter.setFont(font)
+        painter.setPen(QColor(color))
+        painter.drawText(QRectF(chip.left() + 6 + 14 + 4, chip.top(), w, chip.height()), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), label)
+        painter.restore()
+
+    def _paint_tag(self, painter: QPainter, option, tag) -> None:
+        p = tokens.current()
+        text, tone = tag
+        bg, fg = (p.warning_bg, p.warning_text) if tone == "due" else (p.surface_alt, p.text_2)
+        rect = option.rect
+        w = self._tag_width(option, text)
+        r = QRectF(rect.right() - 8 - w, rect.center().y() - self.TAG_H / 2, w, self.TAG_H)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(bg))
+        painter.drawRoundedRect(r, self.TAG_H / 2, self.TAG_H / 2)
+        painter.drawPixmap(int(r.left() + 6), int(r.center().y() - 6), svg_icon("review", fg, 12).pixmap(12, 12))
+        painter.setFont(self._font(painter.font()))
+        painter.setPen(QColor(fg))
+        painter.drawText(QRectF(r.left() + 6 + 12 + 4, r.top(), w, r.height()), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), text)
+        painter.restore()
 
 
 class HistoryPage(QWidget):
@@ -82,15 +189,20 @@ class HistoryPage(QWidget):
 
         holder = QWidget()
         self.stack = QStackedLayout(holder)
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["번호", "제목", "주제", "저장 시각"])
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["상태", "번호", "제목", "주제", "저장 시각"])
         hh = self.table.horizontalHeader()
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(COL_TITLE, QHeaderView.ResizeMode.Stretch)
+        hh.setMinimumSectionSize(40)
         hh.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)  # S1
-        self.table.horizontalHeaderItem(0).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.table.setColumnWidth(0, 80)
-        self.table.setColumnWidth(2, 120)
-        self.table.setColumnWidth(3, 140)
+        self.table.horizontalHeaderItem(COL_NUM).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.table.setColumnWidth(COL_STATUS, COL_W_STATUS)
+        self.table.setColumnWidth(COL_NUM, COL_W_NUM)
+        self.table.setColumnWidth(COL_TOPIC, COL_W_TOPIC)
+        self.table.setColumnWidth(COL_TIME, COL_W_TIME)
+        self._delegate = StatusDelegate(self.table)
+        self.table.setItemDelegateForColumn(COL_STATUS, self._delegate)
+        self.table.setItemDelegateForColumn(COL_TITLE, self._delegate)
         self.table.verticalHeader().hide()
         self.table.verticalHeader().setDefaultSectionSize(tokens.CONTROL_H_SM)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -108,12 +220,28 @@ class HistoryPage(QWidget):
         self.table.cellClicked.connect(self._clicked)
         self.table.cellActivated.connect(self._clicked)  # Enter
         self.table.customContextMenuRequested.connect(self._context_menu)
+        bus().changed.connect(self.refresh_theme)
         if self.empty.button:
             self.empty.button.clicked.connect(lambda: self.goto_requested.emit("fetch"))
 
     def set_settings(self, settings: Settings | None) -> None:
         self.settings = settings
         self.refresh()
+
+    def refresh_theme(self) -> None:
+        """델리게이트가 매번 토큰을 읽으므로 표는 다시 그리기만 하면 된다. 복습 카드의 아이콘은 다시 만든다."""
+        self.table.viewport().update()
+        self._refresh_reviews()
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        self._apply_topic_visibility()
+
+    def _apply_topic_visibility(self) -> None:
+        """표 폭이 640 미만이면 주제 열을 숨긴다 (툴팁에 주제 포함)."""
+        narrow = self.table.width() < TOPIC_HIDE_BELOW
+        if self.table.isColumnHidden(COL_TOPIC) != narrow:
+            self.table.setColumnHidden(COL_TOPIC, narrow)
 
     def refresh(self) -> None:
         """디스크 stat 20개 — 스펙 §6.3 에 따라 UI 스레드 허용."""
@@ -135,6 +263,7 @@ class HistoryPage(QWidget):
         while self._review_lay.count():
             w = self._review_lay.takeAt(0).widget()
             if w is not None:
+                w.hide()  # deleteLater 는 이벤트 루프가 돌아야 지워지므로 그 전에 잔상이 보이지 않게 먼저 숨긴다
                 w.deleteLater()
         items = service.review_items(self.settings) if self.settings is not None else []
         if not items:
@@ -153,13 +282,13 @@ class HistoryPage(QWidget):
             btn.setToolTip("검증 탭에서 이 문제를 엽니다")
             btn.clicked.connect(lambda _=False, i=it: self.check_requested.emit(i.topic, i.num))
             if it.overdue_days > 0:
-                status, color = f"{it.overdue_days}일 지남", p.warning_text
+                status = f"{it.overdue_days}일 지남"
             elif it.overdue_days == 0:
-                status, color = "오늘 복습", p.warning_text
+                status = "오늘 복습"
             else:
-                status, color = f"{-it.overdue_days}일 뒤", p.text_3
+                status = f"{-it.overdue_days}일 뒤"
             lab = QLabel(f"· {status}")
-            lab.setStyleSheet(f"color: {color};")
+            set_class(lab, "review-status", "due" if it.overdue_days >= 0 else "upcoming")  # 색은 QSS 클래스 (스펙 §17.12)
             close = QToolButton()
             close.setIcon(svg_icon("close", p.text_3, 14))  # ✕ 글리프는 Pretendard 에 없어 SVG
             close.setIconSize(QSize(14, 14))
@@ -190,18 +319,58 @@ class HistoryPage(QWidget):
         self._items = list(items)
         self.table.setRowCount(len(items))
         p = tokens.current()
+        stats = service.problem_statuses(self.settings, [it.num for it in items]) if (items and self.settings is not None) else {}
+        counts: dict[str, int] = {}
         for i, it in enumerate(items):
-            vals = (str(it.num), it.title or "—", it.topic, it.saved_at.strftime("%m-%d %H:%M"))
+            st = stats.get(it.num)
+            vals = (st.label if st else "", str(it.num), it.title or "—", it.topic, it.saved_at.strftime("%m-%d %H:%M"))
             for col, val in enumerate(vals):
                 cell = QTableWidgetItem(val)
-                if col == 0:
+                if col == COL_NUM:
                     cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                if col == 1 and it.title is None:
-                    cell.setForeground(__import__("PySide6.QtGui", fromlist=["QColor"]).QColor(p.text_3))
-                cell.setToolTip(str(it.path))
+                if col == COL_TITLE and it.title is None:
+                    cell.setForeground(QColor(p.text_3))
+                tip = str(it.path)
+                if col == COL_STATUS and st is not None:
+                    cell.setData(ROLE_STATUS, st.key)
+                    cell.setData(ROLE_REVIEW, st.review_tag)
+                    tip = self._status_tooltip(it, st)
+                    cell.setData(Qt.ItemDataRole.AccessibleDescriptionRole, self._status_description(it, st))
+                elif col == COL_TITLE:
+                    tip = f"{it.topic} · {it.path}"  # 주제 열이 숨겨져도 툴팁에서 볼 수 있다
+                cell.setToolTip(tip)
                 self.table.setItem(i, col, cell)
+            if st is not None:
+                counts[st.key] = counts.get(st.key, 0) + 1
         self.stack.setCurrentIndex(0 if items else 1)
-        self.count_label.setVisible(len(items) >= LIMIT)
+        if stats:  # 상태 요약 (Pass 12 · 오답 3 …, 0 인 것 생략). 20개 미만이어도 표시
+            self.count_label.setText(" · ".join(f"{service.STATUS_LABELS[k]} {counts[k]}" for k in service.STATUS_ORDER if counts.get(k)))
+            self.count_label.setVisible(bool(counts))
+        else:
+            self.count_label.setText(f"최근 {LIMIT}개")
+            self.count_label.setVisible(len(items) >= LIMIT)
+        self._apply_topic_visibility()
+
+    @staticmethod
+    def _status_tooltip(it: service.RecentItem, st: service.ProblemStatus) -> str:
+        """"1226번 · Pass(SWEA) · 마지막 제출 09-30 14:44 · 복습 2일 뒤" (Pass 는 SWEA/로컬 구분, 미제출은 안내 문구)."""
+        d = ""
+        if st.key == "pass" and st.detail != "Pass":
+            d = st.detail.replace(" Pass", "")
+        elif st.key == "none":
+            d = st.detail
+        parts = [f"{it.num}번", f"{st.label}({d})" if d else st.label]
+        if st.last_submit:
+            parts.append(f"마지막 제출 {st.last_submit}")
+        if st.review_tag:
+            parts.append(st.review_tag[0])
+        parts.append(f"주제 {it.topic}")
+        return " · ".join(parts)
+
+    @staticmethod
+    def _status_description(it: service.RecentItem, st: service.ProblemStatus) -> str:
+        tail = f", {st.review_tag[0]}" if st.review_tag else ""
+        return f"{it.num}번 문제, {st.label}{tail}"
 
     def _clicked(self, row: int, _col: int) -> None:
         if 0 <= row < len(self._items):
@@ -218,7 +387,7 @@ class HistoryPage(QWidget):
         if not (0 <= row < len(self._items)):
             return
         it = self._items[row]
-        menu = QMenu(self)
+        menu = AppMenu(self)
         menu.addAction("폴더 열기", lambda: open_in_explorer(it.path) and self.status_message.emit("폴더를 열었습니다"))
         editor = self.settings.editor if self.settings else "auto"
         open_act = menu.addAction("에디터에서 열기", lambda: self._open_editor(it.path, it.path / f"{it.num}.py", editor))

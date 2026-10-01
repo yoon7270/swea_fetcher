@@ -150,7 +150,7 @@ def test_fetch_page_success_flow(main_window, qtbot, monkeypatch, problem_info):
     assert "진행 메시지" in fp.log.text.toPlainText()
     # 최근 목록이 갱신됨
     assert w.history_page.table.rowCount() == 1
-    assert w.history_page.table.item(0, 0).text() == "25730"
+    assert w.history_page.table.item(0, 1).text() == "25730"
 
 
 @pytest.mark.parametrize(
@@ -475,7 +475,7 @@ def test_history_page_lists_and_click_requests_problem(main_window, qtbot):
     hp = w.history_page
     hp.refresh()
     assert hp.table.rowCount() == 1
-    assert [hp.table.item(0, c).text() for c in range(3)] == ["42", "제목", "DP"]
+    assert [hp.table.item(0, c).text() for c in (1, 2, 3)] == ["42", "제목", "DP"]
     assert hp.stack.currentIndex() == 0
     with qtbot.waitSignal(hp.problem_requested, timeout=WAIT) as sig:
         hp._clicked(0, 0)
@@ -719,3 +719,20 @@ def test_mouse_left_click_not_intercepted(main_window):
     w.goto("history")
     _mouse_side(w, w.history_page.table.viewport(), Qt.MouseButton.LeftButton)
     assert _page_key(w) == "history" and w._back
+
+
+def test_status_badges_do_not_overlap_temporary_message(main_window, qtbot):
+    """임시 메시지 중에 배지를 켜도 메시지 위에 겹쳐 보이지 않고, 메시지가 사라지면 나타난다."""
+    w = main_window
+    w.show()
+    w.statusBar().showMessage("임시 메시지", 0)
+    qtbot.wait(20)
+    w._sb_set_visible(w.review_badge, True)
+    assert w.review_badge.isHidden()
+    w.statusBar().clearMessage()
+    qtbot.waitUntil(lambda: not w.review_badge.isHidden(), timeout=2000)
+    w._sb_set_visible(w.review_badge, False)
+    w.statusBar().showMessage("또 메시지", 0)
+    w.statusBar().clearMessage()
+    qtbot.wait(20)
+    assert w.review_badge.isHidden()  # 꺼 둔 배지는 메시지가 사라져도 계속 숨김

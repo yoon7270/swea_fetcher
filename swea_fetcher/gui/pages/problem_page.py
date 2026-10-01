@@ -20,6 +20,7 @@ from ...models import ProblemContent
 from ...service import FetchOutcome
 from ...storage import normalize_text
 from ..theme import tokens
+from ..theme.bus import bus
 from ..widgets import Badge, Banner, Button, ElidedLabel, EmptyState, editor_tooltip, open_in_editor, open_in_explorer, set_class
 
 ZOOM_MIN, ZOOM_MAX = -3, 8
@@ -68,12 +69,18 @@ class _StatementBrowser(QTextBrowser):
         self._resize_timer.setInterval(_RESIZE_DEBOUNCE_MS)
         self._resize_timer.timeout.connect(self._rerender_if_needed)
         self.apply_palette(tokens.current())
+        bus().changed.connect(self.refresh_theme)
 
-    # 다크 팔레트 도입 시 build_qss 와 함께 다시 호출한다
     def apply_palette(self, palette: tokens.Palette) -> None:
         self.document().setDefaultStyleSheet(tokens.build_statement_css(palette))
         if self._content is not None:
             self._render()
+
+    def refresh_theme(self) -> None:
+        """테마·모드 전환: 문서 CSS 를 새 팔레트로 바꾸고 원본(content)으로 다시 렌더한다. 스크롤 위치 유지."""
+        pos = self.verticalScrollBar().value()
+        self.apply_palette(tokens.current())
+        self.verticalScrollBar().setValue(pos)
 
     def loadResource(self, _type, _url):  # noqa: N802
         """이미지는 addResource 로 미리 넣어 둔다. 그 외 어떤 리소스(file/http/qrc …)도 읽지 않는다."""
@@ -120,7 +127,10 @@ class _StatementBrowser(QTextBrowser):
             if img is None:
                 return ""
             w = min(img.width(), avail)
-            return f'<img src="{token}" width="{w}"/>'
+            tag = f'<img src="{token}" width="{w}"/>'
+            if tokens.current().is_dark:  # 투명 배경 + 검은 선 그림이 다크에서 사라지지 않게 흰 종이 위에 (스펙 §17.7)
+                return f'<table class="imgwrap"><tr><td bgcolor="{tokens.current().image_paper}">{tag}</td></tr></table>'
+            return tag
 
         return _IMG_RE.sub(sub, htm)
 

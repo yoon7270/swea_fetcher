@@ -283,3 +283,34 @@ def test_check_without_growth_does_not_record(settings, problem):
     off = dataclasses.replace(settings, growth=False)
     assert service.check_problem(off, problem, timeout=30).passed
     assert solved.load(settings) == {}
+
+
+# --- M22: 다크 농도 · 모드 보정 · 설정 값 해석 ---------------------------------------------------
+
+
+@pytest.mark.parametrize("base", ["#2DA44E", "#1F6FEB", "#8250DF", "#E16F24", "#D6336C", "#4C94FF"])
+def test_dark_heat_levels_strictly_brighter(base):
+    bg, empty = "#1E222A", "#29303A"
+    cols = [empty, *solved.heat_colors(base, bg, dark=True)]
+    lums = [solved.rel_luminance(c) for c in cols]
+    assert all(a < b for a, b in zip(lums, lums[1:])), lums
+    assert solved.heat_colors(base, bg, dark=True) != solved.heat_colors(base, bg)  # 다크는 다른 혼합 비율
+
+
+def test_adjust_for_mode_luminance_bounds_and_idempotent():
+    dark_fixed = solved.adjust_for_mode("#0B1020", dark=True)
+    assert solved.rel_luminance(dark_fixed) >= solved.DARK_MIN_LUMA and dark_fixed != "#0B1020"
+    assert solved.adjust_for_mode("#4C94FF", dark=True) == "#4C94FF"
+    light_fixed = solved.adjust_for_mode("#FFEE88", dark=False)
+    assert solved.rel_luminance(light_fixed) <= solved.LIGHT_MAX_LUMA
+    assert solved.adjust_for_mode("#2da44e", dark=False) == "#2DA44E"  # 범위 안이면 그대로(대문자 통일)
+    assert solved.adjust_for_mode(solved.adjust_for_mode("#0B1020", True), True) == solved.adjust_for_mode("#0B1020", True)
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [(None, ("follow", None)), ("", ("follow", None)), ("follow", ("follow", None)), ("zzz", ("follow", None)),
+     ("#12AB3", ("follow", None)), ("#12ab34", ("fixed", "#12AB34")), ("#2DA44E", ("fixed", "#2DA44E"))],
+)
+def test_heat_base_setting_migration(value, expected):
+    assert solved.heat_base(value) == expected

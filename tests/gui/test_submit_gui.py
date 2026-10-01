@@ -301,7 +301,7 @@ def test_history_context_menu_submit_routes_to_check_page(main_window, solved, s
             shown.append(self)
             return None
 
-    monkeypatch.setattr(history_page_mod, "QMenu", RecordingMenu)
+    monkeypatch.setattr(history_page_mod, "AppMenu", RecordingMenu)
     monkeypatch.setattr(hp.table, "rowAt", lambda y: 0)
     fake_msgbox.choose = "취소"
     hp._context_menu(QPoint(5, 5))

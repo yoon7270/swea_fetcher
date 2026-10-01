@@ -1,11 +1,12 @@
-"""디자인 토큰 (색·폰트·간격·반경). 값의 출처는 design/design-spec.md §16 (M21 토스 스타일 리프레시).
+"""디자인 토큰 (색·폰트·간격·반경). 값의 출처는 design/design-spec.md §16(M21), §17(M22 다크 모드·테마 확장).
 
-QSS 는 build_qss() 가 토큰으로 생성한다. 라이트 전용(다크는 DARK 를 채우면 활성화 — M21 범위 밖).
-위젯 코드에서 색상값을 직접 쓰지 않는다 — 반드시 tokens.current().<field> 를 참조한다 (diff 행 배경, 카드 내부 rich text 등).
+QSS 는 build_qss() 가 토큰으로 생성한다. 테마 6종 × 모드 2(라이트·다크) = 12 팔레트.
+위젯 코드에서 색상값을 직접 쓰지 않는다 — 반드시 tokens.current().<field> 를 그리는 시점에 참조한다.
+(tests/gui/test_no_hardcoded_colors.py 가 gui/**/*.py 의 색 리터럴을 검사한다.)
 셀렉터 규약: objectName(#nav, #log, #diff, #busy) + 동적 속성 class / state (widgets.set_class).
 
-테마(색 조합): THEMES 에 여러 벌. 바뀌는 건 "주색 계열" 필드뿐이고 중립색(바닥·글자·상태색)은 모든 테마가 공유한다.
-현재 테마는 set_theme(key) 로 바꾸고 current() 로 읽는다. LIGHT 는 기본 테마(블루) 팔레트 — 하위 호환용 이름.
+상태: 테마 key + 모드 설정(light|dark|system) + 감지된 시스템 다크 여부 → current() 가 해당 팔레트를 돌려준다.
+tokens 는 Qt 를 import 하지 않는다 — 시스템 다크 감지는 gui/theme/appearance.py 가 set_system_dark() 로 주입.
 """
 
 from __future__ import annotations
@@ -17,12 +18,12 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Palette:
     bg: str  # 창·페이지 바닥
-    surface: str  # 카드·사이드바
+    surface: str  # 카드·다이얼로그
     surface_alt: str  # 입력창 채움, 로그 필드, 0단계 잔디, 스켈레톤 기본
     border: str  # 구분선(표 행 등). 카드 외곽선은 없음
     primary: str  # 글자 없는 면: 포커스 링, 진행 막대, 토글 ON, 체크 원, 차트 선택, 스피너
     primary_hover: str  # primary 버튼 hover
-    primary_text: str  # primary 버튼 면 위 글자 (흰색)
+    primary_text: str  # primary 버튼 면 위 글자
     accent: str  # 예약 — 새 용도를 만들지 말 것
     success: str  # 아이콘·점
     success_bg: str  # 배너·배지 면
@@ -32,13 +33,13 @@ class Palette:
     error_bg: str
     text: str  # 1단계 본문
     text_2: str  # 2단계 레이블·보조 설명·로그 본문
-    text_3: str  # 3단계 힌트·표 머리글·상태바 — bg 위 4.7:1, 이보다 연한 글자 금지 (플레이스홀더·비활성 제외)
+    text_3: str  # 3단계 힌트·표 머리글·상태바 — 4.5:1 이상, 이보다 연한 글자 금지 (플레이스홀더·비활성 제외)
     diff_same: str
     diff_changed: str  # = warning_bg
     diff_missing: str  # = error_bg   (기대에만 있는 줄)
     diff_extra: str  # = primary_soft (실제에만 있는 줄 — 초록을 쓰지 않는 이유는 스펙 §5.9)
     # --- 기본값 있음 → 기존 생성 코드 호환 ---
-    border_strong: str = "#D1D6DB"  # 스크롤바 핸들, 차트 비선택 막대, 스켈레톤 하이라이트
+    border_strong: str = "#D1D6DB"  # 스크롤바 핸들, 차트 비선택 막대
     primary_pressed: str = "#1957C2"
     primary_soft: str = "#E8F3FF"  # 내비 선택 알약, info 배너, tonal 버튼, running 배지
     primary_soft_text: str = "#1957C2"  # primary_soft 위 글자
@@ -46,7 +47,7 @@ class Palette:
     warning_text: str = "#8A5100"
     error_text: str = "#C62B38"
     text_disabled: str = "#8B95A1"  # 비활성 컨트롤 글자 (AA 예외)
-    # --- M21 신규 ---
+    # --- M21 ---
     bg_subtle: str = "#F9FAFB"  # 표 hover, 카드 안 보조 면, AnswerBrowser 배경
     control_border: str = "#8B95A1"  # 체크박스·라디오 미선택 테두리
     text_placeholder: str = "#8B95A1"  # 플레이스홀더 전용 (AA 예외)
@@ -61,40 +62,86 @@ class Palette:
     toast_text: str = "#FFFFFF"
     danger_pressed: str = "#FFDDDD"  # danger 텍스트 버튼 pressed 면
     toggle_off: str = "#B0B8C1"  # 토글 OFF 트랙 (의미는 손잡이 위치·옆 글자로도 전달)
+    # --- M22 (스펙 §17.3) ---
+    is_dark: bool = False  # 모드 분기(잔디·그림자 등)
+    sidebar: str = "#FFFFFF"  # 사이드바·내비 바닥
+    on_primary: str = "#FFFFFF"  # primary 면 위 글리프(체크·토글 손잡이)
+    hover_fill: str = "#E5E8EB"  # 입력·행 hover 면
+    segment_on: str = "#FFFFFF"  # 세그먼트 컨트롤 선택 칸
+    toggle_knob: str = "#FFFFFF"  # 토글 OFF 손잡이
+    link: str = "#1957C2"  # 리치 텍스트 링크
+    image_paper: str = "#FFFFFF"  # 문제 지문 이미지 뒤 종이색
+    ring_light: str = "#FFFFFF"  # 색 선택 패널 SV 핸들 이중 링(임의 색 위라 흑백 고정)
+    ring_dark: str = "#0F1720"
 
 
-def _make(
-    primary: str, action: str, hover: str, pressed: str, soft: str, soft_hover: str, soft_pressed: str, soft_text: str
+# 모드별 1벌 공통 토큰 (스펙 §17.4) — 글자·상태색은 테마와 무관
+_COMMON_LIGHT = dict(
+    text="#191F28", text_2="#4E5968", text_3="#5B6674", text_placeholder="#8B95A1", text_disabled="#8B95A1",
+    control_border="#8B95A1", toggle_off="#B0B8C1", secondary_text="#333D4B", toast_bg="#333D4B", toast_text="#FFFFFF",
+    success="#0A9B5E", success_bg="#E6F8F0", success_text="#00794A",
+    warning="#D97800", warning_bg="#FFF4E0", warning_text="#8A5100",
+    error="#F04452", error_bg="#FFEEEE", error_text="#C62B38", danger_pressed="#FFE3E3",
+)
+_COMMON_DARK = dict(
+    text="#ECEFF3", text_2="#B9C1CD", text_3="#A1AAB6", text_placeholder="#737C8A", text_disabled="#737C8A",
+    control_border="#7C8593", toggle_off="#4A515D", secondary_text="#DDE2E9", toast_bg="#ECEFF3", toast_text="#191F28",
+    success="#3DD68C", success_bg="#15382A", success_text="#6FE3A8",
+    warning="#FFA726", warning_bg="#3D2C12", warning_text="#FFC266",
+    error="#FF6B78", error_bg="#3F1D23", error_text="#FF8A94", danger_pressed="#55252D",
+)
+
+
+def _make_light(
+    neutral: tuple[str, str, str, str, str, str],
+    primary: str, action: str, hover: str, pressed: str, soft: str, soft_hover: str, soft_pressed: str, soft_text: str,
 ) -> Palette:
-    """중립색은 공유하고 주색 계열 8개만 받아 Palette 를 만든다."""
+    """라이트: neutral = (bg, sidebar, bg_subtle, surface_alt, border, border_strong). surface 는 #FFFFFF 고정 (§17.5)."""
+    bg, sidebar, bg_subtle, surface_alt, border, border_strong = neutral
+    c = _COMMON_LIGHT
     return Palette(
-        bg="#F2F4F6",
-        surface="#FFFFFF",
-        surface_alt="#F2F4F6",
-        border="#E5E8EB",
-        primary=primary,
-        primary_hover=hover,
-        primary_text="#FFFFFF",
-        accent=primary,
-        success="#0A9B5E",
-        success_bg="#E6F8F0",
-        warning="#D97800",
-        warning_bg="#FFF4E0",
-        error="#F04452",
-        error_bg="#FFEEEE",
-        text="#191F28",
-        text_2="#4E5968",
-        text_3="#636E7C",
-        diff_same="#FFFFFF",
-        diff_changed="#FFF4E0",
-        diff_missing="#FFEEEE",
-        diff_extra=soft,
-        primary_pressed=pressed,
-        primary_soft=soft,
-        primary_soft_text=soft_text,
-        primary_action=action,
-        primary_soft_hover=soft_hover,
-        primary_soft_pressed=soft_pressed,
+        bg=bg, surface="#FFFFFF", surface_alt=surface_alt, border=border,
+        primary=primary, primary_hover=hover, primary_text="#FFFFFF", accent=primary,
+        success=c["success"], success_bg=c["success_bg"], warning=c["warning"], warning_bg=c["warning_bg"],
+        error=c["error"], error_bg=c["error_bg"], text=c["text"], text_2=c["text_2"], text_3=c["text_3"],
+        diff_same="#FFFFFF", diff_changed=c["warning_bg"], diff_missing=c["error_bg"], diff_extra=soft,
+        border_strong=border_strong, primary_pressed=pressed, primary_soft=soft, primary_soft_text=soft_text,
+        success_text=c["success_text"], warning_text=c["warning_text"], error_text=c["error_text"],
+        text_disabled=c["text_disabled"], bg_subtle=bg_subtle, control_border=c["control_border"],
+        text_placeholder=c["text_placeholder"], primary_action=action,
+        primary_soft_hover=soft_hover, primary_soft_pressed=soft_pressed,
+        secondary=surface_alt, secondary_hover=border, secondary_pressed=border_strong,
+        secondary_text=c["secondary_text"], toast_bg=c["toast_bg"], toast_text=c["toast_text"],
+        danger_pressed=c["danger_pressed"], toggle_off=c["toggle_off"],
+        is_dark=False, sidebar=sidebar, on_primary="#FFFFFF", hover_fill=border, segment_on="#FFFFFF",
+        toggle_knob="#FFFFFF", link=soft_text, image_paper="#FFFFFF",
+    )
+
+
+def _make_dark(
+    neutral: tuple[str, str, str, str, str, str, str, str, str],
+    primary: str, action: str, hover: str, pressed: str, primary_text: str,
+    soft: str, soft_hover: str, soft_pressed: str, soft_text: str,
+) -> Palette:
+    """다크: neutral = (bg, sidebar, surface, bg_subtle, surface_alt, secondary_hover, secondary_pressed, border, border_strong)."""
+    bg, sidebar, surface, bg_subtle, surface_alt, sec_hover, sec_pressed, border, border_strong = neutral
+    c = _COMMON_DARK
+    return Palette(
+        bg=bg, surface=surface, surface_alt=surface_alt, border=border,
+        primary=primary, primary_hover=hover, primary_text=primary_text, accent=primary,
+        success=c["success"], success_bg=c["success_bg"], warning=c["warning"], warning_bg=c["warning_bg"],
+        error=c["error"], error_bg=c["error_bg"], text=c["text"], text_2=c["text_2"], text_3=c["text_3"],
+        diff_same=surface, diff_changed=c["warning_bg"], diff_missing=c["error_bg"], diff_extra=soft,
+        border_strong=border_strong, primary_pressed=pressed, primary_soft=soft, primary_soft_text=soft_text,
+        success_text=c["success_text"], warning_text=c["warning_text"], error_text=c["error_text"],
+        text_disabled=c["text_disabled"], bg_subtle=bg_subtle, control_border=c["control_border"],
+        text_placeholder=c["text_placeholder"], primary_action=action,
+        primary_soft_hover=soft_hover, primary_soft_pressed=soft_pressed,
+        secondary=surface_alt, secondary_hover=sec_hover, secondary_pressed=sec_pressed,
+        secondary_text=c["secondary_text"], toast_bg=c["toast_bg"], toast_text=c["toast_text"],
+        danger_pressed=c["danger_pressed"], toggle_off=c["toggle_off"],
+        is_dark=True, sidebar=sidebar, on_primary="#0F1720", hover_fill=sec_hover, segment_on=sec_hover,
+        toggle_knob="#C9D0DA", link=soft_text, image_paper="#FFFFFF",
     )
 
 
@@ -102,26 +149,72 @@ def _make(
 class Theme:
     key: str  # QSettings `ui/theme` 에 저장되는 값
     label: str  # 설정 화면 표시 이름
-    palette: Palette
+    light: Palette
+    dark: Palette
+
+    @property
+    def palette(self) -> Palette:  # 하위 호환 — 라이트
+        return self.light
 
 
-# 테마 목록 (표시 순서). 모든 테마가 test_gui_theme 의 대비 검증(버튼 면 위 흰 글자 4.5:1 등)을 통과해야 한다.
+# 테마 목록 (표시 순서). 값은 스펙 §17.5 표 그대로. 모든 팔레트가 test_gui_theme 의 대비 표(§17.6)를 통과해야 한다.
 THEMES: tuple[Theme, ...] = (
-    Theme("blue", "토스 블루", _make("#3182F6", "#1F6FE8", "#1B64DA", "#1957C2", "#E8F3FF", "#D3E8FF", "#C0DDFF", "#1957C2")),
-    Theme("green", "숲 그린", _make("#16A364", "#0B7A4B", "#096B42", "#075A38", "#E6F8F0", "#D0F1E2", "#BBEAD4", "#065F3A")),
-    Theme("purple", "라벤더 퍼플", _make("#7B5CF0", "#6A4BE0", "#5C3FCC", "#4F33B3", "#F0EBFF", "#E3DAFF", "#D6CAFF", "#4B2FB0")),
-    Theme("orange", "선셋 오렌지", _make("#E4600F", "#C2410C", "#AE3A0A", "#963208", "#FFF0E5", "#FFE2CC", "#FFD4B3", "#9A3412")),
-    Theme("rose", "로즈 핑크", _make("#E5457D", "#C72A62", "#B02256", "#981C49", "#FFEAF1", "#FFD9E6", "#FFC8DB", "#A11D4C")),
-    Theme("mono", "먹색 모노", _make("#4E5968", "#333D4B", "#2A3340", "#212933", "#F2F4F6", "#E5E8EB", "#D1D6DB", "#333D4B")),
+    Theme(
+        "blue", "토스 블루",
+        _make_light(("#F2F4F6", "#FFFFFF", "#F9FAFB", "#F2F4F6", "#E5E8EB", "#D1D6DB"),
+                    "#3182F6", "#1F6FE8", "#1B64DA", "#1957C2", "#E8F3FF", "#D3E8FF", "#C0DDFF", "#1957C2"),
+        _make_dark(("#14171C", "#191C22", "#1E222A", "#242A33", "#29303A", "#333B47", "#3D4655", "#2E3541", "#444E5C"),
+                   "#4C94FF", "#1B64DA", "#1F6FE8", "#1957C2", "#FFFFFF", "#1C3560", "#223F6E", "#28497C", "#8FBBFF"),
+    ),
+    Theme(
+        "green", "숲 그린",
+        _make_light(("#F0F5F2", "#FAFDFB", "#F7FAF8", "#F0F5F2", "#E1E9E4", "#CBD6CE"),
+                    "#14995E", "#0B7A4B", "#096B42", "#075A38", "#E6F8F0", "#D0F1E2", "#BBEAD4", "#065F3A"),
+        _make_dark(("#121714", "#171D19", "#1C231F", "#232B26", "#28322C", "#323E36", "#3C4A41", "#2C372F", "#415046"),
+                   "#2FBF7F", "#096B42", "#0B7A4B", "#075A38", "#FFFFFF", "#17382B", "#1D4636", "#245640", "#7BE0B0"),
+    ),
+    Theme(
+        "purple", "라벤더 퍼플",
+        _make_light(("#F3F2F8", "#FCFBFF", "#F9F8FC", "#F3F2F8", "#E6E4EF", "#D2CFE0"),
+                    "#7B5CF0", "#6A4BE0", "#5C3FCC", "#4F33B3", "#F0EBFF", "#E3DAFF", "#D6CAFF", "#4B2FB0"),
+        _make_dark(("#16151C", "#1B1A23", "#201F29", "#262432", "#2C2A38", "#363445", "#413E53", "#302E3E", "#484560"),
+                   "#9B83FF", "#5C3FCC", "#6A4BE0", "#4F33B3", "#FFFFFF", "#2D2559", "#372E6C", "#413680", "#C4B5FF"),
+    ),
+    Theme(
+        "orange", "선셋 오렌지",
+        _make_light(("#F7F3F0", "#FFFCFA", "#FBF9F7", "#F7F3F0", "#EBE5E0", "#D8D0C8"),
+                    "#E4600F", "#C2410C", "#AE3A0A", "#963208", "#FFF0E5", "#FFE2CC", "#FFD4B3", "#9A3412"),
+        _make_dark(("#1A1613", "#201B17", "#251F1B", "#2D2621", "#332B25", "#3E352E", "#4A4038", "#382F28", "#54483E"),
+                   "#FF8A3D", "#AE3A0A", "#C2410C", "#963208", "#FFFFFF", "#43271A", "#55311F", "#683D25", "#FFB27A"),
+    ),
+    Theme(
+        "rose", "로즈 핑크",
+        _make_light(("#F8F2F4", "#FFFBFC", "#FCF8F9", "#F8F2F4", "#EDE4E8", "#DACFD4"),
+                    "#E5457D", "#C72A62", "#B02256", "#981C49", "#FFEAF1", "#FFD9E6", "#FFC8DB", "#A11D4C"),
+        _make_dark(("#1A1417", "#201A1D", "#251E22", "#2D2529", "#332A2F", "#3E3439", "#4A3F45", "#382E34", "#54454D"),
+                   "#FF6B9A", "#B02256", "#C72A62", "#981C49", "#FFFFFF", "#45202F", "#572A3C", "#6A3449", "#FF9DBF"),
+    ),
+    Theme(
+        "mono", "먹색 모노",
+        _make_light(("#F2F2F3", "#FFFFFF", "#F8F8F9", "#F2F2F3", "#E4E4E6", "#D0D0D4"),
+                    "#4E5968", "#333D4B", "#2A3340", "#212933", "#F2F4F6", "#E5E8EB", "#D1D6DB", "#333D4B"),
+        _make_dark(("#121212", "#181818", "#1E1E1F", "#252527", "#2A2A2C", "#343436", "#3F3F42", "#313133", "#4A4A4E"),
+                   "#AEB6C2", "#E6E9EE", "#D3D8DF", "#BEC5CE", "#15181D", "#33363D", "#3C4048", "#474B54", "#E3E7ED"),
+    ),
 )
 DEFAULT_THEME = "blue"
 THEME_SETTING_KEY = "ui/theme"  # QSettings 키
+COLOR_MODE_SETTING_KEY = "ui/color_mode"  # QSettings 키: light | dark | system
+DEFAULT_COLOR_MODE = "system"
+COLOR_MODES = ("light", "dark", "system")
 
-LIGHT = THEMES[0].palette  # 기본 테마(블루) — 하위 호환 이름. 테마가 바뀌어도 이 값은 고정이므로 "현재" 가 필요하면 current()
+LIGHT = THEMES[0].light  # 하위 호환 — 블루 라이트 고정
+DARK = THEMES[0].dark  # 블루 다크 (current() 를 가로채지 않는다)
 
-DARK: Palette | None = None  # 다크는 M21 범위 밖 (스펙 §16.14)
-
-_current_key = DEFAULT_THEME
+_theme_key = DEFAULT_THEME
+_color_mode = DEFAULT_COLOR_MODE
+_system_dark = False
+_version = 0
 
 
 def theme_keys() -> list[str]:
@@ -136,21 +229,62 @@ def get_theme(key: str | None) -> Theme:
     return THEMES[0]
 
 
+def normalize_color_mode(mode: object) -> str:
+    """모르는 값(손상된 설정 등)은 'system'."""
+    return mode if isinstance(mode, str) and mode in COLOR_MODES else DEFAULT_COLOR_MODE
+
+
+def is_dark() -> bool:
+    """유효 모드가 다크인가 (dark 이거나 system 이면서 OS 가 다크)."""
+    return _color_mode == "dark" or (_color_mode == "system" and _system_dark)
+
+
+def color_mode() -> str:
+    return _color_mode
+
+
+def version() -> int:
+    """테마·모드·시스템 다크가 실제로 바뀔 때마다 증가 — 캐시 키."""
+    return _version
+
+
 def current() -> Palette:
-    """현재 테마의 팔레트. 커스텀 페인팅·rich text 는 그리는 시점에 이걸 읽어야 테마 전환이 즉시 반영된다."""
-    return DARK or get_theme(_current_key).palette
+    """현재 테마·모드의 팔레트. 커스텀 페인팅·rich text 는 그리는 시점에 이걸 읽어야 전환이 즉시 반영된다."""
+    t = get_theme(_theme_key)
+    return t.dark if is_dark() else t.light
 
 
 def current_theme_key() -> str:
-    return get_theme(_current_key).key
+    return get_theme(_theme_key).key
 
 
 def set_theme(key: str | None) -> Theme:
-    """현재 테마를 바꾼다 (QSS 재적용은 호출자 몫 — MainWindow.apply_theme). 모르는 키는 기본 테마."""
-    global _current_key
+    """현재 테마를 바꾼다 (QSS 재적용은 호출자 몫 — MainWindow.apply_appearance). 모르는 키는 기본 테마."""
+    global _theme_key, _version
     t = get_theme(key)
-    _current_key = t.key
+    if t.key != _theme_key:
+        _theme_key = t.key
+        _version += 1
     return t
+
+
+def set_color_mode(mode: str | None) -> str:
+    """화면 모드(light|dark|system). 모르는 값은 system. 값이 바뀔 때만 version 증가."""
+    global _color_mode, _version
+    m = normalize_color_mode(mode)
+    if m != _color_mode:
+        _color_mode = m
+        _version += 1
+    return m
+
+
+def set_system_dark(value: bool) -> None:
+    """OS 앱 모드 감지 결과 주입 (tokens 는 Qt 를 모른다). 실제 값이 바뀔 때만 version 증가."""
+    global _system_dark, _version
+    v = bool(value)
+    if v != _system_dark:
+        _system_dark = v
+        _version += 1
 
 
 # 글꼴: Pretendard 번들(gui/theme/fonts.py 가 등록, 실패하면 Malgun Gothic 폴백) — 스펙 §16.3
@@ -194,19 +328,64 @@ def _url(path: Path) -> str:
     return '"' + path.as_posix() + '"'
 
 
-def build_qss(p: Palette | None = None) -> str:
-    """토큰 → QSS. 위젯은 objectName / 동적 속성(class, state)으로 구분한다. 스펙 §16.5 와 1:1.
+_icon_tmp: Path | None = None
+ICON_BASE_COLOR = "#424A53"  # 디자이너 SVG 의 스트로크 색 (= 라이트 text_2). 재착색은 이 문자열 치환으로
+
+
+def themed_icon_path(name: str, mapping: dict[str, str], icon_dir: Path | None = None) -> Path:
+    """SVG 의 색 리터럴을 치환한 사본을 캐시 디렉터리에 써서 경로를 돌려준다 (QSS `url()` 용 — QSS 는 색을 못 바꾼다).
+
+    파일명에 치환 색이 들어가 팔레트가 같으면 같은 파일을 재사용한다. 실패하면 원본 경로(색만 틀림).
+    """
+    import tempfile
+
+    global _icon_tmp
+    src = ICON_DIR / f"{name}.svg"
+    try:
+        base = icon_dir
+        if base is None:
+            if _icon_tmp is None:
+                _icon_tmp = Path(tempfile.gettempdir()) / "swea_fetcher_icons"
+            base = _icon_tmp
+        base.mkdir(parents=True, exist_ok=True)
+        tag = "".join(v.lstrip("#") for v in mapping.values())
+        dst = base / f"{name}-{tag}.svg"
+        if not dst.is_file():
+            text = src.read_text(encoding="utf-8")
+            for old, new in mapping.items():
+                text = text.replace(old, new)
+            dst.write_text(text, encoding="utf-8")
+        return dst
+    except OSError:
+        return src
+
+
+def icon_recolor_pairs(p: Palette) -> tuple[tuple[str, str], ...]:
+    """SVG 안의 색 리터럴 → 팔레트 색 치환표 (스펙 §17.9). 기본 스트로크는 호출자가 따로 치환하므로 상태 아이콘 3색 + 흰 글리프만."""
+    return (("#1A7F37", p.success), ("#9A6700", p.warning), ("#CF222E", p.error), ("#FFFFFF", p.on_primary))
+
+
+CHEVRON_COLOR = "#656D76"  # chevron-down.svg 의 원래 스트로크 색 (콤보 화살표) — QSS 에서 text_3 로 재착색
+
+
+def build_qss(p: Palette | None = None, icon_dir: Path | None = None) -> str:
+    """토큰 → QSS. 위젯은 objectName / 동적 속성(class, state)으로 구분한다. 스펙 §16.5 · §17.7 · §17.8.
 
     Button·Toggle 이 직접 그리는 면은 QSS 에서 투명으로 두고 글자색·패딩·크기만 정한다.
+    build_qss 는 모드를 모른다 — 팔레트만 읽는다. 체크·콤보 화살표 아이콘은 팔레트 색으로 재착색한 사본을 쓴다.
+    icon_dir: 재착색 SVG 를 쓸 디렉터리 (테스트 주입용, 기본은 임시 폴더).
     """
     p = p or current()
     s = SPACE
-    check = _url(ICON_DIR / "check-white.svg")
-    chevron = _url(ICON_DIR / "chevron-down.svg")
+    check = _url(themed_icon_path("check-white", {"#FFFFFF": p.on_primary}, icon_dir))
+    chevron = _url(themed_icon_path("chevron-down", {CHEVRON_COLOR: p.text_3}, icon_dir))
     return f"""
 /* ---------- 기본 ---------- */
 QWidget {{ font-family: {FONT_FAMILY}; font-size: {FONT_SIZE}pt; color: {p.text}; }}
-QMainWindow, QDialog, QWidget#page, QScrollArea, QScrollArea > QWidget > QWidget {{ background: {p.bg}; }}
+QAbstractScrollArea {{ background: transparent; border: none; }}
+QAbstractScrollArea::corner {{ background: transparent; border: none; }}
+QMainWindow, QWidget#page, QScrollArea, QScrollArea > QWidget > QWidget {{ background: {p.bg}; }}
+QDialog {{ background: {p.surface}; }}
 QToolTip {{ background: {p.toast_bg}; color: {p.toast_text}; border: none; border-radius: {RADIUS_SM}px; padding: 6px 10px; font-size: {FONT_SIZE_SM}pt; }}
 
 /* ---------- 텍스트 역할 (굵기는 400 / 700 만) ---------- */
@@ -224,9 +403,9 @@ QFrame[class="tile"] {{ background: {p.bg_subtle}; border: none; border-radius: 
 QLabel[class="app-title"] {{ font-size: {FONT_SIZE_MD}pt; font-weight: 700; padding: {s*3}px {s*3}px {s*2}px {s*3}px; }}
 
 /* ---------- 사이드바 내비 (항목·알약은 widgets.NavDelegate 가 그린다 — 알약 슬라이드 §16.7 A2) ---------- */
-QFrame#Sidebar {{ background: {p.surface}; border: none; }}
+QFrame#Sidebar {{ background: {p.sidebar}; border: none; }}
 QListWidget#nav {{
-    background: {p.surface}; border: none;
+    background: {p.sidebar}; border: none;
     padding: 0 {s}px; min-width: {SIDEBAR_W}px; max-width: {SIDEBAR_W}px; outline: 0;
 }}
 
@@ -238,9 +417,9 @@ QProgressBar#busy::chunk {{ background: {p.primary}; border-radius: {PROGRESS_H/
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
     background: {p.surface_alt}; border: 2px solid transparent; border-radius: {RADIUS_MD}px;
     padding: 0 {s*2-2}px; min-height: {CONTROL_H - 4}px; max-height: {CONTROL_H - 4}px;
-    selection-background-color: {p.primary}; selection-color: {p.primary_text};
+    selection-background-color: {p.primary}; selection-color: {p.on_primary};
 }}
-QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {{ background: {p.border}; }}
+QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {{ background: {p.hover_fill}; }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ background: {p.surface}; border: 2px solid {p.primary}; }}
 QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{ background: {p.bg_subtle}; color: {p.text_disabled}; }}
 QLineEdit[state="invalid"] {{ border: 2px solid {p.error}; }}
@@ -248,10 +427,12 @@ QLineEdit[class="mono"] {{ font-family: {FONT_MONO}; font-size: {FONT_SIZE_MD}pt
 QLineEdit[class="mono"][size="md"] {{ font-size: {FONT_SIZE}pt; min-height: {CONTROL_H - 4}px; max-height: {CONTROL_H - 4}px; }}
 QComboBox::drop-down {{ border: none; width: 28px; }}
 QComboBox::down-arrow {{ image: url({chevron}); width: 16px; height: 16px; }}
+QComboBox QFrame {{ background: transparent; border: none; }}
 QComboBox QAbstractItemView {{
     background: {p.surface}; border: 1px solid {p.border}; border-radius: {RADIUS_MD}px; outline: 0; padding: 4px;
     selection-background-color: {p.primary_soft}; selection-color: {p.primary_soft_text};
 }}
+QComboBox QAbstractItemView QScrollBar:vertical {{ margin: 10px 3px 10px 0; }}
 QComboBox QAbstractItemView::item {{ min-height: 40px; padding: 0 {s}px; border-radius: {RADIUS_SM}px; }}
 QPlainTextEdit, QTextEdit {{ background: {p.bg_subtle}; border: none; border-radius: {RADIUS_MD}px; padding: {s*2}px; }}
 
@@ -362,21 +543,40 @@ QLabel[class="login"][state="none"] {{ color: {p.text_3}; font-size: {FONT_SIZE_
 QLabel[class="empty-title"] {{ color: {p.text}; font-size: {FONT_SIZE_MD}pt; font-weight: 700; }}
 QLabel[class="empty-body"]  {{ color: {p.text_3}; font-size: {FONT_SIZE_SM}pt; }}
 
-/* ---------- 스크롤바 (얇게) ---------- */
-QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
-QScrollBar::handle:vertical {{ background: {p.border_strong}; border-radius: 4px; min-height: 24px; }}
-QScrollBar::handle:vertical:hover {{ background: {p.text_placeholder}; }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 0; }}
-QScrollBar::handle:horizontal {{ background: {p.border_strong}; border-radius: 4px; min-width: 24px; }}
-QScrollBar::handle:horizontal:hover {{ background: {p.text_placeholder}; }}
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+/* ---------- 스크롤바 (얇게, 트랙은 완전 투명 — 스펙 §17.8) ---------- */
+QScrollBar:vertical {{ background: transparent; border: none; width: 10px; margin: 2px 2px 2px 0; }}
+QScrollBar:horizontal {{ background: transparent; border: none; height: 10px; margin: 0 2px 2px 2px; }}
+QScrollBar::handle:vertical {{ background: {p.border_strong}; border-radius: 3px; min-height: 28px; margin: 0 1px; }}
+QScrollBar::handle:horizontal {{ background: {p.border_strong}; border-radius: 3px; min-width: 28px; margin: 1px 0; }}
+QScrollBar::handle:hover {{ background: {p.text_placeholder}; }}
+QScrollBar::handle:pressed {{ background: {p.text_3}; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: none; border: none; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ background: none; border: none; width: 0; height: 0; }}
+QScrollBar::up-arrow, QScrollBar::down-arrow, QScrollBar::left-arrow, QScrollBar::right-arrow {{ background: none; width: 0; height: 0; }}
+
+/* ---------- 메뉴 (우클릭 등 — 팝업 창 속성은 widgets.AppMenu) ---------- */
+QMenu {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: {RADIUS_MD}px; padding: 6px; }}
+QMenu::item {{ padding: 8px 16px 8px 12px; border-radius: {RADIUS_SM}px; min-width: 140px; color: {p.text}; background: transparent; }}
+QMenu::item:selected {{ background: {p.primary_soft}; color: {p.primary_soft_text}; }}
+QMenu::item:disabled {{ color: {p.text_disabled}; }}
+QMenu::separator {{ height: 1px; background: {p.border}; margin: 4px 8px; }}
 
 /* ---------- 다이얼로그 ---------- */
 QMessageBox {{ background: {p.surface}; }}
+QLabel[class="review-status"][state="due"] {{ color: {p.warning_text}; }}
+QLabel[class="review-status"][state="upcoming"] {{ color: {p.text_3}; }}
 QMessageBox QLabel {{ min-width: 320px; }}
 QMessageBox QPushButton {{ min-width: 88px; }}
 QLabel#preview {{ background: {p.surface_alt}; color: {p.text_2}; border-radius: {RADIUS_SM}px; }}
+"""
+
+
+def build_log_css(p: Palette | None = None) -> str:
+    """LogView(QPlainTextEdit) 문서 기본 스타일시트 — 인라인 style 대신 클래스로 색을 준다 (스펙 §17.7)."""
+    p = p or current()
+    return f"""
+.ts {{ font-family: {FONT_MONO}; }}
+.err {{ color: {p.error_text}; }}
 """
 
 
@@ -402,6 +602,10 @@ table {{ border-collapse: collapse; border-width: 1px; border-style: solid; bord
 th, td {{ border-width: 1px; border-style: solid; border-color: {p.border}; padding: {SPACE // 2}px {SPACE}px; }}
 th {{ background-color: {p.surface_alt}; }}
 hr {{ background-color: {p.border}; }}
+a {{ color: {p.link}; }}
+.ts {{ color: {p.text_3}; font-family: {FONT_MONO}; }}
+table.imgwrap {{ border-width: 0; margin-top: 0; margin-bottom: {SPACE}px; }}
+table.imgwrap td {{ border-width: 0; padding: {SPACE // 2}px; }}
 .limits {{ color: {p.text_2}; }}
 .imgfail {{ color: {p.text_3}; }}
 table.samples {{ border-width: 0; margin-top: {SPACE}px; }}

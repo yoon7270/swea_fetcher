@@ -30,7 +30,7 @@ from ...errors import AiError
 from ..coach_widgets import CoachBar, CoachTab, ask_consent, has_consent, set_consent
 from ..theme import tokens
 from ..git_dialog import ask_push
-from ..widgets import Badge, Banner, Button, DiffView, EmptyState, PageColumn, make_busy_bar, set_class, set_invalid, set_size
+from ..widgets import Badge, Banner, Button, ComboBox, DiffView, EmptyState, PageColumn, make_busy_bar, set_class, set_invalid, set_size
 from ... import lookup  # noqa: F401  (cached label 은 service 경유)
 from ..workers import CheckWorker, CoachWorker, FuncWorker, GitWorker, SubmitWorker
 
@@ -120,7 +120,7 @@ class CheckPage(QWidget):
         grid.setContentsMargins(tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2, tokens.SPACE * 2)
         grid.setHorizontalSpacing(tokens.BTN_GAP)  # 나란한 버튼·입력 사이 12
         grid.setVerticalSpacing(tokens.SPACE)
-        self.topic = QComboBox()
+        self.topic = ComboBox()
         self.topic.setObjectName("TopicCombo")
         self.topic.setEditable(True)
         self.topic.setMinimumWidth(160)

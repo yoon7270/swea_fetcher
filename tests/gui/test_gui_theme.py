@@ -364,3 +364,22 @@ def test_app_font_disables_hinting(qapp):
         assert qapp.font().hintingPreference() == QFont.HintingPreference.PreferNoHinting
     finally:
         qapp.setFont(before)
+
+
+def test_toast_measures_with_styled_font(qtbot):
+    """QSS 로 글꼴이 커져도 토스트 폭이 실제 글자 폭을 담는다 (스타일 적용 전에 재서 말줄임되던 회귀)."""
+    from PySide6.QtWidgets import QWidget
+
+    from swea_fetcher.gui.widgets import Toast
+
+    host = QWidget()
+    host.setStyleSheet("QWidget { font-size: 20pt; }")
+    qtbot.addWidget(host)
+    host.resize(800, 400)
+    host.show()
+    toast = Toast(host)
+    toast.show_message("저장 완료 · 25730", "success", 5000)
+    fm = toast.fontMetrics()
+    pill = toast.pill_rect()
+    avail = pill.right() - toast.PAD_X - (pill.left() + toast.PAD_X + toast._icon_w())
+    assert fm.horizontalAdvance(toast.message()) <= avail

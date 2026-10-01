@@ -32,6 +32,7 @@ from ..coach_widgets import AnswerBrowser, growth_consent_ok, set_growth_consent
 from .. import motion
 from ..growth_widgets import BarChart, BulletLabel, CategoryRowWidget, HeatLegend, HeatmapWidget, MetricRowWidget, day_text, number_parts, week_label
 from ..theme import tokens
+from ..theme.bus import bus
 from ..widgets import Badge, Banner, Button, EmptyState, PageColumn, set_class
 
 REFERENCE_NOTE = "AI 분류 기반 참고용"
@@ -128,6 +129,7 @@ class GrowthPage(QWidget):
         self._metric_tiles: list[QWidget] = []
         self._metric_cols = 0
         self._build()
+        bus().changed.connect(self.refresh_theme)
 
     # --- UI ------------------------------------------------------------------------------
     def _build(self) -> None:
@@ -204,8 +206,22 @@ class GrowthPage(QWidget):
         self.day_list.itemClicked.connect(self._day_item_clicked)
         self.day_list.itemActivated.connect(self._day_item_clicked)  # Enter
 
+    def heat_setting(self) -> tuple[str, str | None]:
+        """저장된 잔디 색 설정: ("follow", None) | ("fixed", "#RRGGBB"). 키 없음·쓰레기 값 = 테마 색 따르기."""
+        return solved.heat_base(self.qs.value(solved.HEAT_COLOR_KEY, solved.HEAT_FOLLOW))
+
     def heat_base(self) -> str:
-        return solved.parse_hex(str(self.qs.value("growth/heat_color", solved.DEFAULT_HEAT_COLOR) or ""))
+        """지금 잔디의 기준색: 따르기면 현재 테마·모드의 primary, 고정색이면 모드 보정 후 색 (저장값은 그대로)."""
+        kind, hexv = self.heat_setting()
+        if kind == "fixed" and hexv:
+            return solved.adjust_for_mode(hexv, tokens.is_dark())
+        return tokens.current().primary
+
+    def refresh_theme(self) -> None:
+        """테마·모드 전환: 잔디 기준색(따르기면 새 primary)을 다시 잡고 색을 담은 글자(rich text)를 새 팔레트로 다시 만든다. 채움 애니메이션은 재생하지 않는다."""
+        self.apply_heat_color()
+        if self.isVisible():
+            self.refresh()
 
     def apply_heat_color(self) -> None:
         """설정에서 색을 바꾸면 즉시 반영."""

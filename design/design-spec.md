@@ -1379,3 +1379,14 @@ ColorPickerPanel (tile)
 | X6 | 시스템 감지 신호 누락 | 3초 폴링 폴백 |
 | X7 | 12 팔레트 틴트가 "칙칙/촌스럽다" | 값만 `tokens.py` 표에서 조정(구조 변경 없음). 사용자가 싫어하면 라이트 틴트를 half 로 |
 
+
+### 17.17 구현 기록 (builder) — 스펙 대체안
+
+- **값 조정 (대비 표 자동 테스트 결과)**: 라이트 `text_3` `#5E6977` → `#5B6674`(hover_fill 위 4.5:1 미달 해결), `danger_pressed` `#FFDDDD` → `#FFE3E3`(error_text 4.5:1), 숲 그린 라이트 `primary` `#16A364` → `#14995E`(bg 위 3:1). 나머지는 표 그대로.
+- **번호 열 폭** 72 → 84: 항목 좌우 패딩 16×2 를 빼면 5자리 번호가 말줄임됨.
+- **SVG 리터럴**: 지시서의 4개에 `#CF222E`(error 아이콘)와 콤보 화살표 `#656D76`(text_3 로 재착색) 추가. 치환표는 `tokens.icon_recolor_pairs`.
+- **`#RRGGBB` 검사 예외**: 앱 전체 QSS 적용 `app.setStyleSheet(` 는 허용(위젯 `setStyleSheet(` 만 금지). 토스트 그림자 `QColor(0,0,0,α)` 는 `# noqa-color`.
+- 체크 표시(체크박스)는 QSS `image:` 에 재착색 SVG 임시 파일(`tempdir/swea_fetcher_icons`, 파일명에 색 포함)을 연결하는 방식. 색 칩의 체크는 직접 그림.
+- 상태 판정·`problem_statuses` 는 `service.py`. 상태 조회 실패는 빈 dict(칩 숨김).
+- 잔디 동기화 토글(`HeatSyncToggle`)은 행 전체를 숨김 상태로 만들어 둠(기능 연결 전).
+- 알려진 한계: AI 답변 표의 격자선 색은 Qt 마크다운 표가 CSS border-color 를 무시해 다크에서 밝은 회색으로 보임.
