@@ -22,6 +22,7 @@ def create_app(argv: list[str] | None = None) -> QApplication:
     app.setOrganizationName("swea-fetch")
     app.setStyle("Fusion")  # 플랫폼별 편차를 줄이고 QSS 가 일관되게 먹도록
     fonts.load_fonts()  # Pretendard 등록 (QSS 전에). 실패해도 Malgun Gothic 폴백으로 계속
+    fonts.apply_app_font(app)  # 힌팅 끔 — 작은 크기에서 ㅡ 획이 사라지는 문제
     tokens.set_theme(str(QSettings("swea-fetch", "gui").value(tokens.THEME_SETTING_KEY, tokens.DEFAULT_THEME) or tokens.DEFAULT_THEME))
     app.setStyleSheet(tokens.build_qss())
     if ICON_PATH.exists():

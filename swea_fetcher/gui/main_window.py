@@ -251,7 +251,14 @@ class MainWindow(QMainWindow):
         if cached is None:
             self.flash("저장된 지문이 없습니다. 저장 탭에서 다시 가져오면 볼 수 있습니다")
             return
-        self.problem_page.show_cached(cached)
+        # 폴더를 함께 넘겨야 지문 아래 입력 | 출력과 [폴더 열기]·[에디터에서 열기] 가 나온다 (충돌 배너의 [문제 보기])
+        problem_dir = self.fetch_page._existing_dir
+        if problem_dir is None or problem_dir.name != str(num):
+            try:
+                problem_dir = storage.resolve_problem_dir(self.settings.root, cached.topic, num) if cached.topic else None
+            except ValueError:
+                problem_dir = None
+        self.problem_page.show_cached(cached, problem_dir)
         self.goto("problem")
 
     def _open_recent_problem(self, topic: str, num: int) -> None:

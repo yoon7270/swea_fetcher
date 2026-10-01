@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication
 
 FONT_DIR = Path(__file__).resolve().parent / "fonts"
 FONT_FILES = ("Pretendard-Regular.otf", "Pretendard-Bold.otf")  # 400 / 700 두 웨이트만 (스펙 §16.3)
@@ -33,6 +33,17 @@ def load_fonts(font_dir: Path | None = None) -> list[str]:
             continue
         loaded.append(name)
     return loaded
+
+
+def apply_app_font(app: QGuiApplication) -> None:
+    """앱 기본 글꼴의 힌팅을 끈다 (QSS 의 font-family 가 바뀌어도 힌팅 설정은 이 기본 글꼴에서 상속된다).
+
+    Pretendard(CFF 윤곽) 는 Windows 기본 힌팅에서 9~10pt 의 얇은 가로획이 픽셀 격자에 맞춰지며 사라진다 —
+    "스→ㅅ", "드→ㄷ", "그→ㄱ" 처럼 ㅡ 가 빠지고 굵은 글씨의 두께도 들쭉날쭉해진다 (실측). 힌팅을 끄면 모든 크기에서 정상.
+    """
+    f = QFont(app.font())
+    f.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
+    app.setFont(f)
 
 
 def is_available() -> bool:

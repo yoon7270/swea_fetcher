@@ -350,3 +350,17 @@ def test_log_view_is_card_with_clear_link(main_window):
     assert "hello" in log.text.toPlainText()
     log.clear_btn.click()
     assert log.text.toPlainText() == ""
+
+
+def test_app_font_disables_hinting(qapp):
+    """Pretendard 는 기본 힌팅에서 9~10pt 의 ㅡ 획이 사라진다 → 앱 기본 글꼴의 힌팅을 끈다."""
+    from PySide6.QtGui import QFont
+
+    from swea_fetcher.gui.theme import fonts
+
+    before = qapp.font()
+    try:
+        fonts.apply_app_font(qapp)
+        assert qapp.font().hintingPreference() == QFont.HintingPreference.PreferNoHinting
+    finally:
+        qapp.setFont(before)

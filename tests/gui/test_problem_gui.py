@@ -409,6 +409,19 @@ def test_conflict_banner_offers_editor(main_window, qtbot, monkeypatch, content)
     assert opened == [(d.resolve(), d.resolve() / "25730.py")]
 
 
+def test_conflict_banner_view_shows_samples_with_folder(main_window, qtbot, monkeypatch, content):
+    """충돌 배너 [문제 보기] 도 폴더를 넘겨 지문 아래 입력 | 출력과 폴더/에디터 버튼이 나온다."""
+    content_cache.save(main_window.settings, 25730, "sim", "항아리 게임", content)
+    fp, d = _conflict_in_saved_dir(main_window, qtbot, monkeypatch)
+    (d / "output.txt").write_text("#1 7\n", encoding="utf-8")
+    view = next(b for b in fp.banner._buttons if b.text() == "문제 보기")
+    view.click()
+    pp = main_window.problem_page
+    assert main_window.stack.currentWidget() is pp
+    assert pp._problem_dir is not None and pp._problem_dir.name == "25730"
+    assert "#1 7" in pp.browser.toPlainText() and not pp.open_py_btn.isHidden()
+
+
 def test_conflict_banner_url_input_uses_path_from_message(main_window, qtbot, monkeypatch):
     fp, d = _conflict_in_saved_dir(main_window, qtbot, monkeypatch, target="AV140YnqAIECFAYD")
     assert fp._existing_dir == d
