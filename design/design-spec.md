@@ -1048,3 +1048,334 @@ QSS·토큰만으로 끝나는 변경이 기본이다. 위젯 구조가 바뀌�
 - 번들: `packaging/swea-fetch-gui.spec` 가 `qsvg.dll`·`qsvgicon.dll` 을 binaries 로 명시.
 - 마감 검토: 지연 시작·일시 정지 모션도 교체 시 끝값과 정리 콜백을 적용하고, 취소된 지연 타이머는 재시작하지 않는다. 모션 off 전환 후 같은 키를 요청하면 이전 모션을 먼저 종료한다. 회귀 테스트 2건 추가.
 - 2026-10-01 검증: main 전체 1,433개 테스트 통과. 960×680·720×480 캡처와 150% offscreen 캡처 레이아웃 확인. 실제 exe 자가진단 exit 0, Pretendard Regular/Bold·SVG 아이콘·MainWindow 초기화 확인(로그인 네트워크 검증은 하지 않음). 빌드 PATH의 외부 `icuuc.dll` 충돌은 System32 우선 검색으로 수정. Narrator·고대비·실사용 프레임 성능 검증은 미실시.
+
+---
+
+## 17. M22 다크 모드 · 테마 확장 · 상태 표시
+
+구현 지시서(순서·테스트·체크리스트)는 `docs/handoff-designer-m22-dark.md`. 이 절은 **값과 규칙의 단일 출처**다. §16.14(다크 범위 밖)는 이 절로 대체된다.
+
+### 17.1 방향과 결정 요약
+
+방향 한 문장: **"토스의 '바닥 < 카드' 명도 차 구조를 어두운 쪽으로 그대로 뒤집고(바닥이 가장 어둡고 카드가 한 단계 밝다), 테마 색은 버튼·선택면뿐 아니라 바닥·사이드바·hover 면에 5~8% 틴트로 번지게 한다."** 이유: 사용자가 "테마가 버튼 색만 바꾼다"고 느꼈고, 다크는 그림자 없이 명도 단계만으로 층을 만들어야 §16 의 무테·무그림자 규칙이 유지된다.
+
+| # | 결정 | 이유 |
+|---|---|---|
+| E1 | 화면 모드 3종: 라이트 / 다크 / **시스템 따르기(기본)**. QSettings `ui/color_mode` = `light`·`dark`·`system`. 테마(`ui/theme`)와 직교 — 6테마 × 2모드 = 12 팔레트 | 요구 1·2 |
+| E2 | 전환은 **즉시**(재시작 없음, 크로스페이드 없음). 시스템 따르기는 OS 앱 모드 변경도 즉시 반영 | 요구 1 |
+| E3 | 라이트의 중립색(바닥·사이드바·hover)도 테마별 틴트로 바꾼다. **카드 면은 라이트에서 `#FFFFFF` 유지** (흰 면의 틴트는 보이지 않고 글자 대비만 깎는다). 카드 면 틴트는 다크에서 적용 | 요구 2, 과하지 않게 |
+| E4 | 글자색(`text`·`text_2`·`text_3`)은 **모드별 1벌, 테마와 무관**. 상태색(success/warning/error)도 모드별 1벌 | 대비 보증을 12팔레트에서 반복 계산하지 않기 위해 |
+| E5 | 다크의 버튼 면은 라이트의 "hover 색"을 기본으로, 라이트의 "기본 색"을 hover 로 쓴다(밝아지는 hover). 면 위 글자는 흰색 유지, 4.5:1 이상 | 다크에서 hover 가 어두워지면 눌린 것처럼 보임 |
+| E6 | 먹색 모노 다크만 예외: 버튼 면이 **밝은 회색 + 어두운 글자**(`primary_text` 가 모드·테마별 토큰) | 어두운 면 위 어두운 버튼은 보이지 않음 |
+| E7 | 잔디 색 기본 = **테마 색 따르기**. 저장 키 `growth/heat_color` 가 없거나 `"follow"` 면 따르기, `"#RRGGBB"` 면 고정색. 기존 저장값은 그대로 고정색으로 유지 | 요구 3. 이전 버전은 사용자가 칩을 누를 때만 키를 쓰므로 키 없음 = 한 번도 안 골랐음 |
+| E8 | 색 선택은 QColorDialog 대신 **설정 카드 안에서 펼쳐지는 인라인 패널**(HSV 사각형 + 색상 슬라이더 + HEX 입력). 별도 창·팝업 없음 | 팝업 창은 가장자리 회색 문제를 재현하고 다크 대응 부담이 큼 |
+| E9 | 최근 탭 상태 = **왼쪽 3px 색 띠 + 아이콘·글자가 든 상태 칩** 새 첫 열. 복습 예정은 제목 칸 오른쪽의 별도 작은 태그 | 요구 4, 색만으로 전달 금지 |
+| E10 | 회색 가장자리 원인은 3곳(팝업 컨테이너 창·스크롤바 트랙 서브컨트롤·QAbstractScrollArea 코너/뷰포트)이며 QSS + 팝업 창 속성 + 앱 QPalette 를 함께 적용 | 요구 5, §17.8 |
+| E11 | 사용자 확인 필요 결정 없음. 아래 기본값으로 진행하고 어긋나면 값만 바꾼다: 모드 기본 시스템 따르기, 로컬 검증 실패는 기록이 없어 "미제출"로 표시(§17.12), 잔디 저장소 동기화 토글은 빌더 기능 완성 전까지 숨김 | |
+
+### 17.2 모드 해석과 시스템 감지
+
+- 유효 모드 `is_dark` = `color_mode == "dark"` 또는 (`"system"` 이고 OS 앱 모드가 다크).
+- 감지 순서: ① `QGuiApplication.styleHints().colorScheme()` (Qt 6.5+, `Qt.ColorScheme.Dark`) → ② 값이 `Unknown` 이거나 속성이 없으면 레지스트리 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize` 의 `AppsUseLightTheme`(0 = 다크, 읽기 실패 = 라이트).
+- 변경 감지: `styleHints().colorSchemeChanged` 신호(있을 때). 없으면 모드가 system 인 동안 3초 `QTimer` 로 ②를 폴링. 신호/폴링 모두 모드가 system 일 때만 반응.
+- 강제 모드일 때 네이티브 요소(타이틀 바·시스템 메뉴·네이티브 다이얼로그)를 앱 선택에 맞춘다: Qt 6.8+ 는 `styleHints().setColorScheme(Light|Dark)`, system 이면 `Unknown`(OS 따름). 없으면 창 핸들에 DWM `DWMWA_USE_IMMERSIVE_DARK_MODE`(20) 를 ctypes 로 설정(실패 무시).
+- 한계(수용): `QFileDialog` 네이티브 창은 OS 설정을 따른다. 사용자가 앱 모드와 OS 앱 모드를 다르게 두면 파일 대화상자만 다른 모드로 보일 수 있다 — 설정 화면 힌트에 쓰지 않는다(드문 경우).
+
+### 17.3 토큰 구조 변경 (`tokens.py`)
+
+- `Theme` = `key`, `label`, `light: Palette`, `dark: Palette` (기존 `palette` 는 `light` 의 별칭으로 유지).
+- 전역 상태: 테마 key + 모드 설정 + 해석된 `is_dark`. API: `set_theme(key)`, `set_color_mode(mode)`, `set_system_dark(bool)`(감지 결과 주입 — tokens 는 Qt 를 import 하지 않는다), `is_dark()`, `color_mode()`, `current()`(= 현재 테마의 해당 모드 팔레트), `version()`(위 셋이 바뀔 때마다 증가하는 정수 — 캐시 키).
+- `LIGHT` 는 블루 라이트로 고정(하위 호환). `DARK` 는 블루 다크 팔레트로 채운다(더 이상 `current()` 를 가로채지 않음).
+- 신규 `Palette` 필드(모두 기본값 있음, 기본값은 블루 라이트 값):
+
+| 필드 | 용도 | 라이트 | 다크 |
+|---|---|---|---|
+| `is_dark: bool` | 모드 분기(잔디·로고 등) | False | True |
+| `sidebar` | 사이드바·내비 바닥 (§17.5 표) | 테마별 | 테마별 |
+| `on_primary` | `primary` 면 위 글리프(체크·토글 손잡이·선택 칸 아이콘) | `#FFFFFF` | `#0F1720` |
+| `hover_fill` | 입력·행 hover 면 | = `border` | = `secondary_hover` |
+| `segment_on` | 세그먼트 컨트롤 선택 칸 | `#FFFFFF` | = `secondary_hover` |
+| `toggle_knob` | 토글 OFF 손잡이 | `#FFFFFF` | `#C9D0DA` |
+| `link` | 리치 텍스트 링크 | = `primary_soft_text` | = `primary_soft_text` |
+| `image_paper` | 문제 지문 이미지 뒤 종이색 | `#FFFFFF` | `#FFFFFF` |
+| `ring_light` / `ring_dark` | 색 선택 패널 SV 핸들 이중 링(임의 색 위라 흑백 고정) | `#FFFFFF` / `#0F1720` | 동일 |
+| (별도 필드 없음) | 상태 칩은 기존 `*_bg`/`*_text`, 위치·일정 점은 `success`/`warning` 사용 | | |
+
+- `primary_text`(= `primary_action` 면 위 글자)는 `Palette` 기존 필드지만 값이 모드·테마별로 달라질 수 있다(먹색 모노 다크 `#15181D`).
+- `text_3` 라이트 값을 `#636E7C` → **`#5E6977`** 로 올린다(틴트 바닥 위 여유 확보, bg 위 약 5.0:1).
+- 신규 함수 `build_qpalette(p) -> dict[str,str]` 대신 Qt 쪽 `gui/theme/qt_palette.py` 가 `QPalette` 를 만든다(§17.8).
+
+### 17.4 공통 중립·글자·상태 토큰 (모드별 1벌)
+
+| 토큰 | 라이트 | 다크 |
+|---|---|---|
+| `text` | `#191F28` | `#ECEFF3` |
+| `text_2` | `#4E5968` | `#B9C1CD` |
+| `text_3` | `#5E6977` | `#A1AAB6` |
+| `text_placeholder` = `text_disabled` | `#8B95A1` | `#737C8A` |
+| `control_border` | `#8B95A1` | `#7C8593` |
+| `toggle_off` | `#B0B8C1` | `#4A515D` |
+| `secondary_text` | `#333D4B` | `#DDE2E9` |
+| `toast_bg` / `toast_text` | `#333D4B` / `#FFFFFF` | `#ECEFF3` / `#191F28` (역전 — 툴팁도 같음) |
+| `success` / `success_bg` / `success_text` | `#0A9B5E` / `#E6F8F0` / `#00794A` | `#3DD68C` / `#15382A` / `#6FE3A8` |
+| `warning` / `warning_bg` / `warning_text` | `#D97800` / `#FFF4E0` / `#8A5100` | `#FFA726` / `#3D2C12` / `#FFC266` |
+| `error` / `error_bg` / `error_text` | `#F04452` / `#FFEEEE` / `#C62B38` | `#FF6B78` / `#3F1D23` / `#FF8A94` |
+| `danger_pressed` | `#FFDDDD` | `#55252D` |
+| `diff_changed` / `diff_missing` | = `warning_bg` / = `error_bg` | 동일 규칙 |
+| `diff_same` / `diff_extra` | = `surface` / = `primary_soft` | 동일 규칙 |
+
+### 17.5 테마 × 모드 토큰 표
+
+**라이트** — 규칙: `secondary` = `surface_alt`, `secondary_hover` = `border`, `secondary_pressed` = `border_strong`, `surface` = `#FFFFFF`.
+
+| 테마 | bg | sidebar | bg_subtle | surface_alt | border | border_strong |
+|---|---|---|---|---|---|---|
+| 토스 블루 | `#F2F4F6` | `#FFFFFF` | `#F9FAFB` | `#F2F4F6` | `#E5E8EB` | `#D1D6DB` |
+| 숲 그린 | `#F0F5F2` | `#FAFDFB` | `#F7FAF8` | `#F0F5F2` | `#E1E9E4` | `#CBD6CE` |
+| 라벤더 퍼플 | `#F3F2F8` | `#FCFBFF` | `#F9F8FC` | `#F3F2F8` | `#E6E4EF` | `#D2CFE0` |
+| 선셋 오렌지 | `#F7F3F0` | `#FFFCFA` | `#FBF9F7` | `#F7F3F0` | `#EBE5E0` | `#D8D0C8` |
+| 로즈 핑크 | `#F8F2F4` | `#FFFBFC` | `#FCF8F9` | `#F8F2F4` | `#EDE4E8` | `#DACFD4` |
+| 먹색 모노 | `#F2F2F3` | `#FFFFFF` | `#F8F8F9` | `#F2F2F3` | `#E4E4E6` | `#D0D0D4` |
+
+라이트의 주색 계열 8개(`primary`, `primary_action`, `primary_hover`, `primary_pressed`, `primary_soft`, `primary_soft_hover`, `primary_soft_pressed`, `primary_soft_text`)는 §16 / 현재 `THEMES` 값 그대로. `primary_text` `#FFFFFF`, `on_primary` `#FFFFFF`.
+
+**다크** — 규칙: `surface` 가 `bg` 보다 한 단계 밝고, `sidebar` 는 둘 사이. `secondary` = `surface_alt`.
+
+| 테마 | bg | sidebar | surface | bg_subtle | surface_alt = secondary | secondary_hover | secondary_pressed | border | border_strong |
+|---|---|---|---|---|---|---|---|---|---|
+| 토스 블루 | `#14171C` | `#191C22` | `#1E222A` | `#242A33` | `#29303A` | `#333B47` | `#3D4655` | `#2E3541` | `#444E5C` |
+| 숲 그린 | `#121714` | `#171D19` | `#1C231F` | `#232B26` | `#28322C` | `#323E36` | `#3C4A41` | `#2C372F` | `#415046` |
+| 라벤더 퍼플 | `#16151C` | `#1B1A23` | `#201F29` | `#262432` | `#2C2A38` | `#363445` | `#413E53` | `#302E3E` | `#484560` |
+| 선셋 오렌지 | `#1A1613` | `#201B17` | `#251F1B` | `#2D2621` | `#332B25` | `#3E352E` | `#4A4038` | `#382F28` | `#54483E` |
+| 로즈 핑크 | `#1A1417` | `#201A1D` | `#251E22` | `#2D2529` | `#332A2F` | `#3E3439` | `#4A3F45` | `#382E34` | `#54454D` |
+| 먹색 모노 | `#121212` | `#181818` | `#1E1E1F` | `#252527` | `#2A2A2C` | `#343436` | `#3F3F42` | `#313133` | `#4A4A4E` |
+
+**다크 주색 계열** (`primary` = 글자 없는 면: 링·진행·토글 ON·차트 선택·스피너. `action/hover/pressed` = 버튼 면, 위 글자 `primary_text`. `soft*` = 내비 알약·tonal 버튼·info 배너·선택 행·`diff_extra`, 위 글자 `soft_text`):
+
+| 테마 | primary | primary_action | primary_hover | primary_pressed | primary_text | soft | soft_hover | soft_pressed | soft_text |
+|---|---|---|---|---|---|---|---|---|---|
+| 토스 블루 | `#4C94FF` | `#1B64DA` | `#1F6FE8` | `#1957C2` | `#FFFFFF` | `#1C3560` | `#223F6E` | `#28497C` | `#8FBBFF` |
+| 숲 그린 | `#2FBF7F` | `#096B42` | `#0B7A4B` | `#075A38` | `#FFFFFF` | `#17382B` | `#1D4636` | `#245640` | `#7BE0B0` |
+| 라벤더 퍼플 | `#9B83FF` | `#5C3FCC` | `#6A4BE0` | `#4F33B3` | `#FFFFFF` | `#2D2559` | `#372E6C` | `#413680` | `#C4B5FF` |
+| 선셋 오렌지 | `#FF8A3D` | `#AE3A0A` | `#C2410C` | `#963208` | `#FFFFFF` | `#43271A` | `#55311F` | `#683D25` | `#FFB27A` |
+| 로즈 핑크 | `#FF6B9A` | `#B02256` | `#C72A62` | `#981C49` | `#FFFFFF` | `#45202F` | `#572A3C` | `#6A3449` | `#FF9DBF` |
+| 먹색 모노 | `#AEB6C2` | `#E6E9EE` | `#D3D8DF` | `#BEC5CE` | `#15181D` | `#33363D` | `#3C4048` | `#474B54` | `#E3E7ED` |
+
+(`accent` = `primary`, `on_primary` = `#0F1720` 전 테마. 다크 버튼 면과 `soft` 계열은 위 규칙 E5 에 따라 라이트 hover/기본 값을 맞바꾼 것.) 틴트 강도: 라이트 bg 는 중립 회색 대비 채널 차 약 2~5, 다크 bg/surface 는 테마 hue 로 채널 차 약 3~8 — 테마를 바꾸면 사이드바·바닥이 눈에 띄게 달라지되 "색칠된" 느낌은 아니다.
+
+### 17.6 대비 표 (WCAG, 자동 테스트 대상)
+
+`ratio(fg, bg)` 가 아래 하한 이상이어야 한다. 아래 수치는 설계 시 계산한 근사 하한이며 **정답은 테스트**다(미달 값은 해당 색의 명도를 2~4% 조정). 모든 12 팔레트에 적용.
+
+| 쌍 | 하한 | 비고 |
+|---|---|---|
+| `text` on `bg`, `surface`, `surface_alt`, `bg_subtle`, `primary_soft` | 7:1 | 실제 라이트 ≥ 14, 다크 ≥ 10 |
+| `text_2` on `bg`, `surface`, `surface_alt` | 4.5:1 | 라이트 ≥ 6, 다크 ≥ 7 |
+| `text_3` on `bg`, `surface`, `surface_alt`, `hover_fill`(secondary_hover) | 4.5:1 | 라이트 ≥ 4.9, 다크 최저 ≈ 4.8(hover 면 위) |
+| `primary_text` on `primary_action`, `primary_hover`, `primary_pressed` | 4.5:1 | 라이트 hover 는 더 진해 ≥ 5.2, 다크 ≥ 4.6 |
+| `primary_soft_text` on `soft`, `soft_hover`, `soft_pressed` | 4.5:1 | 다크 최저 ≈ 4.6(블루 pressed) |
+| `success_text` on `success_bg`, `warning_text` on `warning_bg`, `error_text` on `error_bg` (+ `danger_pressed`) | 4.5:1 | 다크 ≥ 6.6 |
+| `secondary_text` on `secondary`, `secondary_hover`, `secondary_pressed` | 4.5:1 | |
+| `toast_text` on `toast_bg` | 7:1 | 14 |
+| `link` on `bg_subtle`, `surface` | 4.5:1 | |
+| `primary` on `surface`, `bg` (포커스 링·토글 ON·진행 막대·차트 선택 = UI 3:1) | 3:1 | 라이트 ≥ 3.2(모노 ≥ 7), 다크 ≥ 5 |
+| `on_primary` on `primary` (체크·손잡이 글리프) | 3:1 | 라이트 최저 3.25, 다크 ≥ 6 |
+| `control_border` on `surface` (체크박스 테두리 UI) | 3:1 | 라이트 3.3, 다크 ≈ 4.3 |
+| `error`·`success`·`warning` on `surface` (점·아이콘) | 3:1 | 아이콘은 글자 병기 |
+| `text_disabled`·`text_placeholder` on `surface_alt` | 예외(AA 면제) 단 다크 3:1 | 다크 ≈ 3.1 |
+| 면 구분(`surface` vs `bg`, 선택 알약 vs `sidebar`) | 비텍스트 — 의무 없음 | 의미는 글자색·2px `primary` 띠·아이콘이 함께 전달 |
+
+`primary_action` 면 자체와 `surface` 의 대비(1.4.11)는 버튼 안에 글자가 있어 면제(다크 퍼플·그린 버튼 면은 3:1 미만일 수 있음 — 수용).
+
+### 17.7 컴포넌트별 다크 규칙 (QSS 변경·추가분)
+
+`build_qss(p)` 는 모드를 모르고 팔레트만 읽는다(분기 금지). 아래는 §16.5 대비 **바뀌는 줄**이다.
+
+- 사이드바: `QFrame#Sidebar`, `QListWidget#nav` 배경 `p.sidebar`(기존 `surface`). 내비 알약·글자·아이콘 색은 기존 토큰(`primary_soft`, `primary_soft_text`, 2px `primary` 띠).
+- 입력: hover 배경 `p.hover_fill`(기존 `p.border`). 나머지 동일. 다크에서 채움은 `surface_alt`(카드보다 밝음), 포커스 시 `surface` + 2px `primary` 링.
+- 체크박스·라디오: 체크 아이콘은 `check-white.svg` 대신 **`on_primary` 로 재착색**한 아이콘(§17.9 SVG 규칙). 미선택 테두리 `control_border`.
+- 토글: ON 트랙 `primary`, ON 손잡이 `on_primary`, OFF 트랙 `toggle_off`, OFF 손잡이 `toggle_knob`. 손잡이 색은 t(0~1) 로 보간.
+- 버튼: 면 계산은 기존 `Button` 이 `p.*` 로 하므로 팔레트만 바뀌면 됨. 비활성 면 `p.border`, 글자 `text_disabled`. 면 위 글자는 QSS `primary_text`.
+- 표: 선택 `primary_soft`+`text`, hover `hover_fill` 대신 **`bg_subtle`**(행 단위, 기존 유지), 행 구분선 `border`. 머리글 `text_3`.
+- 로그/코드/diff: `QPlainTextEdit#log` 배경 `surface_alt`, 글자 `text_2`. `DiffView` 행 배경 = `diff_*`(§17.4), 글자 `text`; `…` 같은 보조 글자 `text_3`; 변경 표시 글자 `warning_text`. 다크의 `diff_extra` 는 `primary_soft`(파랑 계열 틴트) — 초록을 쓰지 않는 이유(§5.9)는 동일.
+- 배너·배지: `*_bg` 면 + `*_text` 글자. 배너 아이콘은 `success`/`warning`/`error`/`primary` 색으로 재착색(§17.9).
+- 툴팁: `toast_bg`/`toast_text` (다크 = 밝은 면 + 어두운 글자). 토스트도 동일. 토스트 외곽 그림자는 §16 대로 라이트에서만 `QColor(0,0,0,α)` — 다크는 그림자를 그리지 않는다(`p.is_dark`).
+- 메뉴 (신규, 현재 QSS 없음): 
+  `QMenu { background: surface; border: 1px solid border; border-radius: 12px; padding: 6px; }`
+  `QMenu::item { padding: 8px 16px 8px 12px; border-radius: 8px; min-width: 140px; color: text; }`
+  `QMenu::item:selected { background: primary_soft; color: primary_soft_text; }`
+  `QMenu::item:disabled { color: text_disabled; }` `QMenu::separator { height: 1px; background: border; margin: 4px 8px; }`
+  팝업 창 속성은 §17.8 의 `AppMenu` 헬퍼.
+- 다이얼로그: `QMessageBox`·`QDialog` 배경 `surface`(기존 `QDialog` 가 `bg` 로 묶여 있으면 카드 안 다이얼로그를 `surface` 로 분리). QMessageBox 버튼은 기존 Button 규칙.
+- 탭(검증 결과): 선택 글자·밑줄 `text`, 비선택 `text_3`. 상태바 `bg` 바닥 + `text_3`.
+- 스크롤바·콤보 팝업: §17.8.
+- 지문 뷰어 `QTextBrowser`: 바닥 `bg_subtle`(AnswerBrowser)/`surface`(지문), 글자 `text`. 지문·AI 답변 CSS 는 `build_statement_css(p)` 가 그대로 팔레트를 읽는다. 추가 규칙 3줄: `a { color: {p.link}; }`, `blockquote { color: text_2; }`(기존), 인라인 코드·`pre` 배경 `surface_alt` 에 글자 `text`. **이미지**: SWEA 지문 이미지는 투명 배경 + 검은 선인 경우가 많아 다크에서 사라진다 → 지문 HTML 생성부가 이미지를 `<table class="imgwrap"><tr><td bgcolor="{p.image_paper}">` 로 감싼다(다크일 때만, 둥근 모서리는 못 줌). 표 `th` 배경 `surface_alt`, 테두리 `border`. 샘플 입출력 `pre.sample` 은 기존 규칙.
+- 색 있는 인라인 `style="color:…"`·`<font color>` 금지. 리치 텍스트 색은 CSS 클래스(`.ts`·`.imgfail`·`.sample-more` 등)로만 주고 문서의 `defaultStyleSheet` 에 정의한다.
+
+### 17.8 팝업·스크롤바 가장자리 회색 제거 (요구 5)
+
+**원인**
+1. 콤보 팝업은 `QComboBoxPrivateContainer`(최상위 팝업 창 + QFrame)가 감싼다. 이 컨테이너는 QSS 규칙이 없어 앱 `QPalette.Window`(Fusion 기본 회색)로 칠해지고, 안쪽 `QAbstractItemView` 는 radius 12 + padding 4 라서 **둥근 모서리 바깥·4px 패딩 틈·스크롤바 둘레**에 회색이 비친다.
+2. `QScrollBar:vertical { background: transparent }` 만 있고 `::add-page` / `::sub-page`(핸들 위·아래 트랙)와 `::up-arrow`/`::down-arrow`·`::corner` 를 스타일하지 않아 Fusion 이 트랙을 팔레트(`Mid`/`Window`)로 그린다. 핸들 옆 연한 띠가 그것이다(캡처 8번).
+3. `QScrollArea > QWidget > QWidget` 규칙은 뷰포트 자식만 칠하고 코너 위젯과 `Base` 팔레트로 칠하는 뷰포트는 남아, 다크에서는 하얀·회색 사각형이 튄다.
+
+**해결 (3단 병행 — 하나만 적용하면 재발)**
+- (a) QSS 추가·교체:
+```
+QAbstractScrollArea { background: transparent; border: none; }          /* 구체 규칙(QTableWidget 등)보다 앞에 */
+QAbstractScrollArea::corner { background: transparent; border: none; }
+QScrollBar:vertical { background: transparent; border: none; width: 10px; margin: 2px 2px 2px 0; }
+QScrollBar:horizontal { background: transparent; border: none; height: 10px; margin: 0 2px 2px 2px; }
+QScrollBar::handle:vertical { background: {border_strong}; border-radius: 3px; min-height: 28px; margin: 0 1px; }   /* 폭 6px 로 보임 */
+QScrollBar::handle:horizontal { background: {border_strong}; border-radius: 3px; min-width: 28px; margin: 1px 0; }
+QScrollBar::handle:hover { background: {text_placeholder}; }   QScrollBar::handle:pressed { background: {text_3}; }
+QScrollBar::add-page, QScrollBar::sub-page { background: none; border: none; }
+QScrollBar::add-line, QScrollBar::sub-line { background: none; border: none; width: 0; height: 0; }
+QScrollBar::up-arrow, QScrollBar::down-arrow, QScrollBar::left-arrow, QScrollBar::right-arrow { background: none; width: 0; height: 0; }
+QComboBox QFrame { background: transparent; border: none; }              /* 팝업 컨테이너 */
+QComboBox QAbstractItemView { background: {surface}; border: 1px solid {border}; border-radius: 12px; padding: 4px; outline: 0; selection-background-color: {primary_soft}; selection-color: {primary_soft_text}; }
+QComboBox QAbstractItemView QScrollBar:vertical { margin: 10px 3px 10px 0; }   /* 둥근 모서리 안쪽으로 */
+```
+  (기존 `margin: 0`·`width: 8px` 는 위 값으로 대체. 핸들 시각 폭은 6px 로 유지해 기존과 같은 얇음.)
+- (b) 코드(위젯 팩토리): `widgets.style_popup(window)` = `setWindowFlag(Qt.FramelessWindowHint)`, `setWindowFlag(Qt.NoDropShadowWindowHint)`, `setAttribute(Qt.WA_TranslucentBackground)`. 모든 콤보 생성 직후 `style_popup(combo.view().window())` 와 `combo.view().viewport().setAutoFillBackground(False)`, `combo.view().setFrameShape(QFrame.NoFrame)`. 모든 `QMenu` 는 `widgets.AppMenu`(생성자에서 `style_popup(self)` 호출)로 교체. 플래그 변경은 창이 처음 보이기 전에만 한다.
+- (c) 앱 `QPalette`(§17.9 `qt_palette`): `Window=bg`, `Base=surface`, `AlternateBase=bg_subtle`, `Button=secondary`, `Mid=border_strong`, `Midlight=border`, `Dark=border_strong`, `Window` 가 비치는 모든 곳이 앱 색이 되게 한다. 테마·모드 전환마다 갱신.
+- 검증: `combo.view().window().grab()` 의 스크롤바 트랙 열 픽셀이 `surface` 와 ±2 이내, 둥근 모서리 바깥 픽셀 alpha 0(투명 창일 때). 12 팔레트 전부.
+
+### 17.9 QPainter 위젯 · 아이콘 · 캐시 색 출처 규칙
+
+**규칙**: 색은 `paintEvent`/`paint`(델리게이트)가 그리는 시점에 `tokens.current().<필드>` 로 읽는다. 생성자·모듈 전역에 색을 저장하지 않는다. 캐시(QPixmap·QIcon·QBrush·HTML)는 **`tokens.version()` 을 키에 포함**하거나 `ThemeBus.changed` 에서 재생성한다. `.py` 에 `#RRGGBB`·`QColor("#…")`·`Qt.GlobalColor`(`transparent` 제외)·`rgb(`·`setStyleSheet(f"…color…")` 금지.
+
+| 위젯 | 칠하는 요소 → 토큰 |
+|---|---|
+| `Button`(면) | 기존 `p.*` 조회 유지(§16.5). 포커스 링 `primary` 2px |
+| `Toggle` | §17.7 |
+| `NavDelegate` | 알약 `primary_soft`(hover `secondary`), 글자 선택 `primary_soft_text`/hover `text`/기본 `text_2`, 선택 띠 `primary` 2px, 비활성 `text_disabled` |
+| `ThemeChip` | 칩은 **선택 중인 모드 기준** 해당 테마의 `primary_action` 점 + 이름 `text`, 선택 시 그 테마 `primary_soft` 면 + 2px `primary` 링(그 테마 `primary`). 팔레트는 `theme.light`/`theme.dark` 중 현재 모드 것 |
+| `Spinner` | `primary` (회색 비활성 면 위에서 보임) |
+| `Skeleton` | 기본 `surface_alt`, 반짝이는 하이라이트 `hover_fill` (라이트 = `border`, 다크 = `secondary_hover`) |
+| `BarChart` | 축·눈금선 `border`, 축 글자 `text_3`, 선택 막대 `primary`, 비선택 `border_strong`, 강조 값 글자 `text`, 비강조 `text_2` |
+| `Sparkline` | 선 `text_3` 1.5px, 끝점 `primary` |
+| `MetricBar`(진행·강도) | 트랙 `surface_alt`, 채움 `primary`/`warning`/`success` |
+| `StatusDot` | success/warning/error/`text_3`(미연결 윤곽) |
+| `HeatmapWidget` | §17.10. 요일·월 글자 `text_3`, 오늘 테두리 `text` 1.5px, 선택 `primary` 2px |
+| `Toast` | §17.7 |
+| `DiffView` 행 | §17.7 |
+| `EmptyState`·배너 아이콘 | SVG 재착색: 아이콘 색은 `text_3`(빈 상태)·상태색(배너) |
+
+**SVG 재착색**: `svg_icon(name, color=None, size)` 의 기본색은 `tokens.current().text_2`(기존 `#424A53` 문자열 치환 유지, 치환 대상 = `ICON_BASE_COLOR`). 추가 치환 맵(해당 SVG 만 영향): `#1A7F37`→`success`, `#9A6700`→`warning`, 아이콘 내부 흰 글리프 `#FFFFFF`→`on_primary`(체크·상태 아이콘 안쪽). `app.svg`(앱 로고)는 치환 제외. 결과 `QIcon`/`QPixmap` 은 `(name, color, size, devicePixelRatio, tokens.version())` 키의 딕셔너리 캐시.
+
+**`ThemeBus`** (`gui/theme/bus.py`): `QObject` 싱글톤, 신호 `changed()`. `MainWindow.apply_appearance()` 가 모든 적용(QSS·QPalette) 후 마지막에 emit. 구독 대상(캐시를 가진 위젯, `refresh_theme()` 구현): 내비 아이콘, `Button`(글자 옆 아이콘), `EmptyState`, `Banner`(아이콘), `ProblemBrowser`/`AnswerBrowser`(문서 CSS), `LogView`(타임스탬프 span 재생성), 최근 표(칩 델리게이트·전경색), `DiffView`(행 색), 복습 카드(상태 글자 색 → 클래스), `HeatLegend`(칸 색), 설정 칩들(`ThemeChip`·잔디 칩·색 패널), 성장 페이지(잔디 기준색·막대·스파크라인)이다.
+
+### 17.10 잔디 색
+
+- **모드 인식 농도**: 0단계 = `surface_alt`. 1~3단계 = 기준색을 카드 `surface` 에서 섞는 비율, 4단계 = 기준색을 배경 반대쪽(라이트 검정 / 다크 흰색)으로 30% 민 색.
+  - 라이트: 혼합 (0.35, 0.65, 1.0) — 현행 유지.
+  - **다크: (0.45, 0.72, 1.0)** — 어두운 바닥에서 1단계가 0단계와 구분되도록 올림(블루 기준 명도 L 0단계 0.03 → 0.09 → 0.17 → 0.30 → 0.46 단조 증가).
+  - `solved.heat_colors(base, bg, dark: bool = False)` 에 `dark` 인자 추가(기본값으로 호환). `bg` 는 카드 `surface`.
+- **기준색 결정**: 설정 `follow` → `tokens.current().primary` (라이트는 테마의 `primary`, 다크는 밝은 다크 `primary`). 고정색 → 저장 hex 를 모드 보정해 사용.
+- **모드 보정(표시 전용, 저장값 불변)**: 다크에서 기준색 상대 휘도 < 0.20 이면 흰색 쪽으로 5%씩 섞어 0.20 이상으로. 라이트에서 > 0.60 이면 검정 쪽으로 5%씩 섞어 0.60 이하로. 툴팁·접근성 이름에는 저장 hex.
+- **칩**: 설정 → 성장 기록 카드의 잔디 색 줄(기존 위치):
+  `[● 테마 색 따르기]` (알약 칩 높이 36, 현재 `primary` 점 16px + 글자, 선택 시 `primary_soft` 면 + 2px `primary` 링 + 체크 아이콘) · 프리셋 5색 원형 칩 32px(기존 24 에서 키움, 사이 간격 8) · `[직접 고르기]`(그라디언트 링 아이콘 있는 원형 칩 32px; 고정색이 프리셋이 아닐 때는 그 색 원형 칩이 자리를 대신하고 같은 이름).
+  선택 표시: 2px `text` 링 + 칩 중앙 `on_primary` 체크(색만으로 선택을 알리지 않음). 프리셋 칩 색은 현재 모드의 보정 후 색. 접근성 이름 "풀이 잔디 색: 초록, 선택됨".
+- 프리셋 목록은 `solved.HEAT_PRESETS` 유지(초록·파랑·보라·주황·분홍).
+- **마이그레이션**: 키 없음 → follow. 키 있음(`#RRGGBB`) → 고정색 그대로(이미 직접 고른 사용자 존중). `parse_hex` 는 `"follow"` 를 모르므로 호출 전에 분기.
+- "잔디 기록을 풀이 저장소에 함께 저장" 토글(`HeatSyncToggle`, QSettings `growth/heat_sync`, 기본 OFF): 성장 기록 카드 잔디 색 줄 아래 한 줄(`_toggle_row`). 힌트 "여러 PC 에서 같은 잔디를 보려면 켜세요. 문제 번호·날짜·방식만 저장하고 코드·지문은 올리지 않습니다." 동기화 기능 빌더 작업이 끝나기 전에는 **행 전체를 숨긴다**(동작하지 않는 스위치 금지, §16.15 동일 원칙).
+
+### 17.11 잔디 색 선택 패널 (인라인, `widgets.ColorPicker`)
+
+- 위치: 잔디 색 줄 바로 아래에서 `[직접 고르기]` 로 펼침/접힘(높이 트윈 `MOTION_BASE`, 동작 줄이기면 즉시). 카드 안 `QFrame[class="tile"]`(`bg_subtle` 면, radius 12, 패딩 16). 너비는 카드 폭에 맞추되 내용은 최대 320px 왼쪽 정렬.
+- 구성(위→아래, 간격 12):
+```
+ColorPickerPanel (tile)
+├─ 제목 줄: "색 직접 고르기" (section 12pt 700)                       [닫기 ✕ 24px 아이콘 버튼, 이름 "색 선택 닫기"]
+├─ SVArea   폭 100% (최대 288) × 높이 144, radius 8
+│     가로 = 채도 0→100%, 세로 = 명도 100→0%. 현재 색 위치에 지름 14px 링(2px `ring_light` 외곽 + 1px `ring_dark` 안쪽선 — 임의 색 위라 흑백 이중선)
+├─ HueSlider 폭 100% × 높이 16 (트랙 radius 8, 색상환 무지개), 손잡이 지름 20 링
+├─ 입력 줄:  [미리보기 28×28 원] [HEX 입력 "#2DA44E" 폭 120, mono, 높이 44→36 sm]   [적용됨 ✓ 힌트]
+│     오류 시 입력 2px `error` 링 + 아래 한 줄 "색 코드는 #과 영문·숫자 6자리예요 (예: #2DA44E)"(error 클래스)
+├─ 미리보기 줄: 잔디 범례와 같은 5칸(0~4단계, 현재 모드 기준 계산) + "적게 … 많이"
+└─ 하단 버튼 줄(우측 정렬, 간격 8): [테마 색 따르기로 되돌리기](link) 
+```
+- 동작: 색 이동 중에는 패널 안 미리보기만 갱신, **놓을 때(마우스 release)·HEX Enter/포커스 아웃·키보드 이동 150ms 디바운스** 에 설정 저장 + `heat_color_changed` emit(성장 탭이 즉시 갱신). 확인/취소 버튼 없음(즉시 적용, 되돌리기 링크로 복구).
+- HEX 입력: `#` 자동 보충, 3자리 확장(`#abc`→`#AABBCC`), 대소문자 무시, 잘못된 값은 적용하지 않고 오류 표시, 유효하면 SV·Hue 위치 동기화.
+- 키보드: SVArea 포커스 시 ←→ 채도 ±1%, ↑↓ 명도 ±1%(Shift 10%), HueSlider ←→ ±1°(Shift 10°), Tab 순서 SVArea → Hue → HEX → 되돌리기 → 닫기. 접근성 이름 "채도·명도 영역", "색상 슬라이더 0~360", "HEX 색 코드". 포커스 링 `primary` 2px(오프셋 2).
+- 한국어 문구 전부 패널 안에 둠(영문 컴포넌트 없음). 다크 대응: 패널 면 `bg_subtle`, 글자 `text`/`text_3`, SV/Hue 의 그라디언트는 색 자체이므로 모드와 무관.
+- 터치 타깃: SVArea·Hue·칩 모두 짧은 변 ≥ 16px 이나 포인터 입력 위젯이므로 44px 규칙은 칩(36/32 + 주변 8 간격)에 한해 "가까운 근사"를 수용하고, 표시 중복 입력 수단으로 HEX 입력을 제공한다.
+
+### 17.12 최근 탭 상태 표시
+
+**표 구조 (5열)**: `상태`(128) · `번호`(72) · `제목`(Stretch, 최소 140) · `주제`(112) · `저장 시각`(124). 창 너비로 표 폭이 640 미만이면 `주제` 열 숨김(툴팁에 주제 포함). 행 높이 36 유지.
+
+**상태 판정 규칙** (`service.problem_status(...)` 순수 함수, 문제 번호 단위):
+입력: `rec = coach.get_record(num)`(없을 수 있음: `last_result`, `last_submit_at`), `solved_latest` = `solved.load` 를 번호로 모아 가장 늦은 항목(`at`, `via`), `review` = `service.review_items` 중 같은 번호.
+1. `solved_latest` 가 있고 (`rec` 가 없거나, `rec.last_result != "pass"` 이면서 `solved_latest.at` ≥ `rec.last_submit_at`, 또는 `rec.last_result == "pass"`) → **Pass**. 세부: `via == "swea"` → "SWEA Pass", `local` → "로컬 Pass"(툴팁에만).
+2. 아니면 `rec.last_result` 가 `wrong` → **오답**, `timeout` → **시간 초과**, `runtime_error` → **런타임 오류**.
+3. `rec.last_result == "pass"` 인데 solved 기록이 없으면(400일 경과·백필 누락) → **Pass**.
+4. 그 외(기록 없음) → **미제출**("아직 제출·검증하지 않음"). 로컬 검증이 실패한 기록은 저장되지 않으므로 이 경우에도 미제출로 보인다 — 후속 개선 후보(별도 빌더 작업).
+5. 복습 태그는 상태와 독립: `review.overdue_days >= 0` → "복습 오늘"/"복습 N일 지남"(warning 톤), `< 0` → "복습 N일 뒤"(중립 톤). 상태 칩과 겹칠 수 있다.
+6. 한 문제가 표에 번호 중복으로 올 수 있으면(주제 다름) 번호만으로 조회 — 기존 `records.json` 키 규칙과 동일.
+
+**시각**
+
+| 상태 | 칩 면 | 칩 글자·아이콘 | 왼쪽 띠 3px | 아이콘(16px SVG, 선 1.75) | 칩 글자 |
+|---|---|---|---|---|---|
+| Pass | `success_bg` | `success_text` | `success` | 원 안 체크 `status-pass` | "Pass" |
+| 오답 | `error_bg` | `error_text` | `error` | 원 안 X `status-wrong` | "오답" |
+| 시간 초과 | `warning_bg` | `warning_text` | `warning` | 시계 `status-timeout` | "시간 초과" |
+| 런타임 오류 | `error_bg` | `error_text` | `error` | 삼각 느낌표 `status-runtime` | "런타임 오류" |
+| 미제출 | `surface_alt` | `text_2` | 없음 | 빈 원 `status-none` (점선 아님, 1.75 선) | "미제출" |
+
+- 칩: 높이 22, radius 11, 아이콘 14px + 간격 4 + 글자 9pt 700, 좌우 패딩 6/8. 칩 왼쪽 시작 x = 18, 왼쪽 띠는 x = 8 의 3×(행 높이 −16) 둥근 막대. 구분은 **아이콘 모양 + 글자 + 색** 3중(색각 이상 대응: 오답/런타임은 같은 색 계열이지만 아이콘·글자가 다르다).
+- 복습 태그: 제목 칸 오른쪽 끝, 높이 20, radius 10, 아이콘 `review`(달력+화살표 12px) + 9pt 700 글자. 도래 = `warning_bg`/`warning_text`, 예정 = `surface_alt`/`text_2`. 제목은 태그 폭 + 8 만큼 줄여 말줄임(오른쪽 `…`).
+- 행 hover = `bg_subtle`, 선택 = `primary_soft`(칩 색은 그대로). 칩·띠는 `StatusDelegate` 가 그림(QSS 아님). 위젯을 셀에 넣지 않는다(20행 × 위젯 비용·접근성).
+- 접근성: 첫 열 `QTableWidgetItem` 텍스트 = 칩 글자("Pass" 등), `setToolTip("1226번 · Pass(SWEA) · 마지막 제출 09-30 14:44 · 복습 2일 뒤")`, 행 전체 접근성 설명 "1226번 문제, Pass, 복습 2일 뒤".
+- 표 위 요약 한 줄(선택): 기존 `count_label` 자리에 "Pass 12 · 오답 3 · 시간 초과 1 · 미제출 4" (hint 클래스). 20개 미만이어도 표시.
+- 복습 카드의 "· N일 지남" 글자는 `setStyleSheet(f"color:…")` 대신 `QLabel[class="review-status"][state="due"|"upcoming"]` QSS(due `warning_text`, upcoming `text_3`)로 바꾼다.
+- 다크: 칩 색은 §17.4 의 다크 `*_bg`/`*_text`, 띠는 다크 `success`/`error`/`warning`, 미제출 칩 `surface_alt`/`text_2` — 별도 규칙 없음.
+- 빈 상태·로딩: 기존 EmptyState 유지. 상태 조회 실패(파일 손상)는 모든 행 "미제출" 이 아니라 **칩을 숨기고**(첫 열 빈칸) 표는 정상 표시 — 상태는 부가 정보.
+
+### 17.13 설정 "화면" 카드
+
+기존 카드(테마 칩 6 + 동작 줄이기)를 다음 순서로 확장한다. 카드 제목 "화면".
+```
+화면 (card)
+├─ 행1  "화면 모드"                      [☀ 라이트 | ☾ 다크 | ▣ 시스템 따르기]  (SegmentedControl, 높이 44)
+│       힌트: "시스템 따르기는 Windows 설정의 앱 모드를 따라가요."
+├─ divider
+├─ 행2  "테마 색"  (ThemeChip 3열 격자, 현재 모드 색으로 표시)
+├─ divider
+└─ 행3  "동작 줄이기" Toggle (기존)
+```
+- `SegmentedControl`: 트랙 `surface_alt` radius 12, 안쪽 패딩 4, 칸 radius 8, 선택 칸 `segment_on` + `text` 700, 비선택 `text_2`, hover `hover_fill`. 칸 최소 폭 96, 높이 36(트랙 44). 키보드: 좌우 화살표 이동·Space/Enter 선택, 포커스 링 2px `primary`. 라디오 그룹으로 접근성 노출(이름 "화면 모드: 다크, 선택됨"). 아이콘(sun/moon/monitor)은 16px, 선택 시 글자와 같은 색. 720px 너비에서 칸 아이콘을 숨기고 글자만.
+- 선택 즉시 `MainWindow.apply_appearance()`. 시스템 따르기 상태에서 OS 모드가 바뀌어도 반영.
+- 테마 칩 격자는 모드가 바뀌면 칩 색도 즉시 새 모드 값으로 다시 그린다.
+
+### 17.14 전환 시 재적용 절차 (요약, 상세는 handoff)
+
+1. `tokens.set_theme/set_color_mode/set_system_dark` → `version` 증가.
+2. `app.setPalette(qt_palette(current()))` → `app.setStyleSheet(build_qss())` (한 번만, `setUpdatesEnabled(False)` 로 감싸 깜빡임 방지).
+3. 아이콘 캐시 무효화(version 키) → 내비·Button·EmptyState·Banner 재설정.
+4. `ThemeBus.changed.emit()` → QTextBrowser 문서 CSS 교체 + 원본 재렌더(스크롤 위치 보존), 로그 재생성, 표·diff 재칠, 잔디·차트 `update()`.
+5. 네이티브 타이틀 바·`QStyleHints` 색 구성표 갱신.
+6. 설정 저장(`ui/color_mode`, `ui/theme`). 시작 시에는 위젯 생성 **전에** 모드·테마를 해석해 첫 프레임부터 올바른 색(라이트 번쩍임 금지).
+
+### 17.15 접근성 · 일관성 자기검토 결과
+
+- 대비: §17.6 표를 12 팔레트에 자동 테스트. 색만으로 의미를 전하는 곳 없음(상태 칩 = 아이콘+글자, 선택 = 링+체크, 모드 = 아이콘+글자).
+- 포커스: 라이트/다크 모두 `primary` 2px 링(≥ 3:1 on `surface`·`bg` — §17.6). 다크 `primary` 가 `soft` 면 위에서도 ≥ 4:1.
+- 범위: 새 기능 UI 는 요청된 4개(모드 세그먼트, 색 패널, 상태 칩·태그, 동기화 토글 자리)뿐. 모드 빠른 전환 버튼 등 추가 UI 없음.
+- 일관성: 모든 새 색은 팔레트 토큰, 간격은 기존 스케일(4·8·12·16), radius 는 8·12·16·pill.
+- 참고: 13번 캡처(선택 내비 굵은 글씨)는 메인에서 힌팅 끔으로 해결됨 — 이 절의 영향 없음.
+
+### 17.16 리스크
+
+| # | 리스크 | 대응 |
+|---|---|---|
+| X1 | Fusion 이 일부 위젯(QSpinBox 화살표, QAbstractItemView 코너)을 팔레트로 그려 다크에서 흰 사각형 | `qt_palette` 전 역할 지정 + 캡처 휴리스틱 테스트(§handoff) |
+| X2 | `QComboBox QFrame` 규칙이 컨테이너에 안 먹음(Qt 버전차) | 코드 `style_popup` + `viewport().setAutoFillBackground(False)` 병행. 캡처로 확인 |
+| X3 | 투명 팝업 창이 일부 환경(원격 데스크톱·offscreen)에서 검게 보임 | `WA_TranslucentBackground` 는 팝업에만, 실패 시 radius 0 폴백 플래그 `POPUP_TRANSLUCENT=False` 한 곳에서 끔 |
+| X4 | 다크 지문 이미지 | `image_paper` 흰 종이(둥근 모서리 불가 수용) |
+| X5 | 다크 3색 퍼플·그린 버튼 면이 `surface` 와 대비 3:1 미만 | 글자 포함 컨트롤이라 면제(§17.6 각주), 필요하면 1px `primary` 테두리 옵션 |
+| X6 | 시스템 감지 신호 누락 | 3초 폴링 폴백 |
+| X7 | 12 팔레트 틴트가 "칙칙/촌스럽다" | 값만 `tokens.py` 표에서 조정(구조 변경 없음). 사용자가 싫어하면 라이트 틴트를 half 로 |
+
