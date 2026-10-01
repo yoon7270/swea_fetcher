@@ -262,6 +262,25 @@ def test_local_check_pass_is_recorded_fail_is_not(settings, problem):
     assert [i.via for i in solved.load(settings)[TODAY]] == ["swea"]
 
 
+def test_local_pass_then_swea_wrong_is_not_counted(settings, problem, submit_stub):
+    assert service.check_problem(settings, problem, timeout=30).passed  # 샘플은 맞음
+    submit_stub["results"] += [SubmitResult(False, "오답"), SubmitResult(True, "Pass")]
+    service.submit_problem(settings, "sim", NUM)  # SWEA 는 오답
+    assert solved.load(settings) == {}
+    assert solved.read_local(settings) == {}  # 기기 파일로도 안 퍼지게 저장본에서도 지움
+    service.check_problem(settings, problem, timeout=30)  # 다시 샘플만 통과 — 아직 SWEA 에서 틀린 상태라 세지 않음
+    assert solved.load(settings) == {}
+    service.submit_problem(settings, "sim", NUM)  # SWEA Pass
+    assert [(i.num, i.via) for i in solved.load(settings)[TODAY]] == [(NUM, "swea")]
+
+
+def test_existing_local_record_hidden_after_swea_wrong(settings):
+    """이미 저장된 로컬 기록 (정리 전 버전에서 남은 것) 도 마지막 SWEA 채점이 오답이면 숨긴다."""
+    solved.record(settings, NUM, "sim", "A+B", "local", at=NOW)
+    growth.record_submit(settings, NUM, "sim", "wrong", at=NOW)
+    assert solved.load(settings) == {}
+
+
 def test_local_check_fail_timeout_cancel_not_recorded(settings, problem, monkeypatch):
     (problem / f"{NUM}.py").write_text("print('#1 4')\n", encoding="utf-8")
     assert not service.check_problem(settings, problem, timeout=30).passed

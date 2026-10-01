@@ -637,6 +637,8 @@ def _record_growth_submit(settings: Settings, num: int, topic: str, result: Subm
         log.warning("성장 기록 실패: %s", e)
     if result.passed:  # 풀이 잔디 (M20): 앱으로 낸 SWEA Pass
         _record_solved(settings, topic, num, "swea")
+    else:  # 샘플만 맞고 SWEA 에서 틀린 문제는 로컬 통과 기록을 걷어낸다
+        solved.retract_local(settings, num)
 
 
 def _record_solved(settings: Settings, topic: str, num: int, via: str) -> None:

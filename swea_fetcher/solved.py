@@ -1,6 +1,8 @@
 """풀이 잔디 (M20): 하루에 Pass 한 문제 기록 + 집계 + 색 단계 계산. 순수 (Qt·네트워크·AI 호출 없음).
 
 - "Pass 한 문제" = 앱으로 SWEA 제출 Pass(via="swea") + 로컬 검증 통과(via="local", 샘플 출력 일치). 같은 날 같은 문제는 1건. 날짜는 로컬 날짜.
+  로컬 통과는 잠정 기록이다: SWEA 가 그 문제를 Pass 가 아닌 결과로 채점하면 그 문제의 로컬 기록을 걷어내고(retract_local),
+  마지막 SWEA 채점이 Pass 가 아닌 문제의 로컬 기록은 표시하지 않는다 (샘플만 맞고 SWEA 에서 틀린 문제가 "해결"로 세지지 않게).
 - 저장 위치는 `{config_dir}/coach/profile/solved.json` — 성장 기록과 같은 폴더라 [성장 기록 지우기]·[AI 기록 지우기]·`logout --all` 이 함께 지운다.
   루트 폴더 안이면 쓰기를 거부한다 (GitHub 로 올라가지 않게). 코드·지문 원문은 저장하지 않는다 (번호·주제·제목·방식·시각만).
 - 400일 넘은 날은 저장할 때 걷어낸다 (1년 표시 + 여유).
@@ -156,13 +158,46 @@ def record(settings: Settings, num: int, topic: str, title: str, via: str, *, at
         return False
 
 
+def retract_local(settings: Settings, num: int) -> bool:
+    """그 문제의 로컬 통과 기록(via="local")을 모든 날에서 지운다 — SWEA 가 Pass 가 아닌 결과로 채점했을 때. 지웠으면 True. 실패해도 예외 없음."""
+    try:
+        with growth._LOCK:
+            days = _read_raw(settings)
+            changed = False
+            for key, items in days.items():
+                kept = [i for i in items if not (i["num"] == int(num) and i["via"] == "local")]
+                if len(kept) != len(items):
+                    days[key], changed = kept, True
+            return changed and _write(settings, days, growth.now().date())
+    except Exception as e:  # noqa: BLE001 — 부가 기능은 제출 흐름을 깨지 않는다
+        log.warning("풀이 잔디 로컬 기록 정리 실패: %s", e)
+        return False
+
+
+def _swea_rejected(settings: Settings) -> set[int]:
+    """마지막 SWEA 채점이 Pass 가 아닌 문제 번호 (이 기기의 제출 이벤트 기준)."""
+    last: dict[int, str] = {}
+    try:
+        for ev in growth.read_events(settings):
+            if ev.t == "submit" and ev.num:
+                last[ev.num] = ev.res
+    except Exception as e:  # noqa: BLE001
+        log.warning("제출 기록을 읽지 못했습니다: %s", e)
+    return {n for n, res in last.items() if res != "pass"}
+
+
 def load(settings: Settings) -> dict[date, list[SolvedItem]]:
     """{날짜: [항목]} (각 날 안은 기록 시각 순). 읽기 전용. 동기화가 켜져 있으면 다른 기기 기록(작업 트리 파일·원격 캐시)을 합친다 (M23)."""
     from . import solved_sync
 
+    rejected = _swea_rejected(settings)
     out: dict[date, list[SolvedItem]] = {}
     for key, items in solved_sync.merged_days(settings, _read_raw(settings)).items():
-        rows = [SolvedItem(i["num"], str(i.get("topic") or ""), str(i.get("title") or ""), i["via"], str(i.get("at") or "")) for i in items]
+        rows = [
+            SolvedItem(i["num"], str(i.get("topic") or ""), str(i.get("title") or ""), i["via"], str(i.get("at") or ""))
+            for i in items
+            if not (i["via"] == "local" and i["num"] in rejected)
+        ]
         if rows:
             out[date.fromisoformat(key)] = sorted(rows, key=lambda r: r.at)
     return out
