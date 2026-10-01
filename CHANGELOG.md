@@ -2,7 +2,7 @@
 
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/). 버전은 `swea_fetcher/__init__.py` 의 `__version__` 하나로 관리한다.
 
-## 미출시
+## v0.12.0 — 2026-10-01 "다크 모드 · 풀이 잔디"
 
 ### 수정
 - Windows 빌드에서 시스템 DLL 경로를 우선 검색해 외부 앱의 동명 ICU DLL이 포함되면서 QtCore 로딩에 실패하는 문제 수정.
