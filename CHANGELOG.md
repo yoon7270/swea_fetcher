@@ -2,7 +2,7 @@
 
 형식: [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/). 버전은 `swea_fetcher/__init__.py` 의 `__version__` 하나로 관리한다.
 
-## 미출시
+## v0.12.1 — 2026-10-02 "잔디 정확도"
 
 ### 수정
 - 풀이 잔디: 로컬 검증(샘플)만 통과하고 SWEA 에서 오답·시간 초과·런타임 오류를 받은 문제가 "해결"로 세지던 문제. 이제 SWEA 가 Pass 가 아닌 결과를 주면 그 문제의 로컬 통과 기록을 지우고, SWEA 에서 다시 Pass 할 때까지 로컬 통과는 세지 않음
