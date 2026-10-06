@@ -25,14 +25,15 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Collection, Iterable, Mapping, Sequence
 
-from . import coach, growth
+from . import coach, growth, problem_types as pt
 from .catalog import CatalogItem, CatalogStatus
 from .config import Settings
 
 log = logging.getLogger("swea_fetcher.recommend")
 
 DAY_FILE = "recommend.json"
-DAY_VERSION = 1
+DAY_VERSION = 2  # 2: 항목에 풀이 유형("ty") 추가. 1 도 읽는다 (유형 없는 항목 = 유형 미확인)
+DAY_VERSIONS = (1, 2)
 MAX_LEVEL = 8
 
 # 수준 모델 상수 (초기 추정치 — 실사용 뒤 이 한 곳만 조정한다). 경계값은 포함.
@@ -64,8 +65,15 @@ AI_PICK_MIN = 3  # 유효 3개 미만이면 AI 실패로 본다
 AI_POOL_MAX = 30
 AI_REASON_MAX = 60
 
-KIND_ORDER = ("retry", "fit", "stretch", "fill")
-KIND_LABEL = {"retry": "다시 도전", "fit": "수준 맞춤", "stretch": "한 단계 위", "fill": "수준 맞춤"}
+# 풀이 유형 분류 예산 (service.classify_types): 한 번에 12문제, 하루 40문제, 한 번 실행에서 푼 문제 24 · 새 유형 후보 12 · 일반 후보 16
+CLASSIFY_BATCH = 12
+CLASSIFY_DAILY_CAP = 40
+CLASSIFY_SOLVED_MAX = 24
+CLASSIFY_NEWTYPE_MAX = 12
+CLASSIFY_CAND_MAX = 16
+
+KIND_ORDER = ("retry", "fit", "stretch", "fill", "newtype")
+KIND_LABEL = {"retry": "다시 도전", "fit": "수준 맞춤", "stretch": "한 단계 위", "fill": "수준 맞춤", "newtype": "새 유형"}
 AI_STATUSES = ("none", "pending", "ok", "failed", "skipped")
 
 
@@ -122,10 +130,11 @@ class Pick:
     """오늘의 세트 한 칸 (표시 전 단계)."""
 
     num: int
-    kind: str  # retry | fit | stretch | fill
+    kind: str  # retry | fit | stretch | fill | newtype
     reason: str
     source: str = "rule"  # "rule" | "ai"
     key: float = 0.0  # 같은 kind 안 정렬 키 (작을수록 먼저)
+    types: tuple[str, ...] = ()  # 풀이 유형 (주 유형 먼저). 비어 있으면 유형 미확인
 
 
 @dataclass
@@ -146,6 +155,7 @@ class Recommendation:
     reason: str
     source: str  # "rule" | "ai"
     solved_today: bool = False
+    types: tuple[str, ...] = ()  # 풀이 유형 id (주 유형 먼저). 비어 있으면 유형 미확인
 
 
 @dataclass
@@ -161,6 +171,7 @@ class RecommendResult:
     notes: list[str] = field(default_factory=list)
     used_swea_passed: bool = False
     weak_tagged: int = 0  # 최근 28일 분류 그룹 수 (AI 안내 문구용)
+    type_counts: dict = field(default_factory=dict)  # {유형 id: 앱에 Pass 기록된 문제 수} — "풀어 본 유형" 줄 (폴더 이름은 증거가 아니다)
 
 
 # --- 수준 모델 ------------------------------------------------------------------------------------
@@ -394,12 +405,20 @@ def _tiered_pool(base: list[CatalogItem], need: int, recent: Collection[int], da
     return base
 
 
-def reason_for(kind: str, est: LevelEstimate, wrong_count: int = 0) -> str:
-    """규칙 기반 이유 문구 (숫자는 계산값만)."""
+def _type_name(types: Sequence[str]) -> str:
+    return (pt.name_of(types[0]) or "") if types else ""
+
+
+def reason_for(kind: str, est: LevelEstimate, wrong_count: int = 0, *, types: Sequence[str] = (), counts: Mapping[str, int] | None = None) -> str:
+    """규칙 기반 이유 문구 (숫자는 계산값만). types 가 있으면 주 유형 이름을 앞에 붙인다."""
     c = est.level
     if kind == "retry":
         return f"오답 {wrong_count}회로 남아 있어요 · 다시 도전해 볼까요"
+    name = _type_name(types)
+    n = (counts or {}).get(types[0], 0) if types else 0  # 이 유형으로 앱에 Pass 기록된 문제 수
     if kind == "fit":
+        if name:
+            return f"{name} · 풀어 본 유형이에요 ({n}문제 해결) · D{c} 감을 굳혀요" if n else f"{name} · 입문 유형으로 D{c} 부터 시작해요"
         if est.cold:
             return f"기록이 적어 D{c} 부터 시작해요"
         k = est.clean_n.get(c, 0)
@@ -407,12 +426,26 @@ def reason_for(kind: str, est: LevelEstimate, wrong_count: int = 0) -> str:
             return f"최근 D{c} 를 {k}문제 안정적으로 풀었어요 · 같은 수준으로 감을 굳혀요"
         return f"요즘 푸는 D{c} 수준에 맞춰 골랐어요"
     if kind == "stretch":
+        if name:
+            return f"{name} · 풀어 본 유형으로 한 단계 위 D{c + 1} 에 도전해요" if n else f"{name} · 입문 유형으로 한 단계 위에 가볍게 도전해요"
         if est.cold:
             return "한 단계 위 문제로 가볍게 도전해요"
         if est.clean_n.get(c, 0) >= THRESH["master_min_clean"]:
             return f"D{c} 를 안정적으로 풀었어요 · 한 단계 올려 볼 때예요"
         return "한 단계 위 문제로 가볍게 도전해요"
+    if name:
+        return f"{name} · 풀어 본 유형 중 비슷한 난이도예요" if n else f"{name} · 입문 유형 중 비슷한 난이도예요"
     return "비슷한 난이도 중 많은 사람이 푼 문제예요"
+
+
+def newtype_reason(tid: str, lv: int, est: LevelEstimate, known: Collection[str]) -> str:
+    """새 유형 칸 이유: 어떤 유형을, 얼마나 쉬운 난이도로, 어떤 경험을 바탕으로 소개하는지."""
+    name = pt.name_of(tid) or ""
+    diff = est.level - lv
+    step = "지금 수준과 같은" if diff <= 0 else ("한 단계 쉬운" if diff == 1 else f"{diff}단계 쉬운")
+    pre = pt.prereq_names(tid, known) or pt.prereq_names(tid, pt.implied(known))
+    tail = f"{'·'.join(pre)} 경험이 있어 다음 단계예요" if pre else "기본 유형이라 먼저 익혀 두면 좋아요"
+    return f"{name} 첫걸음 · {step} D{lv} 로 시작해요 ({tail})"
 
 
 def build_set(
@@ -428,11 +461,18 @@ def build_set(
     ai_picks: Sequence[AiPick] = (),
     ai_cursor: int = 0,
     size: int = SET_SIZE,
+    types: Mapping[int, Sequence[str]] | None = None,
+    known: Collection[str] = (),
+    type_counts: Mapping[str, int] | None = None,
 ) -> SetBuild:
-    """오늘의 세트: 재도전 0~1 + 수준 맞춤(C) + 한 단계 위(C+1), 부족하면 C-1 → C+2 로 확장 (설계 7.2).
+    """오늘의 세트: 재도전 0~1 + 새 유형 0~1 + 수준 맞춤(C) + 한 단계 위(C+1), 부족하면 C-1 → C+2 로 확장 (설계 7.2, M24.1).
 
     같은 (날짜, 셔플, 수준, 입력) 이면 항상 같은 세트. AI 순위(ai_picks[ai_cursor:])가 있으면 "나머지 칸"을 먼저 AI 순위로
-    채우고(풀·구간 검증을 다시 통과한 것만) 모자란 칸은 규칙으로 채운다.
+    채우고(풀·구간·유형 검증을 다시 통과한 것만) 모자란 칸은 규칙으로 채운다.
+
+    풀이 유형 (types: {번호: 유형 id 들}, known: 내가 풀어 본 유형): 수준 맞춤·한 단계 위·확장 칸은 **유형이 모두 풀어 본 유형 안**인 문제만
+    고른다 (아는 유형이 없으면 입문 유형). 유형을 모르는 문제는 그런 후보가 바닥난 뒤에만 채운다. 풀어 보지 않은 유형은 "새 유형" 칸에서
+    학습 경로상 다음 유형 1문제를 한 단계 쉬운 난이도로 소개한다 (아는 유형이 없으면 칸을 만들지 않는다).
     """
     c = est.level
     rng = random.Random(day_seed(day, shuffle, c))
@@ -443,6 +483,19 @@ def build_set(
     levels = est.levels
     picks: list[Pick] = []
     used_stems: set[str] = set()
+    tmap = types or {}
+    known_set = frozenset(known)
+    allowed = pt.allowed_for(known_set)
+    counts = type_counts or {}
+
+    def tys(n: int) -> tuple[str, ...]:
+        return tuple(tmap.get(n) or ())
+
+    def known_ok(it: CatalogItem) -> bool:
+        return pt.type_ok(tys(it.num), allowed)
+
+    def unknown(it: CatalogItem) -> bool:
+        return not tys(it.num)
 
     # 재도전 (규칙 전용): 레벨 C-1..C+1 의 미해결 고전 문제 중 오답이 큰 순
     retry_pick: RetryCand | None = None
@@ -456,14 +509,40 @@ def build_set(
         break
     if retry_pick is not None:
         it = catalog[retry_pick.num]
-        picks.append(Pick(it.num, "retry", reason_for("retry", est, retry_pick.wrong_count)))
+        picks.append(Pick(it.num, "retry", reason_for("retry", est, retry_pick.wrong_count), types=tys(it.num)))
         used_stems.add(stem(it.title))
+
+    # 새 유형 (규칙 전용): 경로상 다음 유형 중 후보가 있는 첫 유형 1문제, 한 단계 쉬운 난이도 (없으면 두 단계 쉬운 → 같은 난이도)
+    def newtype_pick() -> tuple[CatalogItem, str] | None:
+        eff = pt.implied(known_set)
+        taken = {p.num for p in picks}
+        for tid in pt.next_types(known_set):
+            for lv in dict.fromkeys((max(1, c - 1), c - 2, c)):
+                if lv < 1:
+                    continue
+                pool = [it for it in catalog.values()
+                        if it.lv == lv and it.num not in solved and it.num not in retry_all and it.num not in taken
+                        and tys(it.num)[:1] == (tid,) and all(t == tid or t in eff for t in tys(it.num))
+                        and not (shuffle > 0 and it.num in shown_today) and stem(it.title) not in used_stems]
+                if not pool:
+                    continue
+                pool = _apply_quality_floor(_tiered_pool(pool, 1, recent, shown_today if shuffle > 0 else ()), 1)
+                got = _draw(rng, pool, quality_scores(pool, WEIGHTS_STRETCH), 1, used_stems)  # 정답률 높은 문제부터
+                if got:
+                    return got[0], tid
+        return None
+
+    if known_set and size - len(picks) >= 2:
+        nt = newtype_pick()
+        if nt is not None:
+            it, tid = nt
+            picks.append(Pick(it.num, "newtype", newtype_reason(tid, it.lv, est, known_set), "rule", 0.0, tys(it.num)))
     r_slots = size - len(picks)
 
     def base_pool(lv: int) -> list[CatalogItem]:
         return [it for it in catalog.values() if it.lv == lv and it.num not in solved and it.num not in retry_all]
 
-    # AI 순위로 먼저 채움
+    # AI 순위로 먼저 채움 (유형 검증을 한 번 더: 풀어 본 유형 밖이거나 유형을 모르는 문제는 버린다)
     ai_used = 0
     ai_taken: list[Pick] = []
     if ai_picks and r_slots > 0:
@@ -472,59 +551,71 @@ def build_set(
             p = ai_picks[idx]
             idx += 1
             it = catalog.get(p.num)
-            if (it is None or it.num in solved or it.num in retry_all or it.lv not in levels
+            if (it is None or it.num in solved or it.num in retry_all or it.lv not in levels or not known_ok(it)
                     or (shuffle > 0 and it.num in shown_today) or stem(it.title) in used_stems
-                    or any(x.num == it.num for x in ai_taken)):
+                    or any(x.num == it.num for x in ai_taken) or any(x.num == it.num for x in picks)):
                 continue
             kind = "fit" if it.lv == c else "stretch"
-            ai_taken.append(Pick(it.num, kind, p.reason or reason_for(kind, est), "ai", float(len(ai_taken))))
+            ai_taken.append(Pick(it.num, kind, p.reason or reason_for(kind, est, types=tys(it.num), counts=counts), "ai", float(len(ai_taken)), tys(it.num)))
             used_stems.add(stem(it.title))
         ai_used = idx - max(0, ai_cursor) if ai_taken else 0
     picks.extend(ai_taken)
 
     # 규칙으로 채움
-    r_rule = size - len(picks)
     fit_total = r_slots if c >= MAX_LEVEL else r_slots // 2
     stretch_total = r_slots - fit_total
-    need_fit = max(0, fit_total - sum(1 for p in ai_taken if p.kind == "fit"))
-    need_stretch = max(0, stretch_total - sum(1 for p in ai_taken if p.kind == "stretch"))
-    # AI 가 한쪽만 채워 합이 어긋나면 남은 칸 수에 맞춘다
-    while need_fit + need_stretch > r_rule:
-        if need_fit >= need_stretch and need_fit > 0:
-            need_fit -= 1
-        else:
-            need_stretch -= 1
-    while need_fit + need_stretch < r_rule:
-        if c >= MAX_LEVEL or need_fit <= need_stretch:
-            need_fit += 1
-        else:
-            need_stretch += 1
+
+    def balance(need_fit: int, need_stretch: int, total: int) -> tuple[int, int]:
+        """남은 칸 수(total)에 맞춰 수준 맞춤/한 단계 위 칸 수를 조정한다 (AI 가 한쪽만 채워 합이 어긋나는 경우)."""
+        while need_fit + need_stretch > total:
+            if need_fit >= need_stretch and need_fit > 0:
+                need_fit -= 1
+            else:
+                need_stretch -= 1
+        while need_fit + need_stretch < total:
+            if c >= MAX_LEVEL or need_fit <= need_stretch:
+                need_fit += 1
+            else:
+                need_stretch += 1
+        return need_fit, need_stretch
+
+    def remaining_needs() -> tuple[int, int]:
+        have_fit = sum(1 for p in picks if p.kind == "fit")
+        have_stretch = sum(1 for p in picks if p.kind == "stretch")
+        return balance(max(0, fit_total - have_fit), max(0, stretch_total - have_stretch), size - len(picks))
 
     taken_nums = {p.num for p in picks}
 
-    def rule_fill(lv: int, need: int, kind: str, weights: tuple[float, float, float]) -> None:
+    def rule_fill(lv: int, need: int, kind: str, weights: tuple[float, float, float], tier: str = "known") -> None:
         if need <= 0 or lv < 1 or lv > MAX_LEVEL:
             return
-        base = [it for it in base_pool(lv) if it.num not in taken_nums]
+        sel = known_ok if tier == "known" else unknown
+        base = [it for it in base_pool(lv) if it.num not in taken_nums and sel(it)]
         pool = _tiered_pool(base, need, recent, shown_today if shuffle > 0 else ())
         pool = _apply_quality_floor(pool, need)
         scores = quality_scores(pool, weights)
         for it in _draw(rng, pool, scores, need, used_stems):
             taken_nums.add(it.num)
-            picks.append(Pick(it.num, kind, reason_for(kind, est), "rule", -scores.get(it.num, 0.0)))
+            picks.append(Pick(it.num, kind, reason_for(kind, est, types=tys(it.num), counts=counts), "rule", -scores.get(it.num, 0.0), tys(it.num)))
 
-    rule_fill(c, need_fit, "fit", WEIGHTS_FIT)
-    if c < MAX_LEVEL:
-        rule_fill(c + 1, need_stretch, "stretch", WEIGHTS_STRETCH)
-    # 한 풀이 모자라면 다른 풀로 채운다 (수준 맞춤 → 한 단계 위)
-    rule_fill(c, size - len(picks), "fit", WEIGHTS_FIT)
-    if c < MAX_LEVEL:
-        rule_fill(c + 1, size - len(picks), "stretch", WEIGHTS_STRETCH)
-    # 모자라면 구간을 넓힌다: C-1, 그다음 C+2 (이유 "비슷한 난이도 중…")
-    for lv in (c - 1, c + 2):
-        short = size - len(picks)
-        if short > 0:
-            rule_fill(lv, short, "fill", WEIGHTS_FIT)
+    def fill_all(tier: str) -> None:
+        need_fit, need_stretch = remaining_needs()
+        rule_fill(c, need_fit, "fit", WEIGHTS_FIT, tier)
+        if c < MAX_LEVEL:
+            rule_fill(c + 1, need_stretch, "stretch", WEIGHTS_STRETCH, tier)
+        # 한 풀이 모자라면 다른 풀로 채운다 (수준 맞춤 → 한 단계 위)
+        rule_fill(c, size - len(picks), "fit", WEIGHTS_FIT, tier)
+        if c < MAX_LEVEL:
+            rule_fill(c + 1, size - len(picks), "stretch", WEIGHTS_STRETCH, tier)
+        # 모자라면 구간을 넓힌다: C-1, 그다음 C+2 (이유 "비슷한 난이도 중…")
+        for lv in (c - 1, c + 2):
+            short = size - len(picks)
+            if short > 0:
+                rule_fill(lv, short, "fill", WEIGHTS_FIT, tier)
+
+    fill_all("known")
+    if size - len(picks) > 0:
+        fill_all("unknown")  # 유형을 아는 후보가 바닥난 뒤에만 "유형 미확인" 문제로 채운다
 
     picks.sort(key=lambda p: (KIND_ORDER.index(p.kind), p.key, p.num))
     return SetBuild(picks, ai_used, short=len(picks) < 3)
@@ -540,7 +631,7 @@ class DaySet:
     level_c: int = 0
     conf: str = ""
     start: int = 0  # 이 세트를 만들 때의 시작 수준 선택값 (콜드 스타트 선택기가 바뀌었는지 판단)
-    items: list[dict] = field(default_factory=list)  # {"n","k","r","src"}
+    items: list[dict] = field(default_factory=list)  # {"n","k","r","src","ty"} (ty: 풀이 유형 id 목록 — 없으면 유형 미확인)
     day_shown: list[int] = field(default_factory=list)
     recent_shown: dict[str, str] = field(default_factory=dict)  # {"번호": "YYYY-MM-DD"}
     ai: dict = field(default_factory=dict)  # {"status","engines","at","picks":[{"n","r"}],"cursor","fail_count"}
@@ -584,7 +675,11 @@ def _clean_items(raw: object) -> list[dict]:
             continue
         kind = it.get("k") if it.get("k") in KIND_ORDER else "fill"
         src = "ai" if it.get("src") == "ai" else "rule"
-        out.append({"n": it["n"], "k": kind, "r": str(it.get("r") or ""), "src": src})
+        row = {"n": it["n"], "k": kind, "r": str(it.get("r") or ""), "src": src}
+        ty = pt.clean_ids(it.get("ty"))
+        if ty:
+            row["ty"] = list(ty)
+        out.append(row)
     return out
 
 
@@ -600,7 +695,7 @@ def load_day(settings: Settings) -> DaySet | None:
         _quarantine(path)
         return None
     try:
-        if not isinstance(raw, dict) or raw.get("v") != DAY_VERSION:
+        if not isinstance(raw, dict) or raw.get("v") not in DAY_VERSIONS:
             raise ValueError("version")
         date.fromisoformat(str(raw["date"]))
         level = raw.get("level") if isinstance(raw.get("level"), dict) else {}
@@ -648,26 +743,42 @@ def prune_recent(recent: Mapping[str, str], today: date) -> dict[str, str]:
 
 
 def items_of(picks: Iterable[Pick]) -> list[dict]:
-    return [{"n": p.num, "k": p.kind, "r": p.reason, "src": p.source} for p in picks]
+    return [{"n": p.num, "k": p.kind, "r": p.reason, "src": p.source, **({"ty": list(p.types)} if p.types else {})} for p in picks]
 
 
 # --- AI 층 보조 (payload · 파서 · 합산) ------------------------------------------------------------------
 
 
 # AI 로 보내는 값의 허용 키 (이 밖의 키는 구조적으로 못 들어간다)
-PAYLOAD_KEYS = ("level", "weak", "strong", "stats", "pool", "want")
+PAYLOAD_KEYS = ("level", "known", "weak", "strong", "stats", "pool", "want")
 LEVEL_KEYS = ("estimate", "confidence", "recent_solved_by_level")
-POOL_KEYS = ("n", "t", "lv", "pr", "pa")
+POOL_KEYS = ("n", "t", "lv", "pr", "pa", "ty")
 CATEGORY_KEYS = ("name", "score")
 STATS_KEYS = ("avg_wrong_before_pass", "timeout_share", "tagged")
 
 
-def ai_pool(catalog: Mapping[int, CatalogItem], est: LevelEstimate, *, solved_nums: Collection[int], excluded: Collection[int] = ()) -> list[CatalogItem]:
-    """AI 에게 보여줄 후보 풀: 구간 레벨의 안 푼 문제 중 quality 상위 (fit 15 + stretch 15). 푼/재도전 문제는 이미 빠져 있다."""
+def ranked_pool(catalog: Mapping[int, CatalogItem], lv: int, weights: tuple[float, float, float], skip: Collection[int] = ()) -> list[CatalogItem]:
+    """레벨 lv 의 안 푼 문제를 quality 순으로 (풀이 유형 분류 대상 후보 선정용: 상위부터 분류해 나간다)."""
+    skip_set = set(skip)
+    pool = _apply_quality_floor([it for it in catalog.values() if it.lv == lv and it.num not in skip_set], AI_POOL_MAX // 2)
+    scores = quality_scores(pool, weights)
+    pool.sort(key=lambda it: (-scores.get(it.num, 0.0), it.num))
+    return pool
+
+
+def ai_pool(
+    catalog: Mapping[int, CatalogItem], est: LevelEstimate, *, solved_nums: Collection[int], excluded: Collection[int] = (),
+    types: Mapping[int, Sequence[str]] | None = None, known: Collection[str] = (),
+) -> list[CatalogItem]:
+    """AI 에게 보여줄 후보 풀: 구간 레벨의 안 푼 문제 중 quality 상위 (fit 15 + stretch 15). 푼/재도전 문제는 이미 빠져 있다.
+
+    types 를 주면 (M24.1) 유형을 알고 모두 풀어 본 유형(known, 없으면 입문 유형) 안인 문제만 담는다 — 새 유형은 규칙이 따로 고른다."""
     skip = set(solved_nums) | set(excluded)
+    allowed = pt.allowed_for(frozenset(known))
     out: list[CatalogItem] = []
     for lv, w in zip(est.levels, (WEIGHTS_FIT, WEIGHTS_STRETCH)):
-        pool = [it for it in catalog.values() if it.lv == lv and it.num not in skip]
+        pool = [it for it in catalog.values() if it.lv == lv and it.num not in skip
+                and (types is None or pt.type_ok(tuple(types.get(it.num) or ()), allowed))]
         pool = _apply_quality_floor(pool, AI_POOL_MAX // 2)
         scores = quality_scores(pool, w)
         pool.sort(key=lambda it: (-scores.get(it.num, 0.0), it.num))
@@ -685,10 +796,13 @@ def ai_payload(
     pool: Sequence[CatalogItem],
     want: int = AI_PICK_MAX,
     clean_title=lambda s: s,
+    known: Sequence[str] = (),
+    types: Mapping[int, Sequence[str]] | None = None,
 ) -> dict:
     """AI 로 보내는 dict. **이미 집계된 값 객체만** 받고 허용 키로만 만든다 (코드·지문·내가 푼/시도한 문제 번호·제목·폴더명·경로·ID 는 입력 자체가 없다).
 
     clean_title: 제목 무해화 함수 (ai_prompts.neutralize). 제목은 60자로 자른다.
+    known: 일반 칸에 쓸 수 있는 유형 id (풀어 본 유형, 없으면 입문 유형) / types: 후보별 유형 id — 둘 다 분류 체계의 표시 이름으로만 나간다.
     """
     def cats(rows: Sequence[tuple[str, int]]) -> list[dict]:
         return [{"name": str(n)[:30], "score": int(s)} for n, s in list(rows)[:4]]
@@ -699,12 +813,14 @@ def ai_payload(
             "confidence": est.confidence,
             "recent_solved_by_level": {f"D{lv}": int(n) for lv, n in sorted(recent_solved_by_level.items()) if n},
         },
+        "known": pt.names_of(known),
         "weak": cats(weak),
         "strong": cats(strong),
         "stats": {k: (round(float(v), 2) if isinstance(v, float) else v) for k, v in stats.items() if k in STATS_KEYS},
         "pool": [
             {"n": it.num, "t": clean_title(it.title)[:AI_REASON_MAX], "lv": it.lv,
-             "pr": round(it.pr, 1) if it.pr is not None else None, "pa": it.pa}
+             "pr": round(it.pr, 1) if it.pr is not None else None, "pa": it.pa,
+             "ty": pt.names_of(tuple((types or {}).get(it.num) or ()))}
             for it in list(pool)[:AI_POOL_MAX]
         ],
         "want": max(1, min(AI_PICK_MAX, int(want))),

@@ -382,7 +382,7 @@ class SettingsPage(QWidget):
         self.growth_comment.setObjectName("GrowthCommentCheck")
         self.recommend_enabled = Toggle("오늘의 추천 표시")  # M24
         self.recommend_enabled.setObjectName("RecommendEnabledCheck")
-        self.recommend_ai = Toggle("추천에 AI 약점 분석 사용")
+        self.recommend_ai = Toggle("추천에 AI 풀이 유형·약점 분석 사용")
         self.recommend_ai.setObjectName("RecommendAiCheck")
         gh3 = _hint("기록은 ~/.swea-fetch/coach/profile 에만 있고 GitHub 로 올라가지 않습니다. 풀이 잔디(하루에 푼 문제)도 여기에 저장됩니다.")
         self.growth_clear_btn = Button("성장 기록 지우기")  # 아래 "위험 영역" 카드에 놓인다
@@ -439,7 +439,7 @@ class SettingsPage(QWidget):
         v8.addWidget(_divider())
         v8.addWidget(_toggle_row(self.recommend_enabled, "SWEA 공개 문제 목록(약 1,160문제)을 주 1회 받아 수준에 맞는 문제를 추천합니다. 끄면 목록도 받지 않습니다."))
         v8.addWidget(_divider())
-        v8.addWidget(_toggle_row(self.recommend_ai, "하루 1회, 약점 분류 이름·수준 숫자·후보 문제 제목만 AI 로 보냅니다. 코드·지문·푼 문제 목록은 보내지 않습니다."))
+        v8.addWidget(_toggle_row(self.recommend_ai, "공개 문제 지문·제목을 보내 풀이 유형을 분류합니다(결과는 저장해 재사용). 내 코드·계정 정보는 보내지 않습니다. 약점 분석(하루 1회)에는 약점 분류 이름·수준 숫자·후보 문제 제목만 씁니다."))
         v8.addWidget(_divider())
         v8.addLayout(_field("풀이 잔디 색", heat_col, _hint("성장 탭 맨 위 풀이 잔디의 색입니다. 기본은 현재 테마 색을 따라가고, 직접 고르면 그 색 하나로 고정됩니다. 기준색에서 4단계 농도가 만들어집니다.")))
         v8.addWidget(self.heat_sync_row)

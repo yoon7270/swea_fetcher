@@ -72,6 +72,9 @@ class FakeRecommendWorker(QObject):
     catalog_updated = Signal(object)
     catalog_failed = Signal(str, str, bool)
     notice = Signal(str)
+    classify_started = Signal()
+    classify_progress = Signal(int)
+    classify_done = Signal(str)
     failed = Signal(str, str, str)
     finished = Signal()
     instances: list = []

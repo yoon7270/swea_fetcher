@@ -8,7 +8,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from swea_fetcher import catalog, growth, recommend
+from swea_fetcher import catalog, growth, problem_types, recommend
 from swea_fetcher.catalog import CatalogItem
 from swea_fetcher.config import Settings
 from swea_fetcher.recommend import AiPick, LevelEstimate, RetryCand, SolveFact
@@ -204,6 +204,11 @@ def make_catalog(levels=(2, 3, 4), per=20, over: dict | None = None) -> dict[int
     return out
 
 
+def brute_types(cat) -> dict:
+    """모든 후보를 완전탐색(입문 유형) 문제로 — AI 순위는 유형을 아는 후보만 받는다 (M24.1)."""
+    return {n: ("brute",) for n in cat}
+
+
 EST3 = LevelEstimate(3, "ok", "근거", 6, 0, {3: (3.0, 0.0)}, {3: 4})
 EST_COLD = LevelEstimate(2, "cold", "기록이 적어 D2 부터 시작해요", 0, 0, {}, {}, "cold")
 
@@ -359,30 +364,30 @@ def test_reasons_follow_templates():
 def test_ai_picks_fill_non_retry_slots_in_ai_order():
     cat = make_catalog()
     ai = [AiPick(3005, "DFS 약점 훈련"), AiPick(4002, "한 단계 위"), AiPick(3011, None), AiPick(4009, "x"), AiPick(3002, "y")]
-    b = recommend.build_set(cat, EST3, day=TODAY, ai_picks=ai)
+    b = recommend.build_set(cat, EST3, day=TODAY, ai_picks=ai, types=brute_types(cat))
     assert [p.num for p in b.picks if p.source == "ai"] == [3005, 3011, 4002, 4009]  # kind 순서(fit→stretch), 안에서는 AI 순위
     assert b.ai_used == 4 and {p.source for p in b.picks} == {"ai"}
     first = next(p for p in b.picks if p.num == 3005)
     assert first.reason == "DFS 약점 훈련"
     nores = next(p for p in b.picks if p.num == 3011)
-    assert nores.reason == recommend.reason_for("fit", EST3)  # 이유가 없으면 규칙 문구
+    assert nores.reason == recommend.reason_for("fit", EST3, types=("brute",))  # 이유가 없으면 규칙 문구
 
 
 def test_ai_picks_skip_invalid_and_continue_from_cursor():
     cat = make_catalog()
     ai = [AiPick(9999), AiPick(3001), AiPick(3001), AiPick(5001), AiPick(3002), AiPick(3003), AiPick(4001), AiPick(4002), AiPick(4003)]
-    b = recommend.build_set(cat, EST3, day=TODAY, ai_picks=ai, solved_nums={3002})
+    b = recommend.build_set(cat, EST3, day=TODAY, ai_picks=ai, solved_nums={3002}, types=brute_types(cat))
     nums = [p.num for p in b.picks]
     assert 9999 not in nums and 5001 not in nums and 3002 not in nums and nums.count(3001) == 1  # 풀 밖·구간 밖·푼 문제·중복은 버림
     assert b.ai_used == 8  # 건너뛴 항목도 소비한 것으로 센다 (9번째 4003 은 다음 세트용)
-    nxt = recommend.build_set(cat, EST3, day=TODAY, shuffle=1, ai_picks=ai, ai_cursor=b.ai_used, day_shown=nums)
+    nxt = recommend.build_set(cat, EST3, day=TODAY, shuffle=1, ai_picks=ai, ai_cursor=b.ai_used, day_shown=nums, types=brute_types(cat))
     assert sum(1 for p in nxt.picks if p.source == "ai") == 1 and len(nxt.picks) == 4  # 남은 1개 + 규칙으로 채움
 
 
 def test_ai_does_not_replace_retry_slot():
     cat = make_catalog()
     ai = [AiPick(3001), AiPick(3002), AiPick(4001), AiPick(4002)]
-    b = recommend.build_set(cat, EST3, day=TODAY, retry=[RetryCand(3010, 5)], ai_picks=ai)
+    b = recommend.build_set(cat, EST3, day=TODAY, retry=[RetryCand(3010, 5)], ai_picks=ai, types=brute_types(cat))
     assert b.picks[0].kind == "retry" and b.picks[0].source == "rule"
     assert sum(1 for p in b.picks if p.source == "ai") == 3 and len(b.picks) == 4
 
@@ -407,7 +412,7 @@ def test_day_set_round_trip(settings):
     assert ds.ai_status() == "ok" and ds.ai_picks() == [AiPick(3005, "약점")]
     assert ds.recent_dates() == {3001: TODAY}
     raw = json.loads(path.read_text(encoding="utf-8"))
-    assert raw["v"] == 1 and raw["level"] == {"c": 3, "conf": "ok", "start": 2}
+    assert raw["v"] == recommend.DAY_VERSION == 2 and raw["level"] == {"c": 3, "conf": "ok", "start": 2}
 
 
 def test_load_day_missing_corrupt_and_wrong_version(settings):
@@ -538,3 +543,199 @@ def test_merge_ai_tie_breaks_by_quality_then_number():
     merged = recommend.merge_ai([[AiPick(5), AiPick(6)], [AiPick(6), AiPick(5)]], {5: 0.2, 6: 0.9})
     assert [p.num for p in merged] == [6, 5]
     assert [p.num for p in recommend.merge_ai([[AiPick(9)]])] == [9]
+
+
+# --- 풀이 유형 (M24.1): 아는 유형 안에서만 고르고, 새 유형은 한 칸으로만 -----------------------------------------
+
+
+def assign(cat, rule) -> dict:
+    """{번호: 유형 튜플}. rule(item) → 유형 튜플 (빈 튜플 = 유형 미확인)."""
+    return {n: tuple(rule(it)) for n, it in cat.items() if rule(it)}
+
+
+def by_kind(b, *kinds_):
+    return [p for p in b.picks if p.kind in kinds_]
+
+
+def test_only_known_types_fill_normal_slots_and_bfs_never_leaks_in():
+    cat = make_catalog()
+    types = assign(cat, lambda it: ("brute",) if it.num % 2 == 0 else ("bfs",))  # 짝수=완전탐색, 홀수=BFS
+    for shuffle in range(6):
+        b = recommend.build_set(cat, EST3, day=TODAY, shuffle=shuffle, types=types, known={"brute"})
+        normal = by_kind(b, "fit", "stretch", "fill")
+        assert normal and all(types[p.num] == ("brute",) for p in normal)  # 같은 난이도라도 BFS 는 일반 칸에 오지 않는다
+        assert all(p.types == ("brute",) for p in normal)
+
+
+def test_new_type_slot_picks_next_path_type_one_step_easier_after_brute():
+    cat = make_catalog()
+    types = assign(cat, lambda it: ("backtrack",) if it.lv == 2 and it.num % 2 == 0 else (("bfs",) if it.lv == 2 else ("brute",)))
+    b = recommend.build_set(cat, EST3, day=TODAY, types=types, known={"brute"}, type_counts={"brute": 5})
+    new = by_kind(b, "newtype")
+    assert len(new) == 1 and len(b.picks) == 4
+    p = new[0]
+    assert types[p.num] == ("backtrack",) and cat[p.num].lv == 2  # 완전탐색 다음은 DFS·백트래킹, 한 단계 쉬운 D2
+    assert "DFS·백트래킹 첫걸음" in p.reason and "한 단계 쉬운 D2" in p.reason and "완전탐색 경험" in p.reason
+    assert p.source == "rule" and p.types == ("backtrack",)
+    assert [q.kind for q in b.picks][-1] == "newtype"  # 새 유형은 목록 끝
+    assert all(types[q.num] == ("brute",) for q in b.picks if q.kind != "newtype")
+
+
+def test_new_type_prefers_high_pass_rate_candidates():
+    cat = make_catalog()
+    types = assign(cat, lambda it: ("backtrack",) if it.lv == 2 else ("brute",))
+    top3 = {it.num for it in sorted((i for i in cat.values() if i.lv == 2), key=lambda i: -i.pr)[:3]}
+    for day in (TODAY, TODAY.replace(day=7), TODAY.replace(day=8), TODAY.replace(day=9)):  # 날짜가 달라도 정답률 상위 3개 안에서
+        b = recommend.build_set(cat, EST3, day=day, types=types, known={"brute"})
+        assert by_kind(b, "newtype")[0].num in top3
+
+
+def test_new_type_falls_back_to_lower_then_same_level_and_to_later_types():
+    cat = make_catalog(levels=(1, 3, 4))  # D2 가 비어 있다
+    types = assign(cat, lambda it: ("backtrack",) if it.lv == 1 else ("brute",))
+    p = by_kind(recommend.build_set(cat, EST3, day=TODAY, types=types, known={"brute"}), "newtype")[0]
+    assert cat[p.num].lv == 1 and "2단계 쉬운 D1" in p.reason
+    only_same = assign(cat, lambda it: ("backtrack",) if it.lv == 3 and it.num % 5 == 0 else ("brute",))
+    q = by_kind(recommend.build_set(cat, EST3, day=TODAY, types=only_same, known={"brute"}), "newtype")[0]
+    assert cat[q.num].lv == 3 and "지금 수준과 같은 D3" in q.reason
+    # 백트래킹 후보가 없으면 경로의 그다음 유형(스택·큐)
+    cat2 = make_catalog()
+    t2 = assign(cat2, lambda it: ("stackqueue",) if it.lv == 2 and it.num % 3 == 0 else ("brute",))
+    r = by_kind(recommend.build_set(cat2, EST3, day=TODAY, types=t2, known={"brute"}), "newtype")[0]
+    assert t2[r.num] == ("stackqueue",)
+
+
+def test_new_type_needs_known_prerequisite_and_evidence():
+    cat = make_catalog()
+    types = assign(cat, lambda it: ("bfs",) if it.lv == 2 else ("brute",))
+    b = recommend.build_set(cat, EST3, day=TODAY, types=types, known={"brute"})
+    assert not by_kind(b, "newtype")  # BFS 의 선행(백트래킹/스택·큐)을 모른다 → 소개하지 않는다
+    assert not by_kind(recommend.build_set(cat, EST3, day=TODAY, types=types, known=()), "newtype")  # 아는 유형이 없으면 칸을 만들지 않는다
+    with_pre = recommend.build_set(cat, EST3, day=TODAY, types=types, known={"brute", "stackqueue"})
+    assert by_kind(with_pre, "newtype") and types[by_kind(with_pre, "newtype")[0].num] == ("bfs",)
+
+
+def test_new_type_candidate_with_unknown_secondary_type_is_rejected():
+    cat = make_catalog()
+    types = assign(cat, lambda it: ("backtrack", "dp") if it.lv == 2 else ("brute",))  # dp 는 아직 모른다
+    assert not by_kind(recommend.build_set(cat, EST3, day=TODAY, types=types, known={"brute"}), "newtype")
+    types2 = assign(cat, lambda it: ("backtrack", "brute") if it.lv == 2 else ("brute",))
+    assert by_kind(recommend.build_set(cat, EST3, day=TODAY, types=types2, known={"brute"}), "newtype")
+
+
+def test_cold_user_gets_entry_types_only_and_no_new_type_slot():
+    cat = make_catalog()
+    types = assign(cat, lambda it: [("bfs",), ("impl",), ("brute", "math"), ("dp",)][it.num % 4])
+    for shuffle in range(4):
+        b = recommend.build_set(cat, EST_COLD, day=TODAY, shuffle=shuffle, types=types, known=())
+        assert not by_kind(b, "newtype") and len(b.picks) == 4
+        assert all(set(types[p.num]) <= set(problem_types.ENTRY_TYPES) for p in b.picks)  # BFS·DP 는 입문 유형이 아니다
+
+
+def test_unknown_type_problems_fill_only_after_known_candidates_run_out():
+    cat = make_catalog(levels=(3, 4), per=10)
+    known_nums = [3001, 3002, 4001]  # 유형을 아는 후보는 3개뿐
+    types = {n: ("brute",) for n in known_nums}
+    b = recommend.build_set(cat, EST3, day=TODAY, types=types, known={"brute"})
+    nums = {p.num for p in b.picks}
+    assert set(known_nums) <= nums and len(b.picks) == 4  # 아는 3개를 모두 쓰고 1개만 미확인으로
+    unknown = [p for p in b.picks if not p.types]
+    assert len(unknown) == 1 and unknown[0].num not in known_nums
+    plenty = {n: ("brute",) for n in cat}
+    full = recommend.build_set(cat, EST3, day=TODAY, types=plenty, known={"brute"})
+    assert all(p.types == ("brute",) for p in full.picks)  # 후보가 충분하면 미확인은 0개
+
+
+def test_unknown_types_everywhere_still_gives_a_normal_set_without_chips_claims():
+    cat = make_catalog()
+    b = recommend.build_set(cat, EST3, day=TODAY, types={}, known=())
+    assert len(b.picks) == 4 and all(p.types == () for p in b.picks) and not by_kind(b, "newtype")
+    same = recommend.build_set(cat, EST3, day=TODAY, types=None)
+    assert [p.num for p in same.picks] == [p.num for p in b.picks]  # 유형 정보가 없으면 예전과 같은 규칙
+
+
+def test_retry_and_new_type_coexist_and_size_stays_four():
+    cat = make_catalog()
+    types = assign(cat, lambda it: ("backtrack",) if it.lv == 2 else ("brute",))
+    b = recommend.build_set(cat, EST3, day=TODAY, retry=[RetryCand(3010, 5)], types=types, known={"brute"})
+    assert [p.kind for p in b.picks][0] == "retry" and [p.kind for p in b.picks][-1] == "newtype" and len(b.picks) == 4
+    assert sorted(p.kind for p in b.picks[1:-1]) == ["fit", "stretch"]
+
+
+def test_type_aware_set_is_deterministic_and_shuffle_does_not_repeat_new_type():
+    cat = make_catalog()
+    types = assign(cat, lambda it: ("backtrack",) if it.lv == 2 else ("brute",))
+    kw = dict(types=types, known={"brute"})
+    a = recommend.build_set(cat, EST3, day=TODAY, **kw)
+    assert [(p.num, p.kind) for p in a.picks] == [(p.num, p.kind) for p in recommend.build_set(cat, EST3, day=TODAY, **kw).picks]
+    shown = {p.num for p in a.picks}
+    b = recommend.build_set(cat, EST3, day=TODAY, shuffle=1, day_shown=shown, **kw)
+    assert not shown & {p.num for p in b.picks}
+
+
+def test_ai_picks_outside_known_types_or_with_unknown_types_are_rejected():
+    cat = make_catalog()
+    types = {n: ("brute",) for n in cat}
+    types[3001] = ("bfs",)  # AI 가 골랐지만 모르는 유형
+    del types[3002]  # 유형 미확인
+    ai = [AiPick(3001, "BFS"), AiPick(3002, "미확인"), AiPick(3003, "ok"), AiPick(3004), AiPick(4001), AiPick(4002)]
+    b = recommend.build_set(cat, EST3, day=TODAY, ai_picks=ai, types=types, known={"brute"})
+    taken = {p.num for p in b.picks if p.source == "ai"}
+    assert taken == {3003, 3004, 4001, 4002} and b.ai_used == 6  # 거절한 항목도 소비
+    assert 3001 not in {p.num for p in b.picks} and 3002 not in {p.num for p in b.picks}
+    cold = recommend.build_set(cat, EST3, day=TODAY, ai_picks=ai, types=types, known=())
+    assert 3001 not in {p.num for p in cold.picks}  # 아는 유형이 없으면 입문 유형만 (bfs 거절)
+
+
+def test_reasons_mention_the_type():
+    r = recommend.reason_for
+    assert r("fit", EST3, types=("brute",), counts={"brute": 3}) == "완전탐색 · 풀어 본 유형이에요 (3문제 해결) · D3 감을 굳혀요"
+    assert r("stretch", EST3, types=("brute",), counts={"brute": 3}) == "완전탐색 · 풀어 본 유형으로 한 단계 위 D4 에 도전해요"
+    assert r("fit", EST_COLD, types=("impl",), counts={}) == "구현·시뮬레이션 · 입문 유형으로 D2 부터 시작해요"
+    assert r("fill", EST3, types=("brute",), counts={"brute": 1}) == "완전탐색 · 풀어 본 유형 중 비슷한 난이도예요"
+    assert r("fit", EST3) == "최근 D3 를 4문제 안정적으로 풀었어요 · 같은 수준으로 감을 굳혀요"  # 유형이 없으면 예전 문구
+    text = recommend.newtype_reason("bfs", 2, EST3, {"brute", "backtrack"})
+    assert text == "BFS 첫걸음 · 한 단계 쉬운 D2 로 시작해요 (DFS·백트래킹 경험이 있어 다음 단계예요)"
+    assert recommend.newtype_reason("impl", 2, EST3, {"brute"}).endswith("(기본 유형이라 먼저 익혀 두면 좋아요)")  # 선행 유형이 없는 입문 유형
+
+
+def test_day_set_keeps_types_and_reads_version_1_files(settings):
+    day = make_day(items=[{"n": 3001, "k": "newtype", "r": "이유", "src": "rule", "ty": ["backtrack", "dp"]}, {"n": 3002, "k": "fit", "r": "", "src": "rule"}])
+    assert recommend.save_day(settings, day)
+    back = recommend.load_day(settings)
+    assert back.items[0]["ty"] == ["backtrack", "dp"] and "ty" not in back.items[1] and back.items[0]["k"] == "newtype"
+    path = recommend.day_path(settings)
+    old = {"v": 1, "date": "2026-10-06", "items": [{"n": 5, "k": "fit", "r": "x", "src": "rule", "ty": ["bfs", "zzz", 3]}], "ai": {}}
+    path.write_text(json.dumps(old), encoding="utf-8")
+    ds = recommend.load_day(settings)
+    assert ds is not None and ds.items == [{"n": 5, "k": "fit", "r": "x", "src": "rule", "ty": ["bfs"]}]  # 1 도 읽고, 모르는 id 는 걸러낸다
+    path.write_text(json.dumps({**old, "v": 3}), encoding="utf-8")
+    assert recommend.load_day(settings) is None
+
+
+def test_items_of_carries_types():
+    p = recommend.Pick(1, "newtype", "r", "rule", 0.0, ("bfs",))
+    q = recommend.Pick(2, "fit", "r")
+    assert recommend.items_of([p, q]) == [{"n": 1, "k": "newtype", "r": "r", "src": "rule", "ty": ["bfs"]}, {"n": 2, "k": "fit", "r": "r", "src": "rule"}]
+
+
+def test_ai_pool_keeps_only_known_type_candidates():
+    cat = make_catalog(levels=(3, 4), per=25)
+    types = {n: (("brute",) if n % 2 == 0 else ("bfs",)) for n in cat}
+    del types[3000]
+    pool = recommend.ai_pool(cat, EST3, solved_nums=set(), types=types, known={"brute"})
+    assert pool and all(types[it.num] == ("brute",) for it in pool)
+    assert len(pool) < 30 and {it.lv for it in pool} == {3, 4}
+    cold = recommend.ai_pool(cat, EST3, solved_nums=set(), types=types, known=())
+    assert all(types[it.num] == ("brute",) for it in cold)  # 입문 유형만 (bfs 제외)
+    assert recommend.ai_pool(cat, EST3, solved_nums=set(), types={}, known=()) == []  # 유형을 하나도 모르면 풀이 비어 AI 를 부르지 않는다
+
+
+def test_ai_payload_carries_known_and_pool_types_as_display_names():
+    cat = make_catalog(levels=(3,), per=3)
+    pool = list(cat.values())
+    payload = recommend.ai_payload(EST3, recent_solved_by_level={}, weak=[], strong=[], stats={}, pool=pool,
+                                   known=["brute", "impl"], types={pool[0].num: ("brute", "math")})
+    assert payload["known"] == ["완전탐색", "구현·시뮬레이션"]
+    assert payload["pool"][0]["ty"] == ["완전탐색", "수학"] and payload["pool"][1]["ty"] == []
+    assert "brute" not in json.dumps(payload, ensure_ascii=False)  # id 가 아니라 표시 이름만 나간다

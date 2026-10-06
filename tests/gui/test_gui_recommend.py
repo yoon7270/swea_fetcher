@@ -49,8 +49,8 @@ def cat_status(usable=True, wait=0):
                                  usable=usable, manual_wait=wait)
 
 
-def rec(num, kind="fit", level=3, solved=False, source="rule", title=None, reason="이유 문장", pr=75.8, pa=7000):
-    return recommend.Recommendation(num, title or f"문제 {num}", level, pr, pa, kind, reason, source, solved)
+def rec(num, kind="fit", level=3, solved=False, source="rule", title=None, reason="이유 문장", pr=75.8, pa=7000, types=()):
+    return recommend.Recommendation(num, title or f"문제 {num}", level, pr, pa, kind, reason, source, solved, tuple(types))
 
 
 def items(n=4, **kw):
@@ -460,7 +460,9 @@ def test_consent_dialog_defaults_to_cancel_and_lists_what_is_sent(qtbot, monkeyp
 
     monkeypatch.setattr(QMessageBox, "exec", fake_exec)
     assert recommend_card.ask_recommend_consent(None, "GPT (Codex)") is False
-    assert "약점 분류 이름·수준 숫자·후보 문제 제목만" in seen["text"] and "코드·지문·푼 문제 목록·폴더명은 보내지 않습니다" in seen["text"]
+    assert "공개 문제 지문·제목을 보내 풀이 유형을 분류합니다. 내 코드·계정 정보는 보내지 않습니다." in seen["text"]
+    assert "약점 분류 이름·수준 숫자·후보 문제 제목만" in seen["text"] and "폴더명·경로·아이디는 보내지 않습니다" in seen["text"]
+    assert "푼 문제" in seen["text"]  # 푼 문제의 공개 지문·제목도 분류에 쓰인다는 고지
     assert seen["default"] == "취소" and seen["escape"] == "취소"
 
 
@@ -842,3 +844,276 @@ def test_worker_kills_process_that_starts_after_cancel(qtbot, settings, real_ser
     w.cancel()
     w._on_start("late-proc")
     assert killed == ["late-proc"]
+
+
+# --- 풀이 유형 (M24.1): 칩 · 새 유형 배지 · 풀어 본 유형 줄 · 분석 중 · 분류 안내 · 동의 --------------------------------------
+
+
+def typed_items():
+    return [
+        rec(1000, "fit", types=("brute",)),
+        rec(1001, "fit", types=("brute", "impl")),
+        rec(1002, "stretch", level=4, types=()),
+        rec(1003, "newtype", level=2, types=("backtrack",), reason="DFS·백트래킹 첫걸음 · 한 단계 쉬운 D2 로 시작해요"),
+    ]
+
+
+def test_rows_show_type_chips_unknown_chip_and_new_type_badge(card):
+    loaded(card, result(its=typed_items()))
+    r0, r1, r2, r3 = card.rows
+    assert [c.text() for c in r0.type_chips] == ["완전탐색"] and r0.type_chips[0].objectName() == "RecommendTypeChip"
+    assert [c.text() for c in r1.type_chips] == ["완전탐색", "구현·시뮬레이션"]
+    assert [c.text() for c in r2.type_chips] == ["유형 미확인"] and r2.type_chips[0].objectName() == "RecommendTypeUnknown"
+    assert r3.kind_badge.text() == "새 유형 · DFS·백트래킹" and r3.type_chips == []  # 새 유형 칸은 배지에 이름이 있다
+    assert r3.level_badge.text() == "D2"
+
+
+def test_type_chips_and_badges_use_theme_classes_not_colors(card):
+    loaded(card, result(its=typed_items()))
+    for row in card.rows:
+        for chip in row.type_chips:
+            assert chip.styleSheet() == "" and "badge" in str(chip.property("class"))  # 색은 QSS 의 badge 클래스로만 (리터럴 없음)
+
+
+def test_accessible_names_include_the_type(card):
+    loaded(card, result(its=typed_items()))
+    names = [r.accessibleName() for r in card.rows]
+    assert "풀이 유형 완전탐색" in names[0] and "풀이 유형 완전탐색, 구현·시뮬레이션" in names[1]
+    assert "풀이 유형 미확인" in names[2] and "새 유형 · DFS·백트래킹" in names[3] and "풀이 유형 DFS·백트래킹" in names[3]
+
+
+def test_known_types_line_under_the_level_line(card):
+    loaded(card, result(its=typed_items(), type_counts={"brute": 5, "impl": 3}))
+    assert card.type_label.text() == "풀어 본 유형: 완전탐색 5 · 구현·시뮬레이션 3" and not card.type_label.isHidden()
+    assert card.type_label.accessibleName() == card.type_label.text() and card.type_label.toolTip()
+    assert card.level_label.geometry().bottom() <= card.type_label.geometry().top() + 1  # 수준 줄 아래
+
+
+def test_known_types_line_without_history_says_entry_types(card):
+    loaded(card, result(its=typed_items(), type_counts={}))
+    assert card.type_label.text() == "아직 풀어 본 유형을 몰라요 · 입문 유형 위주로 골라요"
+
+
+def test_known_types_line_hidden_without_items(card):
+    loaded(card, result(its=[]))
+    assert card.type_label.isHidden()
+
+
+def test_known_types_line_truncates_long_lists(card):
+    many = {t: i + 1 for i, t in enumerate(recommend.pt.TYPE_IDS)}
+    loaded(card, result(its=typed_items(), type_counts=many))
+    assert card.type_label.text().endswith("외 10개") and card.type_label.text().count(" · ") == 3
+
+
+def test_loading_text_while_classifying_types(card):
+    card.ensure_loaded()
+    w = worker()
+    assert card.status_title.text() == "추천을 고르는 중…"
+    w.classify_started.emit()
+    assert card.state == "loading" and card.status_title.text() == "풀이 유형 분석 중…" and not card.status_box.isHidden()
+    assert "AI" in card.status_hint.text() and not card.skeleton.isHidden()
+    w.classify_progress.emit(12)
+    assert card.status_title.text() == "풀이 유형 분석 중… (12문제 완료)"
+    w.classify_done.emit("ok")
+    assert card.status_title.text() == "추천을 고르는 중…"
+    w.rule_ready.emit(result(its=typed_items()))
+    assert card.state == "ready"
+
+
+def test_classifying_with_items_shows_spinner_and_text_in_the_ai_row(card):
+    w = loaded(card, mode_done=False)
+    w.classify_started.emit()
+    w.classify_progress.emit(3)
+    assert card.ai_note.text() == "풀이 유형 분석 중… (3문제 완료)" and not card.spinner.isHidden() and not card.ai_row.isHidden()
+    assert not card.ai_btn.isEnabled() or card.ai_btn.isHidden()
+    w.classify_done.emit("ok")
+    w.finish()
+    assert card.spinner.isHidden()
+
+
+def test_pending_classification_is_cleared_when_the_worker_ends_without_a_signal(card):
+    w = loaded(card, mode_done=False)
+    w.classify_started.emit()
+    w.finish()
+    assert card._cls_status == ""
+
+
+@pytest.mark.parametrize("status,text,button", [
+    ("needs_consent", "AI 로 풀이 유형을 분류하려면 동의가 필요해요 · 지금은 제목으로만 추정해요", "동의하고 사용"),
+    ("no_engine", "AI 엔진을 찾지 못해 풀이 유형은 제목으로만 추정했어요", "설정으로 이동"),
+    ("failed", "풀이 유형 분석에 실패해 제목으로만 추정했어요", "다시 시도"),
+    ("partial", "풀이 유형을 일부만 분석했어요 · 나머지는 이어서 분석해요", "다시 시도"),
+    ("cancelled", "풀이 유형 분석을 취소했어요", "다시 시도"),
+])
+def test_classification_notices(card, status, text, button):
+    w = loaded(card, mode_done=False)
+    w.classify_done.emit(status)
+    w.finish()
+    assert card.ai_note.text() == text and card.ai_btn.text() == button and not card.ai_btn.isHidden()
+    assert card.ai_note.accessibleName() == text
+
+
+@pytest.mark.parametrize("status", ["ok", "nothing", "off", ""])
+def test_quiet_classification_statuses_leave_the_weak_ai_line_alone(card, status):
+    w = loaded(card, result(ai_status="skipped_low_data", weak_tagged=1), mode_done=False)
+    w.classify_done.emit(status)
+    w.finish()
+    assert card.ai_note.text().startswith("AI 코치에서 분류가")
+
+
+def test_classification_consent_flow_retries_everything(card, qs, monkeypatch):
+    w = loaded(card, mode_done=False)
+    w.classify_done.emit("needs_consent")
+    w.finish()
+    seen = {}
+    monkeypatch.setattr(recommend_card, "ask_recommend_consent", lambda parent, label: seen.setdefault("label", label) and True)
+    card.ai_btn.click()
+    assert seen["label"] == CODEX.label and growth_consent_ok(qs, "codex")
+    w2 = worker()
+    assert w2.mode == "retry_ai" and "codex" in w2.consented  # 동의 뒤 분류·AI 를 다시
+
+
+def test_classification_failure_and_no_engine_actions(card):
+    w = loaded(card, mode_done=False)
+    w.classify_done.emit("failed")
+    w.finish()
+    n = len(FakeRecommendWorker.instances)
+    card.ai_btn.click()
+    assert worker().mode == "retry_ai" and len(FakeRecommendWorker.instances) == n + 1
+    w3 = worker()
+    w3.classify_done.emit("no_engine")
+    w3.finish()
+    emitted = []
+    card.goto_requested.connect(emitted.append)
+    card.ai_btn.click()
+    assert emitted == ["settings"]
+
+
+def test_classification_issue_takes_precedence_over_weak_ai_status(card):
+    w = loaded(card, mode_done=False)
+    w.ai_ready.emit(result(ai_status="needs_consent"))
+    w.classify_done.emit("failed")
+    assert card.ai_note.text() == "풀이 유형 분석에 실패해 제목으로만 추정했어요"
+    w.classify_done.emit("ok")
+    assert card.ai_note.text() == "AI 약점 분석을 쓰려면 동의가 필요해요"
+
+
+def test_set_settings_resets_classification_state(card, settings):
+    w = loaded(card, mode_done=False)
+    w.classify_done.emit("failed")
+    card.set_settings(settings)
+    assert card._cls_status == "" and card._cls_done == 0
+
+
+def test_type_chips_fit_720_wide_window_and_render_in_dark_mode(qtbot, main_window):
+    w = main_window
+    w.resize(720, 480)
+    w.show()
+    w.goto("growth")
+    page = w.growth_page
+    long_items = [rec(1000 + i, kind=("fit", "fit", "stretch", "newtype")[i], title="아주아주 긴 제목의 문제 " * 5, types=(("brute", "impl"), ("dp", "prefix"), (), ("backtrack",))[i],
+                      reason="이유가 아주 길어서 두 줄로 내려가는 문장입니다 " * 3) for i in range(4)]
+    FakeRecommendWorker.last().rule_ready.emit(result(its=long_items, type_counts={t: 9 for t in recommend.pt.TYPE_IDS}))
+    tokens.set_color_mode("dark")
+    bus().changed.emit()
+    qtbot.wait(50)
+    card = page.recommend
+    assert page.scroll.horizontalScrollBar().maximum() == 0 and card.width() <= page.scroll.viewport().width()
+    for row in card.rows:
+        assert row.width() <= page.scroll.viewport().width()
+        row.grab()
+    card.grab()
+    tokens.set_color_mode("light")
+
+
+# --- 워커: 분류 → 세트 → AI -----------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cls_flow(monkeypatch, real_service):
+    calls, st = real_service
+    st.update({"has_set": False, "cls": service.ClassifyResult("ok", 12, True, "codex")})
+
+    def today(settings, *, start_level=None, shuffle=False, rebuild=False, **kw):
+        calls.append(("today", shuffle, rebuild))
+        return result()
+
+    def classify(settings, *, consent_ok, on_begin=None, on_progress=None, retry=False, **kw):
+        calls.append(("classify", retry, consent_ok("codex"), consent_ok("claude")))
+        if st["cls"].status in ("ok", "partial") and on_begin:
+            on_begin("codex")
+            on_progress(12)
+        return st["cls"]
+
+    monkeypatch.setattr(service, "recommend_today", today)
+    monkeypatch.setattr(service, "classify_types", classify)
+    monkeypatch.setattr(service, "has_day_set", lambda settings, now=None: st["has_set"])
+    return calls, st
+
+
+def run_cls_worker(qtbot, settings, mode="auto", **kw):
+    w = RecommendWorker(settings, mode, None, kw.pop("consented", frozenset()), kw.pop("touched", None))
+    got = {"started": [], "progress": [], "done": [], "rule": []}
+    w.classify_started.connect(lambda: got["started"].append(1))
+    w.classify_progress.connect(got["progress"].append)
+    w.classify_done.connect(got["done"].append)
+    w.rule_ready.connect(got["rule"].append)
+    with qtbot.waitSignal(w.finished, timeout=8000):
+        w.start()
+    w.wait(2000)
+    return got
+
+
+def test_worker_classifies_before_building_the_first_set_of_the_day(qtbot, settings, cls_flow):
+    calls, st = cls_flow
+    got = run_cls_worker(qtbot, settings, consented={"codex"})
+    assert [c[0] for c in calls] == ["passed", "classify", "today", "ai"]  # 세트가 없으면 분류 뒤에 만든다
+    assert calls[1] == ("classify", False, True, False) and calls[2] == ("today", False, False)
+    assert got["started"] == [1] and got["progress"] == [12] and got["done"] == ["ok"] and len(got["rule"]) == 1
+
+
+def test_worker_shows_existing_set_first_then_rebuilds_only_when_untouched(qtbot, settings, cls_flow):
+    calls, st = cls_flow
+    st["has_set"] = True
+    got = run_cls_worker(qtbot, settings)
+    assert [c[0] for c in calls] == ["passed", "today", "classify", "today", "ai"]
+    assert calls[1] == ("today", False, False) and calls[3] == ("today", False, True) and len(got["rule"]) == 2  # 보여 준 뒤, 새 유형으로 다시
+    calls.clear()
+    run_cls_worker(qtbot, settings, touched=lambda: True)
+    assert calls[3] == ("today", False, False)  # 사용자가 만졌으면 세트를 바꾸지 않는다
+
+
+def test_worker_does_not_rebuild_when_classification_changed_nothing(qtbot, settings, cls_flow):
+    calls, st = cls_flow
+    st["has_set"] = True
+    st["cls"] = service.ClassifyResult("nothing")
+    got = run_cls_worker(qtbot, settings)
+    assert [c[0] for c in calls] == ["passed", "today", "classify", "ai"] and got["done"] == ["nothing"] and got["started"] == []
+
+
+def test_worker_skips_classification_when_ai_analysis_is_off(qtbot, settings, cls_flow):
+    import dataclasses
+
+    calls, st = cls_flow
+    run_cls_worker(qtbot, dataclasses.replace(settings, recommend_ai=False))
+    assert "classify" not in [c[0] for c in calls]
+
+
+def test_worker_retry_mode_reclassifies_with_retry_flag(qtbot, settings, cls_flow):
+    calls, st = cls_flow
+    run_cls_worker(qtbot, settings, "retry_ai", consented={"claude"})
+    assert [c[0] for c in calls] == ["classify", "today", "ai"] and calls[0][1] is True and calls[1] == ("today", False, True)
+
+
+def test_worker_rules_and_shuffle_modes_never_classify(qtbot, settings, cls_flow):
+    calls, st = cls_flow
+    run_cls_worker(qtbot, settings, "rules")
+    run_cls_worker(qtbot, settings, "shuffle")
+    assert [c[0] for c in calls] == ["today", "today"]
+
+
+def test_settings_page_hint_mentions_type_classification(main_window):
+    sp = main_window.settings_page
+    texts = [lb.text() for lb in sp.findChildren(__import__("PySide6.QtWidgets", fromlist=["QLabel"]).QLabel)]
+    assert any("공개 문제 지문·제목을 보내 풀이 유형을 분류합니다" in t and "내 코드·계정 정보는 보내지 않습니다" in t for t in texts)
+    assert sp.recommend_ai.text() == "추천에 AI 풀이 유형·약점 분석 사용" or "풀이 유형" in sp.recommend_ai.text()

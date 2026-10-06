@@ -33,7 +33,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable, Sequence
 
-from . import ai_engine, ai_prompts, auth, catalog, checker, client, coach, config, content_cache, gitops, growth, growth_tags, lookup, parser, recommend, solved, solved_sync, storage, submit
+from . import ai_engine, ai_prompts, auth, catalog, checker, client, coach, config, content_cache, gitops, growth, growth_tags, lookup, parser, problem_types, recommend, solved, solved_sync, storage, submit
 from .config import Settings
 from .errors import AiError, GitError, InvalidInput, SweaFetchError
 from .gitops import GitResult
@@ -742,6 +742,8 @@ def logout(config_dir: Path, all_: bool = False) -> list[str]:
         targets.append(config_dir / config.ENV_FILE_NAME)
         if catalog.clear(config_dir):  # content_cache.clear 가 빈 cache/ 폴더를 지우므로 먼저 (M24)
             removed.append("문제 목록 캐시")
+        if problem_types.clear(config_dir):  # 풀이 유형 캐시도 같은 cache/ 아래 (M24.1)
+            removed.append("풀이 유형 캐시")
         if content_cache.clear(config_dir / config.CACHE_DIR_NAME):
             removed.append("지문 캐시")
         if coach.clear(config_dir):
@@ -1520,6 +1522,12 @@ class _RecCtx:
     retry: list[recommend.RetryCand]
     events: list[growth.Event]
     used_swea_passed: bool = False
+    first_day: dict[int, date] = field(default_factory=dict)  # 앱에 Pass 기록된 문제 {번호: 첫 Pass 날짜}
+    titles: dict[int, str] = field(default_factory=dict)  # 카탈로그 + 푼 문제 제목 (유형 키워드·분류 입력용, 화면·AI 로 푼 문제 제목은 나가지 않는다)
+    tcache: problem_types.TypeCache = field(default_factory=problem_types.TypeCache)
+    types: dict[int, tuple[str, ...]] = field(default_factory=dict)  # {번호: 풀이 유형} AI 결과 > 제목 키워드
+    counts: Counter = field(default_factory=Counter)  # {유형: 앱에 Pass 기록된 문제 수}
+    known: frozenset = frozenset()  # 내가 풀어 본 유형 (폴더 이름은 증거가 아니다)
 
 
 def _rec_context(settings: Settings, cat: catalog.Catalog, today: date, start_level: int | None) -> _RecCtx:
@@ -1549,7 +1557,14 @@ def _rec_context(settings: Settings, cat: catalog.Catalog, today: date, start_le
     est = recommend.estimate_level(facts, today, start_level)
     solved_nums = set(first_day) | set(passed)
     retry = recommend.retry_candidates([(r.num, r.wrong_count, r.last_result) for r in records.values()], solved_nums)
-    return _RecCtx(cat, est, facts, solved_nums, retry, events, bool(passed))
+    titles = {n: it.title for n, it in cat.items.items()}
+    for d in days:
+        for it in days[d]:
+            titles.setdefault(it.num, it.title)
+    tcache = problem_types.load(settings)
+    types = {n: ty for n, ty in ((n, problem_types.effective_types(tcache, n, t)) for n, t in titles.items()) if ty}
+    counts = problem_types.count_known(first_day, lambda n: types.get(n, ()))
+    return _RecCtx(cat, est, facts, solved_nums, retry, events, bool(passed), first_day, titles, tcache, types, counts, frozenset(counts))
 
 
 def _tagged_groups(events: list[growth.Event], stamp: datetime) -> int:
@@ -1569,7 +1584,8 @@ def _assemble(settings: Settings, ds: recommend.DaySet, ctx: _RecCtx, today: dat
         it = ctx.cat.items.get(raw["n"])
         if it is None:
             continue
-        items.append(recommend.Recommendation(it.num, it.title, it.lv, it.pr, it.pa, raw["k"], raw["r"], raw["src"], it.num in ctx.solved_nums))
+        ty = problem_types.clean_ids(raw.get("ty")) or ctx.types.get(it.num, ())  # 세트에 저장된 유형 우선, 없으면 그 뒤에 알게 된 유형
+        items.append(recommend.Recommendation(it.num, it.title, it.lv, it.pr, it.pa, raw["k"], raw["r"], raw["src"], it.num in ctx.solved_nums, ty))
     sources = {i.source for i in items}
     tagged = _tagged_groups(ctx.events, stamp)
     ai_status = _ai_status_of(settings, ds)
@@ -1578,7 +1594,7 @@ def _assemble(settings: Settings, ds: recommend.DaySet, ctx: _RecCtx, today: dat
     return recommend.RecommendResult(
         day=today, items=items, level=ctx.est, source=("mixed" if len(sources) > 1 else (sources.pop() if sources else "rule")),
         ai_status=ai_status, ai_engines=[str(e) for e in ds.ai.get("engines") or []], catalog=status,
-        shuffle=ds.shuffle, used_swea_passed=ctx.used_swea_passed, weak_tagged=tagged,
+        shuffle=ds.shuffle, used_swea_passed=ctx.used_swea_passed, weak_tagged=tagged, type_counts=dict(ctx.counts),
     )
 
 
@@ -1598,6 +1614,7 @@ def _new_set(ds: recommend.DaySet, ctx: _RecCtx, today: date, start: int, *, shu
         ctx.cat.items, ctx.est, day=today, shuffle=shuffle, solved_nums=ctx.solved_nums, retry=ctx.retry,
         recent_shown=ds.recent_dates(), day_shown=list(ds.day_shown) if keep_shown else (),
         ai_picks=ds.ai_picks() if ai_ok else (), ai_cursor=int(ds.ai.get("cursor") or 0) if ai_ok else 0,
+        types=ctx.types, known=ctx.known, type_counts=ctx.counts,
     )
     ds.shuffle, ds.level_c, ds.conf, ds.start = shuffle, ctx.est.level, ctx.est.confidence, start
     ds.items = recommend.items_of(build.picks)
@@ -1612,10 +1629,12 @@ def recommend_today(
     now: datetime | None = None,
     start_level: int | None = None,
     shuffle: bool = False,
+    rebuild: bool = False,
 ) -> recommend.RecommendResult:
     """오늘의 추천 (규칙만, 네트워크·AI 없음). 오늘 저장된 세트가 있으면 그대로(제목·정답률은 최신값), 없으면 만들어 저장한다.
 
     shuffle=True 는 카운터를 올려 새 세트(이미 보인 번호 제외)를 만든다. 콜드 스타트 선택기(start_level)가 세트를 만들 때와 달라지면 다시 만든다.
+    rebuild=True 는 풀이 유형 분류가 새로 끝났을 때 (M24.1): 아직 [다른 추천] 을 안 눌렀고 세트에 유형 미확인 칸이 있으면 새 유형 정보로 세트를 다시 만든다.
     카탈로그가 없으면 items=[] 와 catalog.usable=False. 설정이 꺼져 있으면 items=[] 와 ai_status="off".
     """
     stamp = growth._now(now)
@@ -1636,6 +1655,13 @@ def recommend_today(
     elif shuffle:
         _new_set(ds, ctx, today, start, shuffle=ds.shuffle + 1, keep_shown=True)
         recommend.save_day(settings, ds)
+    elif rebuild and ds.shuffle == 0 and any(not r.get("ty") for r in ds.items if r["k"] != "retry"):
+        ds.day_shown = []
+        ds.recent_shown = {k: v for k, v in ds.recent_shown.items() if v != today.isoformat()}  # 오늘 처음 보인 세트는 "최근 노출" 이 아니다
+        if ds.ai_status() == "ok":
+            ds.ai["cursor"] = 0
+        _new_set(ds, ctx, today, ds.start or start, shuffle=0, keep_shown=False)
+        recommend.save_day(settings, ds)
     elif ctx.est.cold and ds.conf == "cold" and start and ds.start != start:  # 선택기를 바꿨다: 같은 셔플 번호로 다시 만든다
         ds.day_shown = []
         _new_set(ds, ctx, today, start, shuffle=ds.shuffle, keep_shown=False)
@@ -1646,6 +1672,7 @@ def recommend_today(
             fresh = recommend.build_set(
                 cat.items, ctx.est, day=today, shuffle=ds.shuffle, solved_nums=ctx.solved_nums, retry=ctx.retry,
                 recent_shown=ds.recent_dates(), day_shown=[n for n in ds.day_shown if n not in {r["n"] for r in ds.items}],
+                types=ctx.types, known=ctx.known, type_counts=ctx.counts,
             ).picks
             have = {r["n"] for r in ds.items}
             kept = [r for r in ds.items if r["n"] in cat.items]
@@ -1653,7 +1680,7 @@ def recommend_today(
                 repl = next((p for p in fresh if p.num not in have and p.kind == raw["k"]), None) or next((p for p in fresh if p.num not in have), None)
                 if repl is not None:
                     have.add(repl.num)
-                    kept.append({"n": repl.num, "k": repl.kind, "r": repl.reason, "src": repl.source})
+                    kept.extend(recommend.items_of([repl]))
             ds.items = kept
             _remember(ds, [r["n"] for r in kept], today)
             recommend.save_day(settings, ds)
@@ -1743,7 +1770,7 @@ def _recommend_ai(settings, base, consent_ok, now, on_start, on_begin, is_cancel
     if tagged < AI_MIN_TAGGED:
         base.ai_status = "skipped_low_data"
         return base
-    pool = recommend.ai_pool(cat.items, ctx.est, solved_nums=ctx.solved_nums, excluded={r.num for r in ctx.retry})
+    pool = recommend.ai_pool(cat.items, ctx.est, solved_nums=ctx.solved_nums, excluded={r.num for r in ctx.retry}, types=ctx.types, known=ctx.known)
     if len(pool) < recommend.AI_PICK_MAX:
         base.ai_status = "none"
         return base
@@ -1773,7 +1800,7 @@ def _recommend_ai(settings, base, consent_ok, now, on_start, on_begin, is_cancel
     payload = recommend.ai_payload(
         ctx.est, recent_solved_by_level=solved_by_level, weak=top(stats.weak), strong=top(stats.strong),
         stats={"avg_wrong_before_pass": stats.avg_wrong_before_pass, "timeout_share": stats.timeout_share, "tagged": stats.tagged},
-        pool=pool, clean_title=ai_prompts.neutralize,
+        pool=pool, clean_title=ai_prompts.neutralize, known=sorted(problem_types.allowed_for(ctx.known)), types=ctx.types,
     )
     prompt = ai_prompts.build_recommend_prompt(payload)
     pool_nums = {it.num for it in pool}
@@ -1814,3 +1841,217 @@ def _recommend_ai(settings, base, consent_ok, now, on_start, on_begin, is_cancel
         out.items = base.items  # 보던 화면은 그대로 (순위는 다음 세트용으로 저장됨)
         out.source, out.shuffle = base.source, base.shuffle
     return out
+
+
+# --- 풀이 유형 분류 (M24.1) -------------------------------------------------------------------
+# "난이도만 같은" 추천을 막기 위해 문제마다 풀이 유형(problem_types)을 붙인다. 공개 문제의 지문 앞부분·제목만 AI 로 보내 분류하고
+# 결과는 cache/problem_types.json 에 영구 저장한다 (내 코드·계정·경로는 보내지 않는다). 워커 전용 (네트워크·AI).
+
+AI_CLASSIFY_TIMEOUT = 180.0  # 12문제 분류 JSON 한 개
+CLASSIFY_FETCH_PACE = 0.3  # 지문을 새로 받을 때 요청 사이 대기(초)
+ENOUGH_TYPED = 6  # 일반 칸 후보 풀(C, C+1)에 유형을 아는 문제가 이만큼 있으면 후보 분류를 더 하지 않는다
+
+
+@dataclass
+class ClassifyResult:
+    """status: off(AI 분석 꺼짐) | nothing(할 일 없음) | needs_consent | no_engine | failed | cancelled | partial(일일 상한·중간 실패로 일부만) | ok."""
+
+    status: str = "nothing"
+    done: int = 0  # 이번에 분류를 시도한 문제 수
+    changed: bool = False  # 캐시가 바뀌었다 (세트를 다시 만들 수 있다)
+    engine: str = ""
+
+
+def has_day_set(settings: Settings, now: datetime | None = None) -> bool:
+    """오늘 이미 만들어 둔 세트가 있는가 (파일 읽기만)."""
+    ds = recommend.load_day(settings)
+    return ds is not None and ds.date == growth._now(now).date().isoformat() and bool(ds.items)
+
+
+def classify_types(
+    settings: Settings,
+    *,
+    consent_ok: ConsentCheck,
+    now: datetime | None = None,
+    start_level: int | None = None,
+    on_start: Callable[[object], None] | None = None,
+    on_begin: Callable[[str], None] | None = None,
+    on_progress: Callable[[int], None] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+    retry: bool = False,
+    session=None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> ClassifyResult:
+    """풀이 유형을 AI 로 분류해 캐시에 쌓는다 (하루 40문제 상한, 한 번에 12문제). 예외는 던지지 않고 ClassifyResult.status 로 알린다.
+
+    대상(우선순위): ① 내가 푼 문제(앱 Pass 기록, 최근 것부터 — "내가 아는 유형"의 증거) ② 새 유형 후보(경로상 다음 유형을 찾는 난이도 C-1 의 상위 문제)
+    ③ 일반 칸 후보(C, C+1 의 상위 문제). 이미 분류했거나 제목 키워드로 분명한 문제는 건너뛴다.
+    입력은 공개 문제의 번호·제목·지문 앞부분뿐이다. 엔진은 동의한 엔진 중 첫 번째(Codex 우선) **하나만** 쓴다 (사용량 절약).
+    지문은 (캐시에 있으면 그것을, 없으면) 카탈로그의 contestProbId 로 지문 페이지만 받아 온다 — 폴더·저장 없음, 지문 캐시도 쓰지 않는다
+    (분류용으로 받은 수십 건이 사용자가 열어 본 최근 50건을 밀어내지 않게).
+    """
+    try:
+        return _classify_types(settings, consent_ok, now, start_level, on_start, on_begin, on_progress, is_cancelled, retry, session, sleep)
+    except Exception:  # noqa: BLE001 — 부가 기능은 추천을 깨지 않는다
+        log.exception("풀이 유형 분류 내부 오류")
+        return ClassifyResult("failed")
+
+
+def _classify_types(settings, consent_ok, now, start_level, on_start, on_begin, on_progress, is_cancelled, retry, session, sleep) -> ClassifyResult:
+    if not (recommend_enabled(settings) and settings.recommend_ai):
+        return ClassifyResult("off")
+    stamp = growth._now(now)
+    today = stamp.date()
+    cat = catalog.load(settings)
+    if cat is None:
+        return ClassifyResult("nothing")
+    ctx = _rec_context(settings, cat, today, start_level)
+    tc = ctx.tcache
+    index = lookup.load_index(settings)
+    tried: set[int] = set()  # 이번 실행에서 이미 시도(또는 지문을 못 구함)한 문제 — 같은 실행에서 다시 고르지 않는다
+    used = {"solved": 0, "newtype": 0, "cand": 0}
+    skip = set(ctx.solved_nums) | {r.num for r in ctx.retry}
+    c = ctx.est.level
+
+    def has_source(n: int) -> bool:
+        return n in cat.items or bool((index.get(str(n)) or {}).get("id")) or content_cache.has(settings, n)
+
+    def need(n: int) -> bool:
+        return n not in tried and not tc.fresh(n, today) and not problem_types.title_types(ctx.titles.get(n, "")) and has_source(n)
+
+    def types_now(n: int) -> tuple[str, ...]:
+        return problem_types.effective_types(tc, n, ctx.titles.get(n, ""))
+
+    def pick_batch(limit: int) -> list[int]:
+        take = min(recommend.CLASSIFY_BATCH, limit)
+        if take <= 0:
+            return []
+        if used["solved"] < recommend.CLASSIFY_SOLVED_MAX:  # ① 푼 문제 (최근 것부터)
+            todo = [n for n in sorted(ctx.first_day, key=lambda n: (ctx.first_day[n], n), reverse=True) if need(n)]
+            if todo:
+                batch = todo[: min(take, recommend.CLASSIFY_SOLVED_MAX - used["solved"])]
+                used["solved"] += len(batch)
+                return batch
+        known = set(problem_types.count_known(ctx.first_day, types_now))
+        allowed = problem_types.allowed_for(known)
+        nxt = problem_types.next_types(known)[:1]
+        if nxt and used["newtype"] < recommend.CLASSIFY_NEWTYPE_MAX:  # ② 새 유형 후보: 다음 유형의 문제가 이미 있으면 더 찾지 않는다
+            ranked = recommend.ranked_pool(cat.items, max(1, c - 1), recommend.WEIGHTS_STRETCH, skip)
+            if not any(types_now(it.num)[:1] == (nxt[0],) for it in ranked):
+                todo = [it.num for it in ranked if need(it.num)]
+                if todo:
+                    batch = todo[: min(take, recommend.CLASSIFY_NEWTYPE_MAX - used["newtype"])]
+                    used["newtype"] += len(batch)
+                    return batch
+        if used["cand"] < recommend.CLASSIFY_CAND_MAX:  # ③ 일반 칸 후보 (C, C+1)
+            fit = recommend.ranked_pool(cat.items, c, recommend.WEIGHTS_FIT, skip)
+            stretch = recommend.ranked_pool(cat.items, c + 1, recommend.WEIGHTS_STRETCH, skip) if c < recommend.MAX_LEVEL else []
+            typed = sum(1 for it in fit + stretch if problem_types.type_ok(types_now(it.num), allowed))
+            if typed < ENOUGH_TYPED:
+                todo = []
+                for i in range(max(len(fit), len(stretch))):  # 수준 맞춤·한 단계 위를 번갈아
+                    todo.extend(it.num for it in (fit[i : i + 1] + stretch[i : i + 1]) if need(it.num))
+                if todo:
+                    batch = todo[: min(take, recommend.CLASSIFY_CAND_MAX - used["cand"])]
+                    used["cand"] += len(batch)
+                    return batch
+        return []
+
+    # 할 일이 있는지부터 본다 (없으면 동의·엔진을 묻지 않는다). 미리 보기용이라 쿼터 카운터는 되돌린다
+    snapshot = dict(used)
+    first = pick_batch(recommend.CLASSIFY_BATCH)
+    used.update(snapshot)
+    if not first:
+        return ClassifyResult("nothing")
+    if recommend.CLASSIFY_DAILY_CAP - tc.used_on(today) <= 0:
+        return ClassifyResult("partial")
+    if tc.fail_day == today.isoformat() and not retry:
+        return ClassifyResult("failed")  # 같은 날 자동 재시도는 하지 않는다 ([다시 시도] 만)
+    try:
+        engines = ai_engine.resolve_all(settings.ai_engine).engines
+    except AiError:
+        return ClassifyResult("no_engine")
+    if not engines:
+        return ClassifyResult("no_engine")
+    consented = [e for e in engines if consent_ok(e.name)]
+    if not consented:
+        return ClassifyResult("needs_consent")  # 호출 0
+    engine = consented[0]  # 분류는 한 엔진만 (사용량 절약) — 둘 다 설치돼 있으면 Codex 우선
+    if is_cancelled is not None and is_cancelled():
+        return ClassifyResult("cancelled")
+
+    result = ClassifyResult("ok", engine=engine.name)
+    if on_begin is not None:
+        on_begin(engine.name)
+    box: dict = {"session": session, "failed": False, "fetched": 0}
+
+    def statement_of(n: int) -> tuple[str, ProblemContent | None]:
+        title = ctx.titles.get(n, "")
+        cached = content_cache.load(settings, n)
+        if cached is not None and cached.content is not None:
+            return title or cached.title, cached.content
+        cid = cat.items[n].id if n in cat.items else str((index.get(str(n)) or {}).get("id") or "")
+        if not cid or box["failed"]:
+            return title, None
+        try:
+            if box["session"] is None:
+                box["session"] = auth.get_session(settings)
+            if box["fetched"]:
+                sleep(CLASSIFY_FETCH_PACE)
+            box["fetched"] += 1
+            html, _kind = client.fetch_problem_page(box["session"], settings, cid)
+            return title, parser.parse_content(html)
+        except (SweaFetchError, OSError) as e:
+            log.info("분류용 지문을 받지 못했습니다 (%s): %s", n, e)
+            if box["session"] is None:
+                box["failed"] = True  # 세션을 못 만들면 이번 실행에서 더 시도하지 않는다
+            return title, None
+
+    while True:
+        if is_cancelled is not None and is_cancelled():
+            result.status = "cancelled"
+            break
+        limit = recommend.CLASSIFY_DAILY_CAP - tc.used_on(today)
+        if limit <= 0:
+            result.status = "partial"
+            break
+        batch = pick_batch(limit)
+        if not batch:
+            break
+        entries: list[dict] = []
+        for n in batch:
+            tried.add(n)
+            title, content = statement_of(n)
+            entry = ai_prompts.classify_entry(n, title, content) if content is not None else None
+            if entry is not None and entry["text"].strip():
+                entries.append(entry)
+        if not entries:
+            continue
+        nums = {e["n"] for e in entries}
+        cancelled = False
+        parsed = None
+        try:
+            res = ai_engine.run(engine, ai_prompts.build_classify_prompt(entries), timeout=AI_CLASSIFY_TIMEOUT, on_start=on_start, is_cancelled=is_cancelled)
+            cancelled = res.cancelled or (is_cancelled is not None and is_cancelled())
+            parsed = None if cancelled else problem_types.parse_batch(res.text, nums)
+        except AiError as e:
+            log.info("풀이 유형 분류 AI 실패 (%s): %s", engine.name, e)
+        except Exception:  # noqa: BLE001
+            log.exception("풀이 유형 분류 AI 내부 오류 (%s)", engine.name)
+        if cancelled:
+            result.status = "cancelled"
+            break
+        if parsed is None:  # 엔진 실패·형식 불량: 오늘은 더 부르지 않는다
+            tc.fail_day = today.isoformat()
+            problem_types.save(settings, tc)
+            result.status = "partial" if result.changed else "failed"
+            break
+        valid, _bad = parsed
+        tc.entries.update(problem_types.stamp_entries(valid, nums - set(valid), engine.name, stamp))  # 응답에 없거나 쓸 수 없는 번호는 "정하지 못함" (14일 뒤 재시도)
+        tc.add_used(today, len(nums))
+        problem_types.save(settings, tc)
+        result.done += len(nums)
+        result.changed = True
+        if on_progress is not None:
+            on_progress(result.done)
+    return result

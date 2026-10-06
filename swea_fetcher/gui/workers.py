@@ -166,8 +166,11 @@ class RecommendWorker(BaseWorker):
           "rules"(규칙 세트만 다시 읽기: 시작 수준 변경·해결 배지 갱신) / "shuffle"([다른 추천]) / "retry_ai"(동의·[다시 시도] 뒤 AI 만) /
           "refresh_catalog"(수동 [새로 받기]/[다시 시도]).
     consented: UI 스레드에서 미리 읽은 "동의받은 엔진 키" 집합 (QSettings 를 워커 스레드에서 읽지 않는다). touched: 사용자가 이미 만졌는지 (R11).
+    풀이 유형 분류 (M24.1): 세트를 만들기 전에 (오늘 세트가 없을 때) 또는 세트를 보여 준 뒤 (있을 때) AI 로 유형을 분류해 캐시에 쌓는다.
+    새 유형이 알려져 세트에 유형 미확인 칸이 있고 사용자가 아직 안 만졌으면 세트를 다시 만들어 rule_ready 를 한 번 더 보낸다.
     시그널: rule_ready(RecommendResult) / ai_started(list[str] 엔진 키) / ai_ready(RecommendResult) / catalog_progress(done, total) /
-            catalog_updated(CatalogStatus) / catalog_failed(code, hint, usable) / notice("logged_out") / 상속 failed(title, hint, detail).
+            catalog_updated(CatalogStatus) / catalog_failed(code, hint, usable) / notice("logged_out") /
+            classify_started() / classify_progress(done) / classify_done(status) / 상속 failed(title, hint, detail).
     cancel(): 플래그 + 등록된 AI 프로세스 트리 종료 (both 의 두 프로세스 모두). 카탈로그 갱신은 페이지 사이에서 멈춘다.
     """
 
@@ -178,6 +181,9 @@ class RecommendWorker(BaseWorker):
     catalog_updated = Signal(object)
     catalog_failed = Signal(str, str, bool)  # code, hint, 저장된 카탈로그를 쓸 수 있는가
     notice = Signal(str)
+    classify_started = Signal()
+    classify_progress = Signal(int)
+    classify_done = Signal(str)  # ClassifyResult.status
 
     def __init__(self, settings: Settings, mode: str = "auto", start_level: int | None = None, consented: frozenset | set = frozenset(),
                  touched: Callable[[], bool] | None = None, parent=None) -> None:
@@ -216,9 +222,20 @@ class RecommendWorker(BaseWorker):
             return False
         return True
 
-    def _rules(self, shuffle: bool = False) -> Any:
-        res = service.recommend_today(self.settings, start_level=self.start_level, shuffle=shuffle)
+    def _rules(self, shuffle: bool = False, rebuild: bool = False) -> Any:
+        res = service.recommend_today(self.settings, start_level=self.start_level, shuffle=shuffle, rebuild=rebuild)
         self.rule_ready.emit(res)
+        return res
+
+    def _classify(self, retry: bool = False) -> Any:
+        """풀이 유형 분류 (동의·엔진·상한은 service 가 판단). 하는 일이 없으면 신호도 없다."""
+        if not self.settings.recommend_ai or self._cancel_requested:
+            return None
+        res = service.classify_types(
+            self.settings, consent_ok=lambda key: key in self.consented, start_level=self.start_level, on_start=self._on_start,
+            on_begin=lambda _engine: self.classify_started.emit(), on_progress=self.classify_progress.emit, is_cancelled=self._cancelled, retry=retry,
+        )
+        self.classify_done.emit(res.status)
         return res
 
     def _ai(self, base: Any, retry: bool = False) -> None:
@@ -245,7 +262,8 @@ class RecommendWorker(BaseWorker):
             self._rules(shuffle=True)
             return None
         if self.mode == "retry_ai":
-            self._ai(self._rules(), retry=True)
+            cls = self._classify(retry=True)
+            self._ai(self._rules(rebuild=bool(cls and cls.changed and not self._is_touched())), retry=True)
             return None
         # auto
         usable = service.catalog_status(s).usable
@@ -262,7 +280,16 @@ class RecommendWorker(BaseWorker):
         """카탈로그가 준비된 뒤: SWEA 정답 목록(필요할 때) → 규칙 세트 → AI."""
         if service.refresh_passed(self.settings, is_cancelled=self._cancelled) < 0:
             self.notice.emit("logged_out")
-        self._ai(self._rules())
+        has_set = service.has_day_set(self.settings)
+        base = self._rules() if has_set else None  # 오늘 세트가 있으면 바로 보여 주고, 유형 분류는 그 뒤에
+        cls = self._classify()
+        changed = bool(cls is not None and cls.changed)
+        if base is None or changed:  # 세트가 없었으면 분류 뒤에 만든다 / 있었으면 새로 알게 된 유형으로 미확인 칸이 있을 때만 다시 만든다
+            base = self._rules(rebuild=has_set and changed and not self._is_touched())
+        self._ai(base)
+
+    def _is_touched(self) -> bool:
+        return bool(self.touched is not None and self.touched())
 
 
 class FuncWorker(BaseWorker):
