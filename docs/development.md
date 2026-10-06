@@ -9,6 +9,8 @@ swea_fetcher/
 ├── auth.py         로그인 (AJAX JSON), 세션 캐시, 잠금 가드
 ├── client.py       HTTP (호스트 화이트리스트, 재시도, utf-8 강제, 302 → SessionExpired)
 ├── lookup.py       문제 번호 → contestProbId (공개 목록 → User Problem → Solving Club 상자, 캐시)
+├── catalog.py      공개 문제 목록 카탈로그 (번호 → 난이도·정답률, 익명 순차 갱신, cache/problem_catalog.json) (M24)
+├── recommend.py    오늘의 추천: 수준 모델(사다리)·후보 선정·오늘의 세트·AI payload/파서 (순수, M24)
 ├── parser.py       HTML → ProblemInfo. 선택자 상수는 파일 상단 (SEL_*, TITLE_RE)
 ├── storage.py      경로 계산·중첩 주제 검증·저장·롤백
 ├── checker.py      풀이 실행 + output.txt 행 단위 비교, 인터프리터 탐색(resolve_python)

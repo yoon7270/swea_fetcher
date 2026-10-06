@@ -365,3 +365,26 @@ def test_growth_settings_invalid_falls_back_to_default(root_dir, config_dir, fak
         s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_GROWTH="maybe", SWEA_GROWTH_COMMENT="2")
     assert (s.growth, s.growth_comment) == (True, True)
     assert "SWEA_GROWTH " in caplog.text and "SWEA_GROWTH_COMMENT" in caplog.text
+
+
+# =============================================================================
+# M24: 오늘의 추천 (SWEA_RECOMMEND / SWEA_RECOMMEND_AI)
+# =============================================================================
+
+
+def test_recommend_settings_defaults_and_parsing(root_dir, config_dir, fake_keyring):
+    s = _load_ai(root_dir, config_dir, fake_keyring)
+    assert (s.recommend, s.recommend_ai) == (True, True)
+    s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_RECOMMEND="0", SWEA_RECOMMEND_AI="off")
+    assert (s.recommend, s.recommend_ai) == (False, False)
+    s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_RECOMMEND="true", SWEA_RECOMMEND_AI="no")
+    assert (s.recommend, s.recommend_ai) == (True, False)
+    s2 = Settings(root=root_dir, user_id="u", password="p")  # 기존 생성 코드 호환
+    assert s2.recommend is True and s2.recommend_ai is True and "recommend=" not in repr(s2)
+
+
+def test_recommend_settings_invalid_falls_back_to_default(root_dir, config_dir, fake_keyring, caplog):
+    with caplog.at_level(logging.WARNING, logger="swea_fetcher.config"):
+        s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_RECOMMEND="maybe", SWEA_RECOMMEND_AI="2")
+    assert (s.recommend, s.recommend_ai) == (True, True)
+    assert "SWEA_RECOMMEND " in caplog.text and "SWEA_RECOMMEND_AI" in caplog.text

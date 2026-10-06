@@ -11,6 +11,8 @@ submit_problem: SWEA 에 제출하고 채점 결과를 받는다 (M8). Pass 면 
 ask_coach     : AI 코치 (M17) — 코드 평가·힌트·정답 풀이·연결 테스트. 호출 전 사용자 동의 필수 (GUI 전용)
 check_problem : 로컬 검증 + 통과 기록 (M20 풀이 잔디). growth_solved: 잔디 데이터 조회
 growth_*      : 성장 기록 (M19) — 개요·리포트 조회, 주간 AI 코멘트 생성(generate_growth), 삭제. 동의는 consent_ok 콜백 (GUI 전용)
+catalog_status / refresh_catalog / refresh_passed / recommend_today / recommend_ai : 오늘의 추천 (M24) — 공개 문제 목록 카탈로그, 수준·오늘의 세트, AI 약점 선별.
+              catalog_status·recommend_today 는 파일 읽기만, 나머지는 네트워크/AI 라 워커에서. 동의는 consent_ok 콜백 (GUI 전용)
 
 네트워크·파일 I/O 가 있으므로 GUI 는 워커 스레드에서 호출한다.
 """
@@ -23,13 +25,15 @@ import difflib
 import logging
 import re
 import threading
+import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable, Sequence
 
-from . import ai_engine, ai_prompts, auth, checker, client, coach, config, content_cache, gitops, growth, growth_tags, lookup, parser, solved, solved_sync, storage, submit
+from . import ai_engine, ai_prompts, auth, catalog, checker, client, coach, config, content_cache, gitops, growth, growth_tags, lookup, parser, recommend, solved, solved_sync, storage, submit
 from .config import Settings
 from .errors import AiError, GitError, InvalidInput, SweaFetchError
 from .gitops import GitResult
@@ -736,6 +740,8 @@ def logout(config_dir: Path, all_: bool = False) -> list[str]:
     targets = [config_dir / config.SESSION_FILE_NAME, config_dir / config.LOGIN_STATE_FILE_NAME]
     if all_:
         targets.append(config_dir / config.ENV_FILE_NAME)
+        if catalog.clear(config_dir):  # content_cache.clear 가 빈 cache/ 폴더를 지우므로 먼저 (M24)
+            removed.append("문제 목록 캐시")
         if content_cache.clear(config_dir / config.CACHE_DIR_NAME):
             removed.append("지문 캐시")
         if coach.clear(config_dir):
@@ -1423,3 +1429,388 @@ def generate_growth(
         log.exception("성장 기록 생성 내부 오류")
         result.failure = CoachFailure("failed", f"내부 오류: {e}", "다시 시도하세요")
     return result
+
+
+# --- 오늘의 추천 (M24) -------------------------------------------------------------------
+# catalog_status / recommend_today 는 파일 읽기 전용(네트워크·AI 없음). refresh_* / recommend_ai 는 워커에서만 부른다.
+# 동의는 consent_ok 콜백이 대신한다 — 코어(recommend.py)는 동의를 모른다. 거짓이면 AI 를 호출하지 않는다.
+
+Recommendation = recommend.Recommendation
+RecommendResult = recommend.RecommendResult
+CatalogStatus = catalog.CatalogStatus
+CatalogError = catalog.CatalogError
+
+AI_RECOMMEND_TIMEOUT = 120.0  # 코치(300초)보다 짧게: 선별은 짧은 JSON 하나
+AI_MIN_TAGGED = 3  # 최근 28일 분류 그룹이 이보다 적으면 AI 를 부르지 않는다
+AI_WINDOW_DAYS = 28
+_PASSED_ATTEMPT: dict[str, datetime] = {}  # 정답 목록 시도 시각 (프로세스 안 1시간 스로틀 — 로그인 실패 재시도 루프 방지)
+
+
+def recommend_enabled(settings: Settings) -> bool:
+    return bool(settings.growth and settings.recommend)
+
+
+def catalog_status(settings: Settings, now: datetime | None = None) -> catalog.CatalogStatus:
+    """카탈로그 상태 (파일만 읽음, 네트워크 없음)."""
+    return catalog.status(settings, now)
+
+
+def refresh_catalog(
+    settings: Settings,
+    *,
+    progress: Callable[[int, int], None] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+    force: bool = False,
+    now: datetime | None = None,
+    session=None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> catalog.CatalogStatus:
+    """공개 문제 목록 갱신 (네트워크 — 워커 전용). 갱신이 필요 없거나 실패 쿨다운이면 요청 없이 현재 상태를 돌려준다.
+
+    force=True(수동 [새로 받기]/[다시 시도]) 는 TTL·실패 쿨다운을 무시하지만, 카탈로그가 이미 있으면 1시간 쿨다운은 지킨다
+    (CatalogError code="cooldown"). 실패는 CatalogError 로 단일화한다 (네트워크 / 구조 변경 / 세션 / 취소).
+    """
+    stamp = growth._now(now)
+    st = catalog.status(settings, stamp)
+    if not recommend_enabled(settings):
+        return st
+    if force:
+        if st.usable and st.manual_wait > 0:
+            raise CatalogError(f"문제 목록은 {st.manual_wait // 60 + 1}분 뒤에 다시 받을 수 있습니다", code="cooldown")
+    elif not st.auto_due:
+        return st
+    catalog.refresh(session if session is not None else catalog.anonymous_session(), settings, progress, is_cancelled, sleep, now=stamp)
+    return catalog.status(settings, growth._now(now))
+
+
+def refresh_passed(settings: Settings, *, is_cancelled: Callable[[], bool] | None = None, now: datetime | None = None, session=None,
+                   sleep: Callable[[float], None] = time.sleep) -> int:
+    """SWEA "내가 정답한 문제" 목록 갱신 (로그인 세션, 1일 TTL). 받은 개수 / 건너뜀(꺼짐·TTL·스로틀)=0 / 실패=-1 (예외 없음, 재시도 루프 없음).
+
+    비명시 로그인(`explicit=False`)만 쓰므로 로그인 가드에 걸리면 조용히 "로그아웃" 상태(-1)로 취급한다 — 카드가 앱 기록만 썼다고 한 번 안내한다.
+    """
+    stamp = growth._now(now)
+    if not recommend_enabled(settings) or catalog.PASSED_FILTER is None or not catalog.passed_stale(settings, stamp):
+        return 0
+    key = str(settings.config_dir)
+    last = _PASSED_ATTEMPT.get(key)
+    if last is not None and stamp - last < timedelta(hours=1):
+        return 0
+    _PASSED_ATTEMPT[key] = stamp
+    try:
+        sess = session if session is not None else auth.get_session(settings)
+        nums = catalog.fetch_passed(sess, settings, catalog.load(settings), is_cancelled, sleep, now=stamp)
+    except (SweaFetchError, OSError) as e:
+        log.info("SWEA 정답 목록을 받지 못해 앱 기록만 사용합니다: %s", e)
+        return -1
+    except Exception:  # noqa: BLE001 — 부가 기능은 추천을 깨지 않는다
+        log.exception("SWEA 정답 목록 내부 오류")
+        return -1
+    return len(nums)
+
+
+@dataclass
+class _RecCtx:
+    """추천 계산에 쓰는 이미 읽은 이력 (파일 읽기 1회 분)."""
+
+    cat: catalog.Catalog
+    est: recommend.LevelEstimate
+    facts: list[recommend.SolveFact]
+    solved_nums: set[int]
+    retry: list[recommend.RetryCand]
+    events: list[growth.Event]
+    used_swea_passed: bool = False
+
+
+def _rec_context(settings: Settings, cat: catalog.Catalog, today: date, start_level: int | None) -> _RecCtx:
+    days = solved.load(settings)
+    first_day: dict[int, date] = {}
+    for d in sorted(days):
+        for it in days[d]:
+            first_day.setdefault(it.num, d)
+    events = growth.read_events(settings)
+    pass_wb: dict[int, int] = {}
+    for ev in events:  # 파일 순서 = 시간순: 그 문제의 첫 Pass 직전 오답
+        if ev.t == "submit" and ev.res == "pass" and ev.num in first_day:
+            pass_wb.setdefault(ev.num, ev.wb)
+    records = coach._load_records(settings)
+    unsolved: list[tuple[int, int, date | None]] = []
+    for r in records.values():
+        if r.last_result == "pass" or r.num in first_day or r.wrong_count < recommend.THRESH["hard_min_wb"]:
+            continue
+        try:
+            when = datetime.fromisoformat(r.last_submit_at).date() if r.last_submit_at else None
+        except ValueError:
+            when = None
+        unsolved.append((r.num, r.wrong_count, when))
+    passed = catalog.load_passed(settings)[0] if catalog.PASSED_FILTER is not None else {}
+    levels = {n: it.lv for n, it in cat.items.items() if it.lv}
+    facts = recommend.facts_from_history(solved_first_day=first_day, pass_wb=pass_wb, unsolved=unsolved, swea_passed=passed, levels=levels)
+    est = recommend.estimate_level(facts, today, start_level)
+    solved_nums = set(first_day) | set(passed)
+    retry = recommend.retry_candidates([(r.num, r.wrong_count, r.last_result) for r in records.values()], solved_nums)
+    return _RecCtx(cat, est, facts, solved_nums, retry, events, bool(passed))
+
+
+def _tagged_groups(events: list[growth.Event], stamp: datetime) -> int:
+    cutoff = stamp - timedelta(days=AI_WINDOW_DAYS)
+    return sum(1 for g in growth.group_coach([e for e in events if e.t == "coach" and e.at >= cutoff]) if g.ok)
+
+
+def _ai_status_of(settings: Settings, ds: recommend.DaySet | None) -> str:
+    if not settings.recommend_ai:
+        return "off"
+    return {"ok": "ok", "failed": "failed", "skipped": "skipped_low_data"}.get(ds.ai_status() if ds else "none", "none")
+
+
+def _assemble(settings: Settings, ds: recommend.DaySet, ctx: _RecCtx, today: date, stamp: datetime, status: catalog.CatalogStatus) -> recommend.RecommendResult:
+    items: list[recommend.Recommendation] = []
+    for raw in ds.items:
+        it = ctx.cat.items.get(raw["n"])
+        if it is None:
+            continue
+        items.append(recommend.Recommendation(it.num, it.title, it.lv, it.pr, it.pa, raw["k"], raw["r"], raw["src"], it.num in ctx.solved_nums))
+    sources = {i.source for i in items}
+    tagged = _tagged_groups(ctx.events, stamp)
+    ai_status = _ai_status_of(settings, ds)
+    if ai_status == "none" and tagged < AI_MIN_TAGGED:
+        ai_status = "skipped_low_data"  # 호출 조건 미달을 카드가 바로 안내할 수 있게 (워커 없이)
+    return recommend.RecommendResult(
+        day=today, items=items, level=ctx.est, source=("mixed" if len(sources) > 1 else (sources.pop() if sources else "rule")),
+        ai_status=ai_status, ai_engines=[str(e) for e in ds.ai.get("engines") or []], catalog=status,
+        shuffle=ds.shuffle, used_swea_passed=ctx.used_swea_passed, weak_tagged=tagged,
+    )
+
+
+def _remember(ds: recommend.DaySet, picks_nums: list[int], today: date) -> None:
+    """보인 번호를 오늘/최근 노출 기록에 더한다."""
+    for n in picks_nums:
+        if n not in ds.day_shown:
+            ds.day_shown.append(n)
+        ds.recent_shown[str(n)] = today.isoformat()
+    ds.recent_shown = recommend.prune_recent(ds.recent_shown, today)
+
+
+def _new_set(ds: recommend.DaySet, ctx: _RecCtx, today: date, start: int, *, shuffle: int, keep_shown: bool) -> None:
+    """ds 의 items 를 새로 만든다 (날짜 변경·[다른 추천]·시작 수준 변경). AI 순위가 있으면 cursor 부터 소비한다."""
+    ai_ok = ds.ai_status() == "ok"
+    build = recommend.build_set(
+        ctx.cat.items, ctx.est, day=today, shuffle=shuffle, solved_nums=ctx.solved_nums, retry=ctx.retry,
+        recent_shown=ds.recent_dates(), day_shown=list(ds.day_shown) if keep_shown else (),
+        ai_picks=ds.ai_picks() if ai_ok else (), ai_cursor=int(ds.ai.get("cursor") or 0) if ai_ok else 0,
+    )
+    ds.shuffle, ds.level_c, ds.conf, ds.start = shuffle, ctx.est.level, ctx.est.confidence, start
+    ds.items = recommend.items_of(build.picks)
+    if ai_ok:
+        ds.ai["cursor"] = int(ds.ai.get("cursor") or 0) + build.ai_used
+    _remember(ds, [p.num for p in build.picks], today)
+
+
+def recommend_today(
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+    start_level: int | None = None,
+    shuffle: bool = False,
+) -> recommend.RecommendResult:
+    """오늘의 추천 (규칙만, 네트워크·AI 없음). 오늘 저장된 세트가 있으면 그대로(제목·정답률은 최신값), 없으면 만들어 저장한다.
+
+    shuffle=True 는 카운터를 올려 새 세트(이미 보인 번호 제외)를 만든다. 콜드 스타트 선택기(start_level)가 세트를 만들 때와 달라지면 다시 만든다.
+    카탈로그가 없으면 items=[] 와 catalog.usable=False. 설정이 꺼져 있으면 items=[] 와 ai_status="off".
+    """
+    stamp = growth._now(now)
+    today = stamp.date()
+    status = catalog.status(settings, stamp)
+    cat = catalog.load(settings) if status.usable and recommend_enabled(settings) else None
+    if cat is None:
+        est = recommend.estimate_level([], today, start_level)
+        return recommend.RecommendResult(day=today, items=[], level=est, ai_status="off" if not recommend_enabled(settings) else "none", catalog=status)
+    ctx = _rec_context(settings, cat, today, start_level)
+    start = recommend._clamp_level(start_level) if start_level else 0
+    ds = recommend.load_day(settings)
+    if ds is None or ds.date != today.isoformat():
+        prev_recent = ds.recent_shown if ds is not None else {}
+        ds = recommend.DaySet(today.isoformat(), recent_shown=recommend.prune_recent(prev_recent, today), ai={"status": "none"})
+        _new_set(ds, ctx, today, start, shuffle=0, keep_shown=False)
+        recommend.save_day(settings, ds)
+    elif shuffle:
+        _new_set(ds, ctx, today, start, shuffle=ds.shuffle + 1, keep_shown=True)
+        recommend.save_day(settings, ds)
+    elif ctx.est.cold and ds.conf == "cold" and start and ds.start != start:  # 선택기를 바꿨다: 같은 셔플 번호로 다시 만든다
+        ds.day_shown = []
+        _new_set(ds, ctx, today, start, shuffle=ds.shuffle, keep_shown=False)
+        recommend.save_day(settings, ds)
+    else:
+        missing = [raw for raw in ds.items if raw["n"] not in cat.items]
+        if missing:  # 카탈로그에서 사라진 번호: 같은 시드로 다시 계산해 그 칸만 채운다
+            fresh = recommend.build_set(
+                cat.items, ctx.est, day=today, shuffle=ds.shuffle, solved_nums=ctx.solved_nums, retry=ctx.retry,
+                recent_shown=ds.recent_dates(), day_shown=[n for n in ds.day_shown if n not in {r["n"] for r in ds.items}],
+            ).picks
+            have = {r["n"] for r in ds.items}
+            kept = [r for r in ds.items if r["n"] in cat.items]
+            for raw in missing:
+                repl = next((p for p in fresh if p.num not in have and p.kind == raw["k"]), None) or next((p for p in fresh if p.num not in have), None)
+                if repl is not None:
+                    have.add(repl.num)
+                    kept.append({"n": repl.num, "k": repl.kind, "r": repl.reason, "src": repl.source})
+            ds.items = kept
+            _remember(ds, [r["n"] for r in kept], today)
+            recommend.save_day(settings, ds)
+    return _assemble(settings, ds, ctx, today, stamp, status)
+
+
+def recommend_blocker(settings: Settings, consent_ok: ConsentCheck) -> str | None:
+    """카드 안내 결정: "off" | "ai_off" | "no_engine" | "needs_consent" | None."""
+    if not recommend_enabled(settings):
+        return "off"
+    if not settings.recommend_ai:
+        return "ai_off"
+    try:
+        engines = ai_engine.resolve_all(settings.ai_engine).engines
+    except AiError:
+        return "no_engine"
+    if not engines:
+        return "no_engine"
+    if not any(consent_ok(e.name) for e in engines):
+        return "needs_consent"
+    return None
+
+
+def _ai_one(engine: ai_engine.EngineInfo, prompt: str, pool_nums: set[int], on_start, is_cancelled) -> tuple[str, list[recommend.AiPick] | None, bool]:
+    """엔진 1개 호출 → (엔진 키, 검증된 순위 또는 None, 취소 여부). 예외는 실패(None)로 바꾼다. 프롬프트·응답은 로깅하지 않는다."""
+    try:
+        res = ai_engine.run(engine, prompt, timeout=AI_RECOMMEND_TIMEOUT, on_start=on_start, is_cancelled=is_cancelled)
+    except AiError as e:
+        log.info("추천 AI 실패 (%s): %s", engine.name, e)
+        return engine.name, None, False
+    except Exception:  # noqa: BLE001
+        log.exception("추천 AI 내부 오류 (%s)", engine.name)
+        return engine.name, None, False
+    if res.cancelled or (is_cancelled is not None and is_cancelled()):
+        return engine.name, None, True
+    picks = recommend.parse_ai(res.text, pool_nums)
+    if picks is None:
+        log.info("추천 AI 응답을 쓸 수 없습니다 (%s): 유효한 선택 %d개 미만", engine.name, recommend.AI_PICK_MIN)
+    return engine.name, picks, False
+
+
+def recommend_ai(
+    settings: Settings,
+    base: recommend.RecommendResult,
+    *,
+    consent_ok: ConsentCheck,
+    now: datetime | None = None,
+    on_start: Callable[[object], None] | None = None,
+    on_begin: Callable[[list[str]], None] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+    is_touched: Callable[[], bool] | None = None,
+    retry: bool = False,
+) -> recommend.RecommendResult:
+    """AI 약점 분석으로 후보 중에서 고른다 (하루 1회/엔진). 예외는 던지지 않고 base 에 ai_status 를 담아 돌려준다.
+
+    ai_status: off | skipped_low_data | needs_consent | no_engine | ok | failed | cancelled | none(후보 부족·세트 없음).
+    동의는 consent_ok(엔진 키) 콜백이 대신한다 (코어는 동의를 모른다). 동의 없는 엔진은 호출하지 않고(시도 횟수도 안 씀),
+    both 는 동의된 설치 엔진을 병렬 호출해 득표로 합친다. 고정 엔진이 없으면 폴백 없이 no_engine.
+    AI 로는 수준 숫자·약점/강점 카테고리 이름·집계·후보 풀(번호·제목·레벨·정답률·참여자)만 보낸다 (recommend.ai_payload).
+    is_touched(): 사용자가 이미 [다른 추천]/항목 열기를 했으면 현재 화면은 바꾸지 않고 순위만 저장한다 (다음 세트용).
+    """
+    try:
+        return _recommend_ai(settings, base, consent_ok, now, on_start, on_begin, is_cancelled, is_touched, retry)
+    except Exception:  # noqa: BLE001 — 부가 기능은 앱을 깨지 않는다
+        log.exception("추천 AI 내부 오류")
+        base.ai_status = "failed"
+        return base
+
+
+def _recommend_ai(settings, base, consent_ok, now, on_start, on_begin, is_cancelled, is_touched, retry) -> recommend.RecommendResult:
+    if not (recommend_enabled(settings) and settings.recommend_ai):
+        base.ai_status = "off"
+        return base
+    stamp = growth._now(now)
+    today = stamp.date()
+    ds = recommend.load_day(settings)
+    cat = catalog.load(settings)
+    if ds is None or ds.date != today.isoformat() or cat is None:
+        base.ai_status = "none"
+        return base
+    if not retry and ds.ai_status() in ("ok", "failed"):  # 하루 1회: 같은 날 재시작·탭 이동·[다른 추천] 에서는 호출 0
+        base.ai_status = "ok" if ds.ai_status() == "ok" else "failed"
+        return base
+    ctx = _rec_context(settings, cat, today, ds.start or None)
+    tagged = _tagged_groups(ctx.events, stamp)
+    base.weak_tagged = tagged
+    if tagged < AI_MIN_TAGGED:
+        base.ai_status = "skipped_low_data"
+        return base
+    pool = recommend.ai_pool(cat.items, ctx.est, solved_nums=ctx.solved_nums, excluded={r.num for r in ctx.retry})
+    if len(pool) < recommend.AI_PICK_MAX:
+        base.ai_status = "none"
+        return base
+    try:
+        engines = ai_engine.resolve_all(settings.ai_engine).engines
+    except AiError:
+        base.ai_status = "no_engine"
+        return base
+    allowed = [e for e in engines if consent_ok(e.name)]
+    if not allowed:
+        base.ai_status = "needs_consent"  # 호출 0, 시도 횟수 미소모
+        return base
+    if is_cancelled is not None and is_cancelled():
+        base.ai_status = "cancelled"
+        return base
+
+    stats = growth.compute_stats([e for e in ctx.events if e.at >= stamp - timedelta(days=AI_WINDOW_DAYS)])
+
+    def top(d: dict[str, int]) -> list[tuple[str, int]]:
+        rows = [(growth_tags.name_of(c), s) for c, s in d.items()]
+        return sorted(((n, s) for n, s in rows if n), key=lambda r: (-r[1], r[0]))[:4]
+
+    solved_by_level: Counter = Counter()
+    for f in ctx.facts:
+        if f.solved and f.level and f.day is not None and 0 <= (today - f.day).days <= recommend.THRESH["window_days"]:
+            solved_by_level[f.level] += 1
+    payload = recommend.ai_payload(
+        ctx.est, recent_solved_by_level=solved_by_level, weak=top(stats.weak), strong=top(stats.strong),
+        stats={"avg_wrong_before_pass": stats.avg_wrong_before_pass, "timeout_share": stats.timeout_share, "tagged": stats.tagged},
+        pool=pool, clean_title=ai_prompts.neutralize,
+    )
+    prompt = ai_prompts.build_recommend_prompt(payload)
+    pool_nums = {it.num for it in pool}
+    if on_begin is not None:
+        on_begin([e.name for e in allowed])
+    outcomes: list[tuple[str, list[recommend.AiPick] | None, bool]] = []
+    if len(allowed) == 1:
+        outcomes.append(_ai_one(allowed[0], prompt, pool_nums, on_start, is_cancelled))
+    else:
+        with ThreadPoolExecutor(max_workers=len(allowed), thread_name_prefix="recommend") as ex:
+            futures = [ex.submit(_ai_one, e, prompt, pool_nums, on_start, is_cancelled) for e in allowed]
+            outcomes = [f.result() for f in futures]  # allowed 순서(Codex 우선)를 유지
+    if any(o[2] for o in outcomes) or (is_cancelled is not None and is_cancelled()):
+        base.ai_status = "cancelled"  # 취소는 상태를 바꾸지 않는다
+        return base
+    good = [(key, picks) for key, picks, _c in outcomes if picks]
+    prev_fail = int(ds.ai.get("fail_count") or 0)
+    if not good:
+        ds.ai = {"status": "failed", "engines": [e.name for e in allowed], "at": growth._iso(stamp), "picks": [], "cursor": 0, "fail_count": prev_fail + 1}
+        recommend.save_day(settings, ds)
+        base.ai_status, base.ai_engines = "failed", []
+        return base
+    quality = {**recommend.quality_scores([it for it in pool if it.lv == ctx.est.level], recommend.WEIGHTS_FIT),
+               **recommend.quality_scores([it for it in pool if it.lv != ctx.est.level], recommend.WEIGHTS_STRETCH)}
+    merged = recommend.merge_ai([p for _k, p in good], quality)
+    ds.ai = {"status": "ok", "engines": [k for k, _p in good], "at": growth._iso(stamp),
+             "picks": [{"n": p.num, **({"r": p.reason} if p.reason else {})} for p in merged], "cursor": 0, "fail_count": prev_fail}
+    touched = ds.shuffle > 0 or (is_touched is not None and is_touched())
+    if not touched:  # 규칙 세트를 AI 순위로 교체 (재도전 칸은 규칙 그대로)
+        ds.day_shown = []
+        ds.recent_shown = {k: v for k, v in ds.recent_shown.items() if v != today.isoformat()}  # 오늘 처음 보인 규칙 세트는 "최근 노출" 이 아니다
+        _new_set(ds, ctx, today, ds.start, shuffle=0, keep_shown=False)
+    recommend.save_day(settings, ds)
+    out = _assemble(settings, ds, ctx, today, stamp, base.catalog or catalog.status(settings, stamp))
+    out.ai_status = "ok"
+    out.notes = list(base.notes)
+    if touched:
+        out.items = base.items  # 보던 화면은 그대로 (순위는 다음 세트용으로 저장됨)
+        out.source, out.shuffle = base.source, base.shuffle
+    return out

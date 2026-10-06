@@ -2,7 +2,8 @@
 
 .env 키: SWEA_ROOT (풀이 저장소 경로), SWEA_ID, 선택: SWEA_INPUT_NAME, SWEA_OUTPUT_NAME, SWEA_PYTHON(검증용 인터프리터), SWEA_EDITOR(auto|vscode|pycharm|default),
 SWEA_AI_ENGINE(auto|codex|claude|both), SWEA_AI_WRONG_THRESHOLD(1~20), SWEA_REVIEW_DAYS(1~30) (M17 AI 코치),
-SWEA_GROWTH(1|0, 성장 기록), SWEA_GROWTH_COMMENT(1|0, 주간 AI 코멘트 자동 생성) (M19), SWEA_SOLVED_SYNC(1|0|빈 값=자동, 잔디 기록을 풀이 저장소에 함께 저장) (M23).
+SWEA_GROWTH(1|0, 성장 기록), SWEA_GROWTH_COMMENT(1|0, 주간 AI 코멘트 자동 생성) (M19), SWEA_SOLVED_SYNC(1|0|빈 값=자동, 잔디 기록을 풀이 저장소에 함께 저장) (M23),
+SWEA_RECOMMEND(1|0, 오늘의 추천 카드·공개 문제 목록 받기), SWEA_RECOMMEND_AI(1|0, 추천에 AI 약점 분석) (M24).
 비밀번호는 keyring 에 저장한다 (서비스 "swea-fetch", 사용자명 = SWEA_ID).
 결정 순서: 환경변수 SWEA_PW → .env 의 SWEA_PW (경고, 이관 권장) → keyring → 없으면 ConfigMissing.
 """
@@ -56,6 +57,8 @@ class Settings:
     growth: bool = True  # SWEA_GROWTH: 성장 기록 (AI 응답의 분류 태그·제출 결과 이벤트·주간 리포트) (M19)
     growth_comment: bool = True  # SWEA_GROWTH_COMMENT: 주간 AI 코멘트 자동 생성 (M19)
     solved_sync: bool | None = None  # SWEA_SOLVED_SYNC: 잔디 기록을 풀이 저장소에 함께 저장 (M23). None = 자동 (루트가 git 저장소+원격이면 켜짐)
+    recommend: bool = True  # SWEA_RECOMMEND: 오늘의 추천 카드 + 공개 문제 목록 받기 (M24). SWEA_GROWTH=0 이면 카드도 숨김
+    recommend_ai: bool = True  # SWEA_RECOMMEND_AI: 추천에 AI 약점 분석 (M24). 동의(growth_consent_ok) 없이는 호출하지 않는다
 
     @property
     def session_file(self) -> Path:
@@ -329,5 +332,7 @@ def load_settings(config_dir: Path | None = None) -> Settings:
         growth=_bool_setting("SWEA_GROWTH", get("SWEA_GROWTH"), True),
         growth_comment=_bool_setting("SWEA_GROWTH_COMMENT", get("SWEA_GROWTH_COMMENT"), True),
         solved_sync=_tristate_setting("SWEA_SOLVED_SYNC", get("SWEA_SOLVED_SYNC")),
+        recommend=_bool_setting("SWEA_RECOMMEND", get("SWEA_RECOMMEND"), True),
+        recommend_ai=_bool_setting("SWEA_RECOMMEND_AI", get("SWEA_RECOMMEND_AI"), True),
         **_auto_push_settings(get("SWEA_AUTO_PUSH"), get("SWEA_AUTO_PUSH_SCOPE"), get("SWEA_AUTO_PUSH_ON")),
     )

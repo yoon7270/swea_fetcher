@@ -30,6 +30,7 @@ from ... import growth, service, solved
 from ...config import Settings
 from ..coach_widgets import AnswerBrowser, growth_consent_ok, set_growth_consent
 from .. import motion
+from ..recommend_card import RecommendCard
 from ..growth_widgets import BarChart, BulletLabel, CategoryRowWidget, HeatLegend, HeatmapWidget, MetricRowWidget, day_text, number_parts, week_label
 from ..theme import tokens
 from ..theme.bus import bus
@@ -106,6 +107,7 @@ class GrowthPage(QWidget):
     comment_requested = Signal(object)  # 주 월요일(date): 수동 [코멘트 받기]/[다시 받기]/동의 후 시작
     cancel_requested = Signal()
     problem_requested = Signal(str, int)  # 잔디 날짜 목록에서 고른 문제 (주제, 번호) — 메인이 문제 탭으로 연다
+    recommend_open_requested = Signal(int)  # 오늘의 추천 항목 (번호) — 메인이 문제 탭에서 지문을 연다 (저장 없음, M24)
 
     def __init__(self, qsettings: QSettings, parent=None) -> None:
         super().__init__(parent)
@@ -149,6 +151,10 @@ class GrowthPage(QWidget):
         self.banner = Banner()  # 0~1개: 꺼짐 안내 / 코멘트 동의
         root.addWidget(self.banner)
         self._build_heat(root)
+        self.recommend = RecommendCard(self.qs)  # 오늘의 추천 (M24): 풀이 잔디 아래, 리포트 위. 워커는 카드가 직접 돌린다
+        root.addWidget(self.recommend)
+        self.recommend.recommend_open_requested.connect(self.recommend_open_requested)
+        self.recommend.goto_requested.connect(self.goto_requested)
 
         holder = QWidget()
         self.stack = QStackedLayout(holder)
@@ -421,6 +427,7 @@ class GrowthPage(QWidget):
         self.settings = settings
         self._stale = True
         self._running_week = None
+        self.recommend.set_settings(settings)
         self.kick_remote_refresh()  # 앱 시작·설정 변경 직후: 다른 PC 의 잔디 기록을 백그라운드로 읽는다 (M23, 10분 스로틀)
         if self.isVisible():
             self.refresh()
@@ -452,10 +459,18 @@ class GrowthPage(QWidget):
     def _consent_ok(self, engine: str) -> bool:
         return growth_consent_ok(self.qs, engine)
 
+    def wait_workers(self) -> None:
+        """창 닫기: 추천 워커의 AI 프로세스를 먼저 죽이고 기다린다 (실행 중 QThread 가 파괴되지 않게)."""
+        self.recommend.wait_workers()
+        w = getattr(self, "_remote_worker", None)
+        if w is not None and w.isRunning():
+            w.wait(3000)
+
     def refresh(self) -> None:
         """개요·선택 주 리포트를 다시 읽어 그린다. 성장 기록이 꺼져 있으면 꺼짐 안내만."""
         self._stale = False
         s = self.settings
+        self.recommend.ensure_loaded()  # 꺼져 있으면 카드를 숨기고, 보이면 오늘 첫 진입에서만 워커 (M24)
         if s is None or not s.growth:
             self.overview = self.report = None
             self._refresh_heat()  # 꺼짐: 잔디 카드를 숨긴다 (기록·표시 모두 멈춤)

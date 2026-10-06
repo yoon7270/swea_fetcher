@@ -159,6 +159,112 @@ class GrowthWorker(BaseWorker):
         return res
 
 
+class RecommendWorker(BaseWorker):
+    """오늘의 추천 (M24): 카탈로그 갱신 · 수준·세트 계산 · AI 선별. 파일·네트워크·AI 는 전부 여기서 (UI 스레드 금지).
+
+    mode: "auto"(성장 탭이 처음 보일 때·날짜가 바뀐 뒤: 카탈로그 확인 → 규칙 세트 → AI → 오래된 카탈로그 조용히 갱신) /
+          "rules"(규칙 세트만 다시 읽기: 시작 수준 변경·해결 배지 갱신) / "shuffle"([다른 추천]) / "retry_ai"(동의·[다시 시도] 뒤 AI 만) /
+          "refresh_catalog"(수동 [새로 받기]/[다시 시도]).
+    consented: UI 스레드에서 미리 읽은 "동의받은 엔진 키" 집합 (QSettings 를 워커 스레드에서 읽지 않는다). touched: 사용자가 이미 만졌는지 (R11).
+    시그널: rule_ready(RecommendResult) / ai_started(list[str] 엔진 키) / ai_ready(RecommendResult) / catalog_progress(done, total) /
+            catalog_updated(CatalogStatus) / catalog_failed(code, hint, usable) / notice("logged_out") / 상속 failed(title, hint, detail).
+    cancel(): 플래그 + 등록된 AI 프로세스 트리 종료 (both 의 두 프로세스 모두). 카탈로그 갱신은 페이지 사이에서 멈춘다.
+    """
+
+    rule_ready = Signal(object)
+    ai_started = Signal(object)
+    ai_ready = Signal(object)
+    catalog_progress = Signal(int, int)
+    catalog_updated = Signal(object)
+    catalog_failed = Signal(str, str, bool)  # code, hint, 저장된 카탈로그를 쓸 수 있는가
+    notice = Signal(str)
+
+    def __init__(self, settings: Settings, mode: str = "auto", start_level: int | None = None, consented: frozenset | set = frozenset(),
+                 touched: Callable[[], bool] | None = None, parent=None) -> None:
+        super().__init__(parent)
+        self.settings, self.mode, self.start_level = settings, mode, start_level
+        self.consented = frozenset(consented)
+        self.touched = touched
+        self._procs: list[Any] = []
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+        for proc in list(self._procs):
+            ai_engine.kill_tree(proc)
+
+    def _on_start(self, proc) -> None:
+        self._procs.append(proc)
+        if self._cancel_requested:
+            ai_engine.kill_tree(proc)
+
+    def _cancelled(self) -> bool:
+        return self._cancel_requested
+
+    def _refresh(self, force: bool) -> bool:
+        """카탈로그를 (필요하면) 받는다. 실패는 catalog_failed 로 알리고 False. 새로 받았으면 catalog_updated."""
+        prev = service.catalog_status(self.settings)
+        try:
+            st = service.refresh_catalog(self.settings, progress=self.catalog_progress.emit, is_cancelled=self._cancelled, force=force)
+        except service.CatalogError as e:
+            self.catalog_failed.emit(e.code, e.hint, prev.usable)
+            return False
+        if st.fetched_at != prev.fetched_at:
+            self.catalog_updated.emit(st)
+        if not st.usable:
+            self.catalog_failed.emit("blocked", "", False)
+            return False
+        return True
+
+    def _rules(self, shuffle: bool = False) -> Any:
+        res = service.recommend_today(self.settings, start_level=self.start_level, shuffle=shuffle)
+        self.rule_ready.emit(res)
+        return res
+
+    def _ai(self, base: Any, retry: bool = False) -> None:
+        if not self.settings.recommend_ai or self._cancel_requested:
+            return
+        res = service.recommend_ai(
+            self.settings, base, consent_ok=lambda key: key in self.consented, on_start=self._on_start,
+            on_begin=self.ai_started.emit, is_cancelled=self._cancelled, is_touched=self.touched, retry=retry,
+        )
+        self.ai_ready.emit(res)
+
+    def work(self) -> None:
+        s = self.settings
+        if not service.recommend_enabled(s):
+            return None
+        if self.mode == "refresh_catalog":  # 수동 [새로 받기]/[다시 시도]: 받은 뒤 이어서 정답 목록·규칙·AI
+            if self._refresh(force=True):
+                self._tail()
+            return None
+        if self.mode == "rules":
+            self._rules()
+            return None
+        if self.mode == "shuffle":
+            self._rules(shuffle=True)
+            return None
+        if self.mode == "retry_ai":
+            self._ai(self._rules(), retry=True)
+            return None
+        # auto
+        usable = service.catalog_status(s).usable
+        if not usable and not self._refresh(force=False):
+            return None
+        self._tail()
+        if usable and not self._cancel_requested:  # 있던 카탈로그가 오래됐으면 마지막에 조용히 갱신
+            st = service.catalog_status(s)
+            if st.stale and st.auto_due and self._refresh(force=False):
+                self._rules()
+        return None
+
+    def _tail(self) -> None:
+        """카탈로그가 준비된 뒤: SWEA 정답 목록(필요할 때) → 규칙 세트 → AI."""
+        if service.refresh_passed(self.settings, is_cancelled=self._cancelled) < 0:
+            self.notice.emit("logged_out")
+        self._ai(self._rules())
+
+
 class FuncWorker(BaseWorker):
     """임의 함수를 워커에서 실행 (list_recent 등 파일 I/O)."""
 

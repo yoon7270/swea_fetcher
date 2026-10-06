@@ -380,6 +380,10 @@ class SettingsPage(QWidget):
         self.growth_enabled.setObjectName("GrowthEnabledCheck")
         self.growth_comment = Toggle("주간 AI 코멘트 자동 생성")
         self.growth_comment.setObjectName("GrowthCommentCheck")
+        self.recommend_enabled = Toggle("오늘의 추천 표시")  # M24
+        self.recommend_enabled.setObjectName("RecommendEnabledCheck")
+        self.recommend_ai = Toggle("추천에 AI 약점 분석 사용")
+        self.recommend_ai.setObjectName("RecommendAiCheck")
         gh3 = _hint("기록은 ~/.swea-fetch/coach/profile 에만 있고 GitHub 로 올라가지 않습니다. 풀이 잔디(하루에 푼 문제)도 여기에 저장됩니다.")
         self.growth_clear_btn = Button("성장 기록 지우기")  # 아래 "위험 영역" 카드에 놓인다
         set_class(self.growth_clear_btn, "danger")
@@ -432,6 +436,10 @@ class SettingsPage(QWidget):
         v8.addWidget(_toggle_row(self.growth_enabled, "AI 코치 응답에서 분류 태그만 저장합니다(코드·지문 저장 안 함). 끄면 태그 요청과 기록을 모두 멈춥니다."))
         v8.addWidget(_divider())
         v8.addWidget(_toggle_row(self.growth_comment, "주 1회, 집계 숫자와 분류 이름만 AI 로 보냅니다. 코드·지문·문제 번호는 보내지 않습니다."))
+        v8.addWidget(_divider())
+        v8.addWidget(_toggle_row(self.recommend_enabled, "SWEA 공개 문제 목록(약 1,160문제)을 주 1회 받아 수준에 맞는 문제를 추천합니다. 끄면 목록도 받지 않습니다."))
+        v8.addWidget(_divider())
+        v8.addWidget(_toggle_row(self.recommend_ai, "하루 1회, 약점 분류 이름·수준 숫자·후보 문제 제목만 AI 로 보냅니다. 코드·지문·푼 문제 목록은 보내지 않습니다."))
         v8.addWidget(_divider())
         v8.addLayout(_field("풀이 잔디 색", heat_col, _hint("성장 탭 맨 위 풀이 잔디의 색입니다. 기본은 현재 테마 색을 따라가고, 직접 고르면 그 색 하나로 고정됩니다. 기준색에서 4단계 농도가 만들어집니다.")))
         v8.addWidget(self.heat_sync_row)
@@ -533,6 +541,8 @@ class SettingsPage(QWidget):
         self.ai_clear_btn.clicked.connect(self._clear_ai_records)
         self.growth_enabled.toggled.connect(lambda on: self._growth_toggled("SWEA_GROWTH", on))
         self.growth_comment.toggled.connect(lambda on: self._growth_toggled("SWEA_GROWTH_COMMENT", on))
+        self.recommend_enabled.toggled.connect(lambda on: self._growth_toggled("SWEA_RECOMMEND", on))
+        self.recommend_ai.toggled.connect(lambda on: self._growth_toggled("SWEA_RECOMMEND_AI", on))
         self.heat_sync.toggled.connect(self._heat_sync_toggled)
         self.growth_clear_btn.clicked.connect(self._clear_growth)
         self.reduce_motion.toggled.connect(self._reduce_motion_toggled)
@@ -590,6 +600,9 @@ class SettingsPage(QWidget):
         self.growth_enabled.setChecked(settings.growth if settings else config._truthy(values.get("SWEA_GROWTH") or "1"))
         self.growth_comment.setChecked(settings.growth_comment if settings else config._truthy(values.get("SWEA_GROWTH_COMMENT") or "1"))
         self.growth_comment.setEnabled(self.growth_enabled.isChecked())
+        self.recommend_enabled.setChecked(settings.recommend if settings else config._truthy(values.get("SWEA_RECOMMEND") or "1"))
+        self.recommend_ai.setChecked(settings.recommend_ai if settings else config._truthy(values.get("SWEA_RECOMMEND_AI") or "1"))
+        self._sync_recommend_enabled()
         self._load_heat_sync(settings, values)
         self._loading_ai = False
         self._ai_status_stale = True
@@ -1007,11 +1020,19 @@ class SettingsPage(QWidget):
         if key == "SWEA_GROWTH":
             self.growth_comment.setEnabled(on)
             self.heat_sync.setEnabled(on)
+        if key in ("SWEA_GROWTH", "SWEA_RECOMMEND"):
+            self._sync_recommend_enabled()
         if self._loading_ai:
             return
         service.set_env_values(self.config_dir, **{key: "1" if on else "0"})
         self.status_message.emit("성장 기록 설정을 저장했습니다")
         self.coach_settings_changed.emit()
+
+    def _sync_recommend_enabled(self) -> None:
+        """오늘의 추천 토글: 성장 기록이 꺼지면 둘 다 비활성, 추천이 꺼지면 AI 약점 분석만 비활성 (M24)."""
+        growth_on = self.growth_enabled.isChecked()
+        self.recommend_enabled.setEnabled(growth_on)
+        self.recommend_ai.setEnabled(growth_on and self.recommend_enabled.isChecked())
 
     def _load_heat_sync(self, settings, values: dict) -> None:
         """잔디 동기화 토글 표시: 명시값(SWEA_SOLVED_SYNC) 우선, 비어 있으면 자동 기본값 (루트가 git 저장소+원격이면 켜짐). 저장 시그널은 막는다."""
@@ -1111,7 +1132,7 @@ class SettingsPage(QWidget):
         self.heat_picker.set_levels(heat_level_colors(base))
 
     def _clear_growth(self) -> None:
-        box = QMessageBox(QMessageBox.Icon.Warning, "성장 기록 지우기", "성장 리포트·분류 기록·풀이 잔디가 삭제됩니다.\nAI 응답 캐시·복습 일정과 풀이 파일은 건드리지 않습니다.\n풀이 저장소에 올라간 잔디 기록(.swea-fetch/solved)도 그대로라, 동기화가 켜져 있으면 다시 표시됩니다.", parent=self)
+        box = QMessageBox(QMessageBox.Icon.Warning, "성장 기록 지우기", "성장 리포트·분류 기록·풀이 잔디가 삭제됩니다 (오늘의 추천 기록 포함).\nAI 응답 캐시·복습 일정과 풀이 파일은 건드리지 않습니다.\n풀이 저장소에 올라간 잔디 기록(.swea-fetch/solved)도 그대로라, 동기화가 켜져 있으면 다시 표시됩니다.", parent=self)
         delete = box.addButton("지우기", QMessageBox.ButtonRole.DestructiveRole)
         set_class(delete, "danger")
         cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)

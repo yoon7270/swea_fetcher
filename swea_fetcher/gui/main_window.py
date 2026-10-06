@@ -181,6 +181,7 @@ class MainWindow(QMainWindow):
         self.growth_page.comment_requested.connect(self._growth_comment_requested)
         self.growth_page.cancel_requested.connect(self._growth_cancel)
         self.growth_page.problem_requested.connect(self._open_recent_problem)  # 풀이 잔디의 날짜 목록 → 문제 탭
+        self.growth_page.recommend_open_requested.connect(self._open_problem_by_number)  # 오늘의 추천 → 문제 탭 (저장 없음, M24)
         self.settings_page.heat_color_changed.connect(self.growth_page.apply_heat_color)
         self.settings_page.appearance_changed.connect(self.apply_appearance)
         self.fetch_page.problem_ready.connect(self._on_problem_ready)
@@ -682,7 +683,7 @@ class MainWindow(QMainWindow):
             self._growth_worker.wait(5000)
         if self._stmt_worker is not None:
             self._stmt_worker.wait(5000)
-        for p in (self.settings_page, self.check_page):  # 실행 중 QThread 가 파괴되지 않게
+        for p in (self.settings_page, self.check_page, self.growth_page):  # 실행 중 QThread 가 파괴되지 않게 (추천 워커는 AI 프로세스부터 취소)
             p.wait_workers()
         if self._update_worker is not None and self._update_worker.isRunning():
             self._update_worker.wait(3000)

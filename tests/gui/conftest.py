@@ -56,6 +56,64 @@ def _light_tokens():
     reset()
 
 
+from PySide6.QtCore import QObject, Signal  # noqa: E402
+
+
+class FakeRecommendWorker(QObject):
+    """오늘의 추천 워커 대역 (M24): 스레드·네트워크·AI 없음. 테스트가 시그널을 직접 내보내 흐름을 구동한다.
+
+    생성 기록(`instances`)에 mode·start_level·consented 가 남는다. finish() 로 끝났음을 알린다.
+    """
+
+    rule_ready = Signal(object)
+    ai_started = Signal(object)
+    ai_ready = Signal(object)
+    catalog_progress = Signal(int, int)
+    catalog_updated = Signal(object)
+    catalog_failed = Signal(str, str, bool)
+    notice = Signal(str)
+    failed = Signal(str, str, str)
+    finished = Signal()
+    instances: list = []
+
+    def __init__(self, settings, mode="auto", start_level=None, consented=frozenset(), touched=None, parent=None) -> None:
+        super().__init__(parent)
+        self.settings, self.mode, self.start_level, self.consented, self.touched = settings, mode, start_level, frozenset(consented), touched
+        self.running = False
+        self.cancelled = False
+        FakeRecommendWorker.instances.append(self)
+
+    def start(self) -> None:
+        self.running = True
+
+    def isRunning(self) -> bool:  # noqa: N802
+        return self.running
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+    def wait(self, _ms: int = 0) -> bool:
+        return True
+
+    def finish(self) -> None:
+        self.running = False
+        self.finished.emit()
+
+    @classmethod
+    def last(cls) -> "FakeRecommendWorker":
+        return cls.instances[-1]
+
+
+@pytest.fixture(autouse=True)
+def _fake_recommend_worker(monkeypatch):
+    """성장 탭이 열릴 때 카드가 띄우는 RecommendWorker 가 실제 스레드·네트워크를 쓰지 않게 한다. 실제 워커가 필요한 테스트는 직접 되돌린다."""
+    from swea_fetcher.gui import recommend_card
+
+    FakeRecommendWorker.instances = []
+    monkeypatch.setattr(recommend_card, "RecommendWorker", FakeRecommendWorker)
+    yield FakeRecommendWorker
+
+
 @pytest.fixture
 def valid_config(root_dir: Path, config_dir: Path, fake_keyring) -> Path:
     from swea_fetcher import service

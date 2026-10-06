@@ -172,3 +172,24 @@ E2E: `swea-fetch -v <첨부 링크 URL> _e2e_test` (문제 `AZq-gSmq_RfHBISS`, 2
 - 미실측: `submit.do` 의 실제 응답 (분류기가 실제 제출을 막아 사용자가 1회 실행해 확인해야 함). `AP` 의미. 언어별 `langType` 은 Python 만 확인.
 - **category 가 맞아야 제출 기록이 남는다 (2026-09-17 실측)**: `categoryType=BOX`+빈 `categoryId` 로 제출하면 채점은 되지만 문제의 '제출결과' 에 기록되지 않음(제출횟수 안 늘어남). 올바른 값은 문제를 연 경로: 공개 Problem / User Problem 은 `fnGoProblemTest(id, id, "CODE")` → `("CODE", contestProbId)`, Solving Club 상자는 `fnGoProblemTest(id, probBoxId, "BOX")` → `("BOX", probBoxId)` (`/main/js/common-problem.js`). `lookup.find_category` 가 색인의 발견 경로로 결정하고, 옛 색인엔 `box_id` 가 없어 클럽 상자를 다시 훑는다. 풀이 화면은 보낸 category 를 hidden 으로 그대로 돌려준다.
 - **제출 이력은 맥락(category)별로 따로 집계된다 (2026-09-17 실측, v0.6.2)**: 같은 문제 1225 가 공개 Problem(CODE)과 클럽 상자 `Queue(09.09)`(BOX)에 **같은 contestProbId `AV14uWl6AF0CFAYD`** 로 존재하는데, 풀이 화면의 '제출횟수/제출결과' 는 CODE 로 열면 2/99, BOX(probBoxId=AZ-xsmtqr73HBIS2)로 열면 1/99 로 서로 다름. → 제출 대상은 사용자가 채점받는 맥락이어야 하므로 `lookup.find_category` 는 번호가 클럽 상자에 있으면 BOX 를 우선한다(없으면 CODE). box_scanned 플래그로 재스캔 방지. 같은 번호가 여러 상자에 있으면 **최신 상자**로 제출한다(상자 목록은 최신순). [다시 찾기]/`--refresh-index` 로 재스캔.
+
+## M24 공개 문제 목록 실측 (2026-10-06, 읽기 전용 12요청)
+
+`POST /main/code/problem/problemList.do` (form-urlencoded). 익명 7건(폼 구조 확인용 GET 1건 포함) + 로그인 세션 5건 = 12건(저장 세션 확인 `userInformation.do` 2건 별도), 요청 간 1.2초 이상, 429·차단 징후 없음, 응답 0.13~0.42초. 제출·명시 로그인은 하지 않음.
+
+| 확인 | 결과 |
+|---|---|
+| P1 익명 요청 | **200 으로 목록이 온다.** 카탈로그 갱신은 익명 세션(쿠키 없음)으로 한다 → 로그인 가드/실패 카운터 무영향 |
+| P2 `pageSize` | 폼 select 값 `10/20/30`. **`pageSize=30` 적용됨**(한 페이지 30행, ALL 기준 39페이지 ≈ 1,160문제). `pageIndex` hidden, `orderBy=FIRST_REG_DATETIME`(등록순, 최신 먼저) |
+| P3 `selectCodeLang` | 값 `ALL/CCPP/JAVA/PYTHON`. **`PYTHON` 이 목록을 줄인다: 31페이지(약 900대) vs ALL 39페이지.** `CATALOG_LANG="PYTHON"` |
+| P4 "내가 정답한 문제" | 체크박스 `passFilterYn=Y`(= "정답"), `submitFilterYn=Y`(= "풀이중", 시도했으나 미정답; 해당 없으면 "해당 목록이 없습니다."), `solutionYn=Y`(풀이 있음). 로그인 세션에서 `passFilterYn=Y` 는 `정답` 배지가 붙은 행만 돌려줌(PYTHON/ALL 결과 동일). 단 앱 기록의 해결 문제와는 겹치지 않았다 — 앱 기록 해결은 Solving Club 상자(BOX) 맥락이라 공개 목록(CODE) 집계와 별개로 보인다(1225 사례와 일치). 의미는 행의 `정답` 배지로 확인 → `PASSED_FILTER=("passFilterYn","Y")`, 앱 기록 제외와 **병행**한다 |
+| P5 행별 내 상태 | **있다.** 로그인 세션의 행에서만 제목 링크(`span.week_text a`) 안에 `<span class="badge badge-white">정답</span>` 이 붙는다(익명 행엔 없음, 필터 없는 목록에서도 동일). 제목 추출 시 링크 안의 `span`(굵은 `[댓글수]` 와 `badge`)을 모두 제거해야 한다 |
+| P6 난이도 배지 | 행 `span.badge` 텍스트 `D1`~`D8`(클래스 `badgeC-d{n}`). **배지가 아예 없는 행이 있다**(가장 오래된 번호대, 마지막 페이지) → `lv=0` |
+| P7 순서 안정성 | 같은 요청 2회 동일 순서. 등록순이라 새 문제가 올라오면 페이지가 밀리므로 번호 중복 제거로 보정 |
+| P8 부하 | 평균 0.25초/요청. 기본 0.5초 ± 0.2 간격이면 충분 |
+
+행 구조(`div.widget-box-sub`): `span.week_num` `"27008."`, `span.week_text a[onclick="fn_move_page('<ID>')"]`(제목 + 굵은 `[N]` span), 난이도 `span.badge`(`widget-toolbar-sub` 안), 정보 상자 `div.infobox-data-code` 의 `span.code-sub-item`(라벨: 참여자/제출/정답률/추천/포인트) ↔ `span.code-sub-mum`(값: `785`, `42K`, `7.49%`). 목록 아래 `ul.pagination` 텍스트가 `"1 (current) / 31"` 형태(`(current)` 가 끼므로 정규식에 반영).
+
+주의: 페이지에는 **같은 `div.widget-box-sub` 가 두 영역**에 있다 — 위쪽 "인기" 위젯(6행, `div.col-md-5` 안)과 실제 목록(`div.problem-list`). 실제 목록만 읽어야 한다(`div.problem-list div.widget-box-sub`). 번호 중복 제거로 이중 안전장치.
+
+테스트 픽스처(`tests/fixtures/catalog_page_*.html`)는 익명 응답에서 행 조각과 페이지 문구만 잘라 저장했다(헤더·사용자 메뉴·닉네임·ID 없음). `정답` 배지 행은 익명 행에 같은 마크업을 손으로 끼워 만들었다(실제 내 이력 아님).
