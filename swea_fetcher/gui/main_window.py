@@ -49,6 +49,7 @@ PAGES = (
 APP_TITLE = "SWEA Fetch"
 REDUCE_MOTION_KEY = "ui/reduce_motion"  # QSettings: 동작 줄이기 (bool, 기본 False)
 NAV_HISTORY_MAX = 50  # 뒤로 가기 기록 상한
+UNSAVED_TOPIC = "preview"  # 저장 안 한 문제의 지문만 가져올 때 쓰는 자리표시 주제 (dry-run 이라 폴더를 만들지 않는다)
 UPDATE_CHECK_DELAY_MS = 1500  # 창이 뜬 뒤에 조회 (시작 속도에 영향 없게). app.main() 이 사용
 GROWTH_KICK_DELAY_MS = 1500  # 시작 후 지연 실행 (M19 성장 리포트 확정·주간 코멘트)
 GROWTH_TICK_MS = 30 * 60 * 1000  # 켜 둔 채 월요일을 넘기는 경우 대응: 30분마다 파일만 확인
@@ -185,6 +186,7 @@ class MainWindow(QMainWindow):
         self.fetch_page.problem_ready.connect(self._on_problem_ready)
         self.fetch_page.cached_problem_requested.connect(self._show_cached_problem)
         self.history_page.problem_requested.connect(self._open_recent_problem)
+        self.problem_page.open_requested.connect(self._open_problem_by_number)
         self.settings_page.cache_settings_changed.connect(self.problem_page.refresh_footer)
         self.settings_page.settings_changed.connect(lambda: self.reload_settings(stay=True))
         self.settings_page.timeout_changed.connect(lambda _v: self.check_page.refresh_hint())
@@ -269,6 +271,25 @@ class MainWindow(QMainWindow):
         self.problem_page.show_cached(cached, problem_dir)
         self.goto("problem")
 
+    def _open_problem_by_number(self, num: int) -> None:
+        """문제 탭의 번호 입력: 저장한 문제면 그 폴더(입출력 포함)로, 아니면 캐시 → SWEA 에서 지문만 (저장하지 않음)."""
+        if self.settings is None:
+            self.flash("먼저 설정에서 루트 폴더와 계정을 정해 주세요", 6000)
+            return
+        try:
+            found = service.find_problem(self.settings, num)
+        except OSError:
+            found = None
+        if found is not None:
+            self._open_recent_problem(found.topic, num)
+            return
+        cached = content_cache.load(self.settings, num)
+        if cached is not None:
+            self.problem_page.show_cached(cached, None)
+            self.goto("problem")
+            return
+        self._fetch_statement(num, UNSAVED_TOPIC, None, cache_topic="")
+
     def _open_recent_problem(self, topic: str, num: int) -> None:
         """최근 탭에서 고른 문제의 지문을 문제 탭으로. 캐시에 있으면 바로, 없으면 지문만 가져온다 (저장·덮어쓰기 없음)."""
         if self.settings is None:
@@ -282,28 +303,35 @@ class MainWindow(QMainWindow):
             self.problem_page.show_cached(cached, problem_dir)
             self.goto("problem")
             return
-        if self._stmt_worker is not None:  # 클릭·Enter 중복 방지
+        self._fetch_statement(num, topic, problem_dir)
+
+    def _fetch_statement(self, num: int, topic: str, problem_dir: Path | None, cache_topic: str | None = None) -> None:
+        """지문만 1회 가져온다 (dry-run: 첨부·저장 없음). cache_topic 이 주어지면 캐시·표시에 그 주제를 쓴다 (저장 안 한 문제는 "")."""
+        if self._stmt_worker is not None or self.settings is None:  # 클릭·Enter 중복 방지
             return
         opts = service.FetchOptions(dry_run=True, skeleton_only=True, with_content=True)  # 첨부·저장 없이 페이지만
         w = FetchWorker(self.settings, str(num), topic, opts, self)
-        w.finished_ok.connect(lambda oc, d=problem_dir: self._on_statement_fetched(oc, d))
+        w.finished_ok.connect(lambda oc, d=problem_dir, t=cache_topic: self._on_statement_fetched(oc, d, t))
         w.failed.connect(lambda title, _hint, _detail: self.flash(f"지문을 가져오지 못했습니다: {title}", 8000))
         w.finished.connect(self._clear_stmt_worker)
         self._stmt_worker = w
+        self.problem_page.set_open_busy(True)
         self.statusBar().showMessage(f"{num} 지문 가져오는 중…")
         w.start()
 
-    def _on_statement_fetched(self, outcome, problem_dir: Path | None) -> None:
+    def _on_statement_fetched(self, outcome, problem_dir: Path | None, cache_topic: str | None = None) -> None:
         self.statusBar().clearMessage()
         info = outcome.info
         num = info.num if info.num is not None else 0
+        topic = outcome.topic if cache_topic is None else cache_topic
         if outcome.content is not None and self.settings is not None and self.qs.value("problem/cache_enabled", True, type=bool):
-            content_cache.save(self.settings, num, outcome.topic, info.title, outcome.content)
-        cached = content_cache.CachedStatement(num, outcome.topic, info.title, datetime.now().isoformat(timespec="seconds"), outcome.content)
+            content_cache.save(self.settings, num, topic, info.title, outcome.content)
+        cached = content_cache.CachedStatement(num, topic, info.title, datetime.now().isoformat(timespec="seconds"), outcome.content)
         self.problem_page.show_cached(cached, problem_dir, badge="최신")
         self.goto("problem")
 
     def _clear_stmt_worker(self) -> None:
+        self.problem_page.set_open_busy(False)
         if self._stmt_worker is not None:
             self._stmt_worker.deleteLater()
         self._stmt_worker = None

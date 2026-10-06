@@ -359,6 +359,37 @@ def test_list_recent_sorted_by_mtime_and_limited(settings):
     assert [i.num for i in service.list_recent(settings.root, limit=2)] == [3, 2]
 
 
+def test_list_recent_no_limit_returns_all(settings):
+    base = time.time() - 10_000
+    for i in range(1, 26):
+        _make_problem(settings.root, "sim", i, f"t{i}", base + i)
+    assert len(service.list_recent(settings)) == 20
+    assert len(service.list_recent(settings, limit=None)) == 25
+
+
+def test_list_recent_fills_missing_title_from_app_records(settings, solver_html):
+    """코드 첫 줄 `# 번호. 제목` 이 지워진 문제는 지문 캐시 → 코치 기록 → 번호 색인 순으로 제목을 채운다."""
+    from swea_fetcher import content_cache, lookup, parser
+
+    base = time.time() - 10_000
+    for n in (11, 12, 13, 14):
+        _make_problem(settings.root, "sim", n, None, base + n)
+    content_cache.save(settings, 11, "sim", "캐시 제목", parser.parse_content(solver_html))
+    lookup.save_index(settings, {"11": {"id": "X", "title": "[01] 색인 제목"}, "12": {"id": "Y", "title": "[07] 항아리 게임"}, "13": None})
+    titles = {i.num: i.title for i in service.list_recent(settings, limit=None)}
+    assert titles == {11: "캐시 제목", 12: "항아리 게임", 13: None, 14: None}
+    assert service.list_recent(settings.root)[0].title is None  # 경로로 부르면 보충하지 않음 (MCP·테스트 호환)
+
+
+def test_find_problem_returns_saved_folder(settings):
+    base = time.time() - 10_000
+    _make_problem(settings.root, "sim", 7, "seven", base)
+    _make_problem(settings.root, "bfs", 7, "seven", base + 50)
+    found = service.find_problem(settings, 7)
+    assert found is not None and found.topic == "bfs"
+    assert service.find_problem(settings, 8) is None
+
+
 def test_list_recent_empty(settings):
     assert service.list_recent(settings) == []
 

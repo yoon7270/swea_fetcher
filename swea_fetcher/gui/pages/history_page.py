@@ -1,5 +1,5 @@
-"""최근 페이지 (스펙 §6.3·§17.12): {topic}/{num}/ 를 수정 시각순으로. 문제별 상태 칩·왼쪽 띠·복습 태그(M22).
-더블클릭/Enter → 검증, 우클릭 → 메뉴."""
+"""최근 페이지 (스펙 §6.3·§17.12): 루트의 {topic}/{num}/ 전부를 수정 시각순으로. 문제별 상태 칩·왼쪽 띠·복습 태그(M22).
+전체 · 푼 문제 · 안 푼 문제 필터와 번호·제목·주제 검색. 클릭/Enter → 문제 보기, 우클릭 → 메뉴."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QStackedLayout,
     QStyle,
     QStyledItemDelegate,
@@ -26,9 +27,9 @@ from ... import service
 from ...config import Settings
 from ..theme import tokens
 from ..theme.bus import bus
-from ..widgets import AppMenu, Banner, Button, EmptyState, open_in_editor, open_in_explorer, editor_tooltip, set_class, svg_icon
+from ..widgets import AppMenu, Banner, Button, EmptyState, SegmentedControl, open_in_editor, open_in_explorer, editor_tooltip, set_class, svg_icon
 
-LIMIT = 20
+FILTERS = (("all", "전체", "nav-history"), ("solved", "푼 문제", "status-pass"), ("unsolved", "안 푼 문제", "status-none"))
 REVIEW_MAX_ROWS = 5  # 복습 카드에 보여줄 최대 항목 (나머지는 "외 N개")
 COL_STATUS, COL_NUM, COL_TITLE, COL_TOPIC, COL_TIME = range(5)
 COL_W_STATUS, COL_W_NUM, COL_W_TOPIC, COL_W_TIME, TITLE_MIN_W = 128, 84, 112, 124, 140  # 번호 84: 스펙 72 는 항목 좌우 패딩 16×2 를 빼면 5자리 번호가 잘린다
@@ -148,7 +149,9 @@ class HistoryPage(QWidget):
         super().__init__(parent)
         self.setObjectName("page")
         self.settings: Settings | None = None
-        self._items: list[service.RecentItem] = []
+        self._items: list[service.RecentItem] = []  # 표에 보이는 행 (필터 적용 후)
+        self._all: list[service.RecentItem] = []  # 루트의 전체 문제
+        self._stats: dict[int, service.ProblemStatus] = {}
         self._build()
 
     def _build(self) -> None:
@@ -158,9 +161,9 @@ class HistoryPage(QWidget):
         root.setSpacing(tokens.SPACE * 2)
         head = QHBoxLayout()
         head.setSpacing(tokens.BTN_GAP)
-        title = QLabel("최근 저장")
+        title = QLabel("저장한 문제")
         set_class(title, "title")
-        self.count_label = QLabel(f"최근 {LIMIT}개")
+        self.count_label = QLabel()
         set_class(self.count_label, "hint")
         self.count_label.hide()
         self.refresh_btn = Button("새로고침")
@@ -176,6 +179,20 @@ class HistoryPage(QWidget):
         hint = QLabel("클릭 = 문제 보기 · 우클릭 = 에디터·폴더 열기·검증")
         set_class(hint, "hint")
         root.addWidget(hint)
+
+        # 필터 (루트 전체 기준): 전체 · 푼 문제(Pass) · 안 푼 문제(오답·시간 초과·런타임 오류·미제출) + 검색
+        bar = QHBoxLayout()
+        bar.setSpacing(tokens.BTN_GAP)
+        self.filter_seg = SegmentedControl(items=FILTERS, default="all", name="문제 필터")
+        self.filter_seg.setObjectName("HistoryFilter")
+        self.search = QLineEdit()
+        self.search.setObjectName("HistorySearch")
+        self.search.setPlaceholderText("번호 · 제목 · 주제 검색")
+        self.search.setClearButtonEnabled(True)
+        self.search.setAccessibleName("저장한 문제 검색")
+        bar.addWidget(self.filter_seg)
+        bar.addWidget(self.search, 1)
+        root.addLayout(bar)
 
         # 복습 카드 (M17): 항목이 있을 때만. 최근 20개 표와 별개로 조회한다 (표에 없는 문제도 보이게)
         self.review_card = QFrame()
@@ -211,11 +228,15 @@ class HistoryPage(QWidget):
         self.table.setShowGrid(False)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.empty = EmptyState("아직 저장한 문제가 없어요", "저장 페이지에서 문제 번호와 주제를 입력하면 여기에 쌓입니다", "저장 페이지로", icon="nav-history")
+        self.no_match = EmptyState("조건에 맞는 문제가 없어요", "필터나 검색어를 바꿔 보세요", icon="nav-history")
         self.stack.addWidget(self.table)
         self.stack.addWidget(self.empty)
+        self.stack.addWidget(self.no_match)
         root.addWidget(holder, 1)
 
         self.refresh_btn.clicked.connect(self.refresh)
+        self.filter_seg.selected_changed.connect(lambda _k: self._apply_filter())
+        self.search.textChanged.connect(lambda _t: self._apply_filter())
         QShortcut(QKeySequence(Qt.Key.Key_F5), self, activated=self.refresh)
         self.table.cellClicked.connect(self._clicked)
         self.table.cellActivated.connect(self._clicked)  # Enter
@@ -244,19 +265,52 @@ class HistoryPage(QWidget):
             self.table.setColumnHidden(COL_TOPIC, narrow)
 
     def refresh(self) -> None:
-        """디스크 stat 20개 — 스펙 §6.3 에 따라 UI 스레드 허용."""
+        """루트 전체 폴더 stat (문제 수백 개 수준) — UI 스레드 허용 (스펙 §6.3)."""
         self._refresh_reviews()
-        if self.settings is None:
-            self._fill([])
-            return
-        try:
-            items = service.list_recent(self.settings.root, limit=LIMIT)
-        except OSError as e:
-            self.banner.show_message("error", f"루트 폴더를 읽을 수 없습니다: {self.settings.root}", str(e), [("settings", "설정으로 이동")])
-            self._fill([])
-            return
-        self.banner.hide()
-        self._fill(items)
+        items: list[service.RecentItem] = []
+        if self.settings is not None:
+            try:
+                items = service.list_recent(self.settings, limit=None)
+            except OSError as e:
+                self.banner.show_message("error", f"루트 폴더를 읽을 수 없습니다: {self.settings.root}", str(e), [("settings", "설정으로 이동")])
+            else:
+                self.banner.hide()
+        self._all = items
+        self._stats = service.problem_statuses(self.settings, [it.num for it in items]) if (items and self.settings is not None) else {}
+        self._update_counts()
+        self._apply_filter()
+
+    @staticmethod
+    def _is_solved(st) -> bool:
+        return st is not None and st.key == "pass"
+
+    def _update_counts(self) -> None:
+        """필터 칸에 개수, 머리글 오른쪽에 상태 요약 (Pass 12 · 오답 3 …, 0 인 것 생략) — 모두 루트 전체 기준."""
+        total = len(self._all)
+        solved_n = sum(1 for it in self._all if self._is_solved(self._stats.get(it.num)))
+        numbers = {"all": total, "solved": solved_n, "unsolved": total - solved_n}
+        for key, label, _icon in FILTERS:
+            self.filter_seg.set_label(key, f"{label} {numbers[key]}" if total else label)
+        counts: dict[str, int] = {}
+        for it in self._all:
+            st = self._stats.get(it.num)
+            if st is not None:
+                counts[st.key] = counts.get(st.key, 0) + 1
+        self.count_label.setText(" · ".join(f"{service.STATUS_LABELS[k]} {counts[k]}" for k in service.STATUS_ORDER if counts.get(k)))
+        self.count_label.setVisible(bool(counts))
+
+    def _apply_filter(self) -> None:
+        mode = self.filter_seg.value()
+        q = self.search.text().strip().lower()
+        rows = []
+        for it in self._all:
+            done = self._is_solved(self._stats.get(it.num))
+            if (mode == "solved" and not done) or (mode == "unsolved" and done):
+                continue
+            if q and q not in f"{it.num} {it.title or ''} {it.topic}".lower():
+                continue
+            rows.append(it)
+        self._fill(rows)
 
     def _refresh_reviews(self) -> None:
         """복습 예약 카드 (제목 + 항목 최대 5개 + 행 끝 [✕]). 상태는 색만이 아니라 글자로도 구분 (도래: 오늘 복습/N일 지남, 예정: N일 뒤)."""
@@ -319,8 +373,7 @@ class HistoryPage(QWidget):
         self._items = list(items)
         self.table.setRowCount(len(items))
         p = tokens.current()
-        stats = service.problem_statuses(self.settings, [it.num for it in items]) if (items and self.settings is not None) else {}
-        counts: dict[str, int] = {}
+        stats = self._stats
         for i, it in enumerate(items):
             st = stats.get(it.num)
             vals = (st.label if st else "", str(it.num), it.title or "—", it.topic, it.saved_at.strftime("%m-%d %H:%M"))
@@ -340,15 +393,7 @@ class HistoryPage(QWidget):
                     tip = f"{it.topic} · {it.path}"  # 주제 열이 숨겨져도 툴팁에서 볼 수 있다
                 cell.setToolTip(tip)
                 self.table.setItem(i, col, cell)
-            if st is not None:
-                counts[st.key] = counts.get(st.key, 0) + 1
-        self.stack.setCurrentIndex(0 if items else 1)
-        if stats:  # 상태 요약 (Pass 12 · 오답 3 …, 0 인 것 생략). 20개 미만이어도 표시
-            self.count_label.setText(" · ".join(f"{service.STATUS_LABELS[k]} {counts[k]}" for k in service.STATUS_ORDER if counts.get(k)))
-            self.count_label.setVisible(bool(counts))
-        else:
-            self.count_label.setText(f"최근 {LIMIT}개")
-            self.count_label.setVisible(len(items) >= LIMIT)
+        self.stack.setCurrentIndex(0 if items else (1 if not self._all else 2))
         self._apply_topic_visibility()
 
     @staticmethod

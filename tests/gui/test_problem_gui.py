@@ -193,7 +193,11 @@ def test_empty_state(main_window):
     pp = main_window.problem_page
     assert not pp.has_content()
     assert pp.empty.button is not None
-    assert "아직 가져온 문제가 없습니다" in [c.text() for c in pp.empty.findChildren(type(pp.title))][0]
+    assert "아직 연 문제가 없습니다" in [c.text() for c in pp.empty.findChildren(type(pp.title))][0]
+    keys = []
+    pp.goto_requested.connect(keys.append)
+    pp.empty.button.click()
+    assert keys == ["history"]
 
 
 def test_missing_content_shows_warning_banner(main_window, problem_info):
@@ -489,3 +493,49 @@ def test_problem_tab_no_samples_without_folder(main_window, content):
     pp = main_window.problem_page
     pp.show_cached(CachedStatement(25730, "sim", "항아리 게임", "2026-09-29T00:00:00", content))
     assert "samples" not in pp.browser.toHtml() and pp.browser._samples == []
+
+
+def test_open_by_number_uses_saved_folder(main_window, qtbot, monkeypatch, content):
+    """문제 탭 번호 입력: 저장한 문제면 그 폴더의 입출력과 함께 (캐시가 있으면 네트워크 없이)."""
+    w = main_window
+    d = w.settings.root / "BFS" / "25730"
+    d.mkdir(parents=True)
+    (d / "25730.py").write_text("print(1)\n", encoding="utf-8")
+    (d / "input.txt").write_text("1 2\n", encoding="utf-8")
+    content_cache.save(w.settings, 25730, "BFS", "항아리 게임", content)
+    monkeypatch.setattr(service, "fetch_problem", lambda *a, **k: pytest.fail("캐시가 있으면 네트워크를 쓰지 않아야 함"))
+    pp = w.problem_page
+    pp.num_edit.setText("25730")
+    pp.open_btn.click()
+    assert w.stack.currentWidget() is pp and pp.has_content()
+    assert not pp.open_dir_btn.isHidden() and "1 2" in pp.browser.toPlainText()
+
+
+def test_open_by_number_unsaved_fetches_statement_only(main_window, qtbot, monkeypatch, problem_info, content):
+    """저장 안 한 문제: 지문만 dry-run 으로 가져와 보여 주고, 루트에 아무 폴더도 만들지 않는다. 캐시 주제는 빈 값."""
+    w = main_window
+    calls = []
+
+    def fake(settings, target, topic, opts, progress):
+        calls.append((target, opts))
+        return _statement_outcome(problem_info, content, topic=topic)
+
+    monkeypatch.setattr(service, "fetch_problem", fake)
+    pp = w.problem_page
+    pp.num_edit.setText(str(problem_info.num))
+    pp.num_edit.returnPressed.emit()
+    assert not pp.open_btn.isEnabled()  # 가져오는 동안 잠금
+    qtbot.waitUntil(lambda: w._stmt_worker is None, timeout=WAIT)
+    (target, opts), = calls
+    assert target == str(problem_info.num) and opts.dry_run and opts.skeleton_only
+    assert pp.open_btn.isEnabled() and pp.has_content() and pp.badge.text() == "최신"
+    assert pp.open_dir_btn.isHidden()
+    assert list(w.settings.root.iterdir()) == [] if w.settings.root.exists() else True
+    assert content_cache.load(w.settings, problem_info.num).topic == ""
+
+
+def test_open_by_number_ignores_empty_input(main_window, monkeypatch):
+    w = main_window
+    monkeypatch.setattr(service, "fetch_problem", lambda *a, **k: pytest.fail("빈 입력은 요청하지 않음"))
+    w.problem_page.open_btn.click()
+    assert w._stmt_worker is None

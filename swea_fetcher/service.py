@@ -352,8 +352,10 @@ def read_skeleton_title(py_path: Path) -> str | None:
     return m.group(2).strip() or None
 
 
-def list_recent(settings_or_root: Settings | Path, limit: int = 20) -> list[RecentItem]:
-    """root 아래 {topic}/{num}/ 폴더를 수정 시각 내림차순으로. topic 은 `test/IM_test` 표기."""
+def list_recent(settings_or_root: Settings | Path, limit: int | None = 20) -> list[RecentItem]:
+    """root 아래 {topic}/{num}/ 폴더를 수정 시각 내림차순으로. topic 은 `test/IM_test` 표기. limit=None 이면 전부.
+
+    Settings 로 부르면 코드 첫 줄 주석이 없어 제목을 못 읽은 문제를 앱 기록(지문 캐시·코치·잔디·번호 색인)으로 채운다."""
     root = settings_or_root.root if isinstance(settings_or_root, Settings) else Path(settings_or_root)
     items: list[RecentItem] = []
     for topic in list_topics(root):
@@ -372,7 +374,52 @@ def list_recent(settings_or_root: Settings | Path, limit: int = 20) -> list[Rece
             num = int(d.name)
             items.append(RecentItem(num, read_skeleton_title(d / f"{num}.py"), topic, d, datetime.fromtimestamp(mtime)))
     items.sort(key=lambda it: it.saved_at, reverse=True)
-    return items[:limit]
+    if limit is not None:
+        items = items[:limit]
+    if isinstance(settings_or_root, Settings):
+        _fill_missing_titles(settings_or_root, items)
+    return items
+
+
+_INDEX_TITLE_PREFIX_RE = re.compile(r"^\s*\[\d+\]\s*")  # 문제 상자 제목 "[07] 항아리 게임" 의 순번
+
+
+def _fill_missing_titles(settings: Settings, items: list[RecentItem]) -> None:
+    """제목이 없는 항목(코드 첫 줄 `# 번호. 제목` 이 지워진 경우)을 앱 기록에서 채운다. 실패해도 예외 없음 (제목은 부가 정보).
+
+    순서: 지문 캐시(SWEA 원래 제목) → 코치 기록 → 풀이 잔디 → 문제 번호 색인(상자 제목, 앞 순번 제거)."""
+    missing = [it for it in items if not it.title]
+    if not missing:
+        return
+    known: dict[int, str] = {}
+    try:
+        for n, rec in coach._load_records(settings).items():
+            if rec.title and str(n).isdigit():
+                known.setdefault(int(n), rec.title)
+        for day in solved.load(settings).values():
+            for s_it in day:
+                if s_it.title:
+                    known.setdefault(s_it.num, s_it.title)
+        for n, entry in lookup.load_index(settings).items():
+            title = _INDEX_TITLE_PREFIX_RE.sub("", str((entry or {}).get("title") or "")).strip() if isinstance(entry, dict) else ""
+            if title and str(n).isdigit():
+                known.setdefault(int(n), title)
+    except Exception:  # noqa: BLE001
+        log.debug("제목 보충용 기록을 읽지 못했습니다", exc_info=True)
+    for it in missing:
+        try:
+            cached = content_cache.load(settings, it.num)
+        except Exception:  # noqa: BLE001
+            cached = None
+        it.title = (cached.title if cached is not None and cached.title else None) or known.get(it.num) or None
+
+
+def find_problem(settings: Settings, num: int) -> RecentItem | None:
+    """루트에 저장된 그 번호의 문제 폴더 (여러 주제에 있으면 가장 최근에 고친 것). 없으면 None."""
+    for it in list_recent(settings.root, limit=None):
+        if it.num == int(num):
+            return it
+    return None
 
 
 def write_env(config_dir: Path, root: Path, user_id: str, input_name: str = "input.txt", output_name: str = "output.txt") -> Path:

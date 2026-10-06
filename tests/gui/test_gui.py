@@ -482,6 +482,36 @@ def test_history_page_lists_and_click_requests_problem(main_window, qtbot):
     assert sig.args == ["DP", 42]
 
 
+def test_history_page_lists_all_problems_with_solved_filter_and_search(main_window):
+    """최근 탭은 루트 전체 문제를 보여 주고, 전체 · 푼 문제 · 안 푼 문제 필터와 검색을 지원한다 (개수는 필터 칸에)."""
+    from swea_fetcher import solved
+
+    w = main_window
+    for i in range(1, 26):
+        d = w.settings.root / "sim" / str(i)
+        d.mkdir(parents=True)
+        (d / f"{i}.py").write_text(f"# {i}. 문제{i}\n", encoding="utf-8")
+    solved.record(w.settings, 3, "sim", "문제3", "swea")
+    solved.record(w.settings, 5, "sim", "문제5", "swea")
+    hp = w.history_page
+    hp.refresh()
+    assert hp.table.rowCount() == 25  # 20개 제한 없음
+    labels = {k: b.text() for k, b in hp.filter_seg.buttons.items()}
+    assert labels == {"all": "전체 25", "solved": "푼 문제 2", "unsolved": "안 푼 문제 23"}
+    assert hp.count_label.text() == "Pass 2 · 미제출 23"
+    hp.filter_seg.set_value("solved", emit=True)
+    assert sorted(int(hp.table.item(r, 1).text()) for r in range(hp.table.rowCount())) == [3, 5]
+    hp.filter_seg.set_value("unsolved", emit=True)
+    assert hp.table.rowCount() == 23
+    hp.search.setText("문제2")  # 제목 검색: 문제2, 문제20~25
+    assert sorted(int(hp.table.item(r, 1).text()) for r in range(hp.table.rowCount())) == [2, 20, 21, 22, 23, 24, 25]
+    hp.search.setText("없는말")
+    assert hp.table.rowCount() == 0 and hp.stack.currentWidget() is hp.no_match
+    hp.search.clear()
+    hp.filter_seg.set_value("all", emit=True)
+    assert hp.table.rowCount() == 25 and hp.stack.currentIndex() == 0
+
+
 def test_history_page_empty_state(main_window):
     hp = main_window.history_page
     hp.refresh()

@@ -11,8 +11,8 @@ import re
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QImage, QKeySequence, QShortcut, QTextDocument
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QStackedLayout, QTextBrowser, QVBoxLayout, QWidget
+from PySide6.QtGui import QImage, QIntValidator, QKeySequence, QShortcut, QTextDocument
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QStackedLayout, QTextBrowser, QVBoxLayout, QWidget
 
 from ...config import Settings
 from ...content_cache import CachedStatement
@@ -184,6 +184,7 @@ class _StatementBrowser(QTextBrowser):
 class ProblemPage(QWidget):
     status_message = Signal(str)
     goto_requested = Signal(str)
+    open_requested = Signal(int)  # 문제 번호로 열기 — 메인이 저장 폴더·캐시·SWEA 순으로 찾는다
 
     def __init__(self, qsettings: QSettings, parent=None) -> None:
         super().__init__(parent)
@@ -199,14 +200,42 @@ class ProblemPage(QWidget):
 
     # --- UI -----------------------------------------------------------------------
     def _build(self) -> None:
-        self.stack = QStackedLayout(self)
-        self.empty = EmptyState("아직 가져온 문제가 없습니다", "저장 탭에서 문제를 가져오면 지문이 여기에 표시됩니다", "저장 탭으로", icon="nav-problem")
+        outer = QVBoxLayout(self)
+        m = tokens.SPACE * 3
+        outer.setContentsMargins(m, m, m, 0)
+        outer.setSpacing(0)
+        # 번호로 열기: 저장한 문제면 그 폴더의 입출력과 함께, 아니면 캐시 → SWEA 에서 지문만 (저장하지 않음)
+        open_bar = QHBoxLayout()
+        open_bar.setSpacing(tokens.BTN_GAP)
+        self.num_edit = QLineEdit()
+        self.num_edit.setObjectName("ProblemNumber")
+        self.num_edit.setPlaceholderText("문제 번호로 열기")
+        self.num_edit.setValidator(QIntValidator(1, 99_999_999, self))
+        self.num_edit.setAccessibleName("문제 번호")
+        self.num_edit.setMaximumWidth(240)
+        self.open_btn = Button("열기")
+        set_class(self.open_btn, "tonal")
+        self.open_btn.setToolTip("저장한 문제면 폴더의 입출력과 함께, 아니면 SWEA 에서 지문만 가져와 보여 줍니다 (저장하지 않음)")
+        open_bar.addWidget(self.num_edit)
+        open_bar.addWidget(self.open_btn)
+        open_bar.addStretch(1)
+        outer.addLayout(open_bar)
+        stack_holder = QWidget()
+        outer.addWidget(stack_holder, 1)
+        self.stack = QStackedLayout(stack_holder)
+        self.empty = EmptyState(
+            "아직 연 문제가 없습니다",
+            "위에 문제 번호를 입력하거나, 최근 탭·성장 탭의 잔디에서 문제를 고르면 지문이 여기에 표시됩니다",
+            "최근 탭으로",
+            icon="nav-problem",
+        )
         if self.empty.button:
-            self.empty.button.clicked.connect(lambda: self.goto_requested.emit("fetch"))
+            self.empty.button.clicked.connect(lambda: self.goto_requested.emit("history"))
+        self.num_edit.returnPressed.connect(self._request_open)
+        self.open_btn.clicked.connect(self._request_open)
         holder = QWidget()
         root = QVBoxLayout(holder)
-        m = tokens.SPACE * 3
-        root.setContentsMargins(m, m, m, m)
+        root.setContentsMargins(0, tokens.SPACE * 2, 0, m)
         root.setSpacing(tokens.SPACE * 2)
 
         head = QHBoxLayout()
@@ -268,6 +297,15 @@ class ProblemPage(QWidget):
         QShortcut(QKeySequence("Ctrl+-"), self, activated=lambda: self._set_zoom(self._zoom - 1))
         self.banner.action_clicked.connect(lambda key: self.goto_requested.emit("fetch") if key == "fetch" else None)
         self._refresh_footer()
+
+    def _request_open(self) -> None:
+        text = self.num_edit.text().strip()
+        if text.isdigit() and int(text) > 0:
+            self.open_requested.emit(int(text))
+
+    def set_open_busy(self, busy: bool) -> None:
+        """지문을 가져오는 동안 [열기] 를 잠근다 (중복 요청 방지)."""
+        self.open_btn.setEnabled(not busy)
 
     # --- 상태 -----------------------------------------------------------------------
     def set_settings(self, settings: Settings | None) -> None:

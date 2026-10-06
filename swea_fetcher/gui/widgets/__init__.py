@@ -1498,35 +1498,50 @@ class SegmentedControl(QWidget):
     TRACK_H, CELL_H, PAD, CELL_MIN_W = 44, 36, 4, 96
     ITEMS = (("light", "라이트", "mode-light"), ("dark", "다크", "mode-dark"), ("system", "시스템 따르기", "mode-system"))
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, items=None, default: str | None = None, name: str = "화면 모드") -> None:
+        """items = ((key, 글자, 아이콘), ...) — 생략하면 화면 모드 3칸. default = 처음 선택 칸 (생략하면 마지막 칸)."""
         super().__init__(parent)
         self.setObjectName("SegmentedControl")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setFixedHeight(self.TRACK_H)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self.setAccessibleName("화면 모드")
+        self._items = tuple(items or self.ITEMS)
+        self._name = name
+        self._default = default or self._items[-1][0]
+        self.setAccessibleName(name)
         self._kb_focus = False
         self._icons = True
         self.group = QButtonGroup(self)
         self.group.setExclusive(True)
         self.buttons: dict[str, _SegButton] = {}
-        for key, label, icon in self.ITEMS:
+        for key, label, icon in self._items:
             b = _SegButton(key, label, icon, self)
             self.buttons[key] = b
             self.group.addButton(b)
             b.toggled.connect(lambda on, k=key: self._on_toggled(k, on))
-        self.buttons["system"].setChecked(True)
+        self.buttons[self._default].setChecked(True)
         self._sync_names()
+
+    def set_label(self, key: str, label: str) -> None:
+        """칸 글자 바꾸기 (예: "푼 문제 12"). 폭을 다시 계산한다."""
+        b = self.buttons.get(key)
+        if b is None or b.text() == label:
+            return
+        b.setText(label)
+        self._sync_names()
+        self.updateGeometry()
+        self.resizeEvent(None)
+        self.update()
 
     # --- 값 ---
     def value(self) -> str:
         for k, b in self.buttons.items():
             if b.isChecked():
                 return k
-        return "system"
+        return self._default
 
     def set_value(self, key: str, emit: bool = False) -> None:
-        b = self.buttons.get(key) or self.buttons["system"]
+        b = self.buttons.get(key) or self.buttons[self._default]
         if b.isChecked():
             return
         self.blockSignals(not emit)
@@ -1544,9 +1559,8 @@ class SegmentedControl(QWidget):
             self.selected_changed.emit(key)
 
     def _sync_names(self) -> None:
-        for key, label, _icon in self.ITEMS:
-            b = self.buttons[key]
-            b.setAccessibleName(f"화면 모드: {label}{', 선택됨' if b.isChecked() else ''}")
+        for key, b in self.buttons.items():
+            b.setAccessibleName(f"{self._name}: {b.text()}{', 선택됨' if b.isChecked() else ''}")
 
     # --- 기하 ---
     def icons_visible(self) -> bool:
@@ -1562,7 +1576,8 @@ class SegmentedControl(QWidget):
         return QSize(self._needed(False), self.TRACK_H)
 
     def resizeEvent(self, e) -> None:  # noqa: N802
-        super().resizeEvent(e)
+        if e is not None:
+            super().resizeEvent(e)
         self._icons = self.width() >= self._needed(True)  # 좁으면(720px 창) 아이콘을 숨기고 글자만
         inner = self.width() - 2 * self.PAD
         keys = list(self.buttons)
