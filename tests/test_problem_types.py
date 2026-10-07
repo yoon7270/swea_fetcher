@@ -143,7 +143,7 @@ def test_cache_drops_bad_entries_and_old_taxonomy(settings):
     assert set(entries) == {1, 4} and entries[4].t == ("dp", "math")
     path.write_text(json.dumps({"v": 1, "tax": pt.TAXONOMY_VERSION + 1, "day": "2026-10-06", "used": 3, "types": good}), encoding="utf-8")
     tc = pt.load(settings)
-    assert tc.entries == {} and tc.used == 3  # 분류 체계가 바뀌면 옛 결과는 쓰지 않는다 (일일 카운터는 유지)
+    assert tc.entries == {} and tc.used == 0  # 분류 체계가 바뀌면 옛 결과를 버리고, 다시 분류할 수 있게 오늘 사용량도 0 부터
 
 
 def test_cache_refuses_to_write_inside_the_root(settings):
@@ -245,3 +245,10 @@ def test_classify_entry_clips_statement_and_title_and_neutralizes_closing_tag():
 
 def test_classify_entry_without_statement_has_empty_text():
     assert ai_prompts.classify_entry(1, "제목", None) == {"n": 1, "title": "제목", "text": ""}
+
+
+def test_classify_prompt_judges_by_constraints_not_title():
+    from swea_fetcher import ai_prompts
+
+    prompt = ai_prompts.build_classify_prompt([{"n": 5260, "title": "부분 집합의 합", "text": "3<=N<=100"}])
+    assert "제목이 아니라 입력 제약으로 판단" in prompt and "N>20" in prompt

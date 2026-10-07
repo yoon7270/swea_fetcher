@@ -27,7 +27,7 @@ from .config import Settings
 
 log = logging.getLogger("swea_fetcher.problem_types")
 
-TAXONOMY_VERSION = 1
+TAXONOMY_VERSION = 2  # 2: 분류 프롬프트에 제약 조건(N 범위) 기준 추가 — 1 의 결과는 다시 분류
 CACHE_FILE = "problem_types.json"
 _FILE_VERSION = 1
 MAX_TYPES = 2  # 문제당 유형 수 상한 (첫 번째가 주 유형)
@@ -282,7 +282,7 @@ def load(settings: Settings) -> TypeCache:
         used = 0
     cache = TypeCache(day=str(raw.get("day") or ""), used=max(0, used), fail_day=str(raw.get("fail_day") or ""))
     if raw.get("tax") != TAXONOMY_VERSION or not isinstance(raw.get("types"), dict):
-        return cache  # 분류 체계가 바뀌었다: 옛 결과는 쓰지 않는다 (카운터만 유지)
+        return TypeCache()  # 분류 체계가 바뀌었다: 옛 결과는 쓰지 않고, 다시 분류할 수 있게 오늘 사용량도 0 부터
     for key, val in raw["types"].items():
         try:
             num = int(key)
@@ -333,11 +333,18 @@ def clear(config_dir: Path) -> int:
 
 
 def effective_types(cache: TypeCache, num: int, title: str = "") -> tuple[str, ...]:
-    """화면·추천에 쓰는 유형: AI 결과 > 제목 키워드 > ()."""
+    """푼 문제(내가 아는 유형)에 쓰는 유형: AI 결과 > 제목 키워드 > ()."""
     e = cache.entries.get(num)
     if e is not None and e.t:
         return e.t
     return title_types(title)
+
+
+def ai_types(cache: TypeCache, num: int) -> tuple[str, ...]:
+    """추천 후보에 쓰는 유형: AI 가 지문을 읽고 정한 결과만. 제목 키워드 추정은 쓰지 않는다
+    (예: "부분 집합의 합" 은 제목만 보면 완전탐색이지만 N≤100 이라 가지치기·DP 가 필요하다). 모르면 () = 유형 미확인."""
+    e = cache.entries.get(num)
+    return e.t if e is not None and e.src == "ai" else ()
 
 
 # --- AI 응답 검증 -----------------------------------------------------------------------------------

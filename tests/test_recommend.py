@@ -412,7 +412,7 @@ def test_day_set_round_trip(settings):
     assert ds.ai_status() == "ok" and ds.ai_picks() == [AiPick(3005, "약점")]
     assert ds.recent_dates() == {3001: TODAY}
     raw = json.loads(path.read_text(encoding="utf-8"))
-    assert raw["v"] == recommend.DAY_VERSION == 2 and raw["level"] == {"c": 3, "conf": "ok", "start": 2}
+    assert raw["v"] == recommend.DAY_VERSION == 3 and raw["level"] == {"c": 3, "conf": "ok", "start": 2}
 
 
 def test_load_day_missing_corrupt_and_wrong_version(settings):
@@ -431,7 +431,7 @@ def test_load_day_missing_corrupt_and_wrong_version(settings):
 def test_load_day_cleans_bad_items(settings):
     path = recommend.day_path(settings)
     path.parent.mkdir(parents=True)
-    path.write_text(json.dumps({"v": 1, "date": "2026-10-06", "items": [{"n": 1, "k": "weird", "r": 5, "src": "x"}, {"n": "2"}, "bad", {"n": True}],
+    path.write_text(json.dumps({"v": 3, "date": "2026-10-06", "items": [{"n": 1, "k": "weird", "r": 5, "src": "x"}, {"n": "2"}, "bad", {"n": True}],
                                 "day_shown": [1, "x", 2], "ai": {"status": "bogus"}}), encoding="utf-8")
     ds = recommend.load_day(settings)
     assert ds.items == [{"n": 1, "k": "fill", "r": "5", "src": "rule"}] and ds.day_shown == [1, 2] and ds.ai_status() == "none"
@@ -699,18 +699,19 @@ def test_reasons_mention_the_type():
     assert recommend.newtype_reason("impl", 2, EST3, {"brute"}).endswith("(기본 유형이라 먼저 익혀 두면 좋아요)")  # 선행 유형이 없는 입문 유형
 
 
-def test_day_set_keeps_types_and_reads_version_1_files(settings):
+def test_day_set_keeps_types_and_drops_old_versions(settings):
     day = make_day(items=[{"n": 3001, "k": "newtype", "r": "이유", "src": "rule", "ty": ["backtrack", "dp"]}, {"n": 3002, "k": "fit", "r": "", "src": "rule"}])
     assert recommend.save_day(settings, day)
     back = recommend.load_day(settings)
     assert back.items[0]["ty"] == ["backtrack", "dp"] and "ty" not in back.items[1] and back.items[0]["k"] == "newtype"
     path = recommend.day_path(settings)
-    old = {"v": 1, "date": "2026-10-06", "items": [{"n": 5, "k": "fit", "r": "x", "src": "rule", "ty": ["bfs", "zzz", 3]}], "ai": {}}
-    path.write_text(json.dumps(old), encoding="utf-8")
+    cur = {"v": 3, "date": "2026-10-06", "items": [{"n": 5, "k": "fit", "r": "x", "src": "rule", "ty": ["bfs", "zzz", 3]}], "ai": {}}
+    path.write_text(json.dumps(cur), encoding="utf-8")
     ds = recommend.load_day(settings)
-    assert ds is not None and ds.items == [{"n": 5, "k": "fit", "r": "x", "src": "rule", "ty": ["bfs"]}]  # 1 도 읽고, 모르는 id 는 걸러낸다
-    path.write_text(json.dumps({**old, "v": 3}), encoding="utf-8")
-    assert recommend.load_day(settings) is None
+    assert ds is not None and ds.items == [{"n": 5, "k": "fit", "r": "x", "src": "rule", "ty": ["bfs"]}]  # 모르는 id 는 걸러낸다
+    for v in (1, 2):  # 2 이하는 제목 추정 유형이 섞여 있어 버리고 새로 만든다
+        path.write_text(json.dumps({**cur, "v": v}), encoding="utf-8")
+        assert recommend.load_day(settings) is None
 
 
 def test_items_of_carries_types():

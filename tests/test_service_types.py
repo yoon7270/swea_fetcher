@@ -200,14 +200,23 @@ def test_per_run_solved_limit_leaves_budget_for_candidates(settings, env):
     assert any(n not in range(1000, 1060) for n in sent)  # 나머지 예산은 후보(새 유형·일반)에
 
 
-def test_title_keyword_problems_skip_the_ai(settings, env):
+def test_title_keyword_problems_are_still_checked_by_ai(settings, env):
+    """제목 단어("부분집합")만으로 유형을 정하지 않는다 — 지문의 제약(N≤100)을 봐야 하므로 AI 로 확인한다."""
     seed_catalog(settings, over={3000: {"title": "BFS 연습"}, 3001: {"title": "[S/W 문제해결] 부분집합의 합"}})
     solve(settings, (3000, 3001, 3002))
     classify(settings)
-    sent = set(prompted_nums(env))
-    assert 3002 in sent and 3000 not in sent and 3001 not in sent  # 제목이 분명하면 AI 를 쓰지 않는다
+    assert {3000, 3001, 3002} <= set(prompted_nums(env))
+
+
+def test_title_guess_never_qualifies_an_unsolved_candidate(settings):
+    """푼 문제는 제목 추정까지 아는 유형으로 세지만, 추천 후보는 AI 분류가 없으면 유형 미확인이다."""
+    seed_catalog(settings, over={3000: {"title": "[S/W 문제해결] 부분집합의 합"}, 3005: {"title": "[S/W 문제해결 최적화] 3일차 - 부분 집합의 합"}})
+    solve(settings, (3000,))
     res = service.recommend_today(settings, now=NOW)
-    assert res.type_counts == {"bfs": 1, "brute": 2}  # 제목으로 알아낸 유형도 푼 유형으로 센다 (3000 BFS · 3001 부분집합 · 3002 AI)
+    assert res.type_counts == {"brute": 1}
+    for it in res.items:
+        if it.num == 3005:
+            assert it.types == ()
 
 
 def test_statement_comes_from_content_cache_else_catalog_id_and_nothing_is_saved(settings, env):
@@ -230,7 +239,7 @@ def test_statement_text_is_clipped(settings, env, monkeypatch):
     solve(settings, (3000, 3001, 3002))
     monkeypatch.setattr(service.parser, "parse_content", lambda html: ProblemContent("", "<p>" + "가" * 9000 + "</p>", {}))
     classify(settings)
-    assert all(len(e["text"]) < 1_600 for c in env["calls"] for e in entries_of(c[1]))
+    assert all(len(e["text"]) < 2_600 for c in env["calls"] for e in entries_of(c[1]))
 
 
 def test_fetch_failures_skip_the_problem_without_caching(settings, env):

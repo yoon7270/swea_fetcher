@@ -1562,7 +1562,9 @@ def _rec_context(settings: Settings, cat: catalog.Catalog, today: date, start_le
         for it in days[d]:
             titles.setdefault(it.num, it.title)
     tcache = problem_types.load(settings)
-    types = {n: ty for n, ty in ((n, problem_types.effective_types(tcache, n, t)) for n, t in titles.items()) if ty}
+    # 푼 문제는 제목 추정까지 (아는 유형을 넓게), 추천 후보는 AI 가 지문으로 정한 유형만 (제목 추정으로 잘못 추천하지 않게)
+    types = {n: ty for n, ty in ((n, problem_types.effective_types(tcache, n, t) if n in first_day else problem_types.ai_types(tcache, n))
+                                 for n, t in titles.items()) if ty}
     counts = problem_types.count_known(first_day, lambda n: types.get(n, ()))
     return _RecCtx(cat, est, facts, solved_nums, retry, events, bool(passed), first_day, titles, tcache, types, counts, frozenset(counts))
 
@@ -1917,10 +1919,12 @@ def _classify_types(settings, consent_ok, now, start_level, on_start, on_begin, 
         return n in cat.items or bool((index.get(str(n)) or {}).get("id")) or content_cache.has(settings, n)
 
     def need(n: int) -> bool:
-        return n not in tried and not tc.fresh(n, today) and not problem_types.title_types(ctx.titles.get(n, "")) and has_source(n)
+        return n not in tried and not tc.fresh(n, today) and has_source(n)  # 제목으로 짐작되는 문제도 AI 로 확인한다
 
     def types_now(n: int) -> tuple[str, ...]:
-        return problem_types.effective_types(tc, n, ctx.titles.get(n, ""))
+        if n in ctx.first_day:
+            return problem_types.effective_types(tc, n, ctx.titles.get(n, ""))
+        return problem_types.ai_types(tc, n)
 
     def pick_batch(limit: int) -> list[int]:
         take = min(recommend.CLASSIFY_BATCH, limit)

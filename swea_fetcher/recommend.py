@@ -32,8 +32,8 @@ from .config import Settings
 log = logging.getLogger("swea_fetcher.recommend")
 
 DAY_FILE = "recommend.json"
-DAY_VERSION = 2  # 2: 항목에 풀이 유형("ty") 추가. 1 도 읽는다 (유형 없는 항목 = 유형 미확인)
-DAY_VERSIONS = (1, 2)
+DAY_VERSION = 3  # 2: 항목에 풀이 유형("ty") 추가. 3: 후보 유형은 AI 분류만 (2 이하는 제목 추정 유형이 섞여 있어 버리고 새로 만든다)
+DAY_VERSIONS = (3,)
 MAX_LEVEL = 8
 
 # 수준 모델 상수 (초기 추정치 — 실사용 뒤 이 한 곳만 조정한다). 경계값은 포함.
