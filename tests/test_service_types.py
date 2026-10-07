@@ -569,3 +569,17 @@ def test_nothing_is_written_to_the_root_folder(settings, env):
     service.recommend_today(settings, now=NOW)
     assert list(settings.root.rglob("*")) == []
     assert problem_types.cache_path(settings).parent == settings.cache_dir
+
+
+def test_ai_level_fills_problems_without_official_level(settings, env):
+    """반 문제 상자처럼 공식 D 배지가 없는 푼 문제는 AI 가 매긴 난이도로 수준을 계산한다 (공식 배지가 있으면 그게 우선)."""
+    seed_catalog(settings)
+    box = (9001, 9002, 9003)
+    for n in box:
+        assert content_cache.save(settings, n, "box", f"상자 {n}", ProblemContent("", "<p>N≤100 DP</p>", {}))
+    solve(settings, box)
+    env["replies"]["codex"] = lambda p: json.dumps({"v": 2, "types": [{"n": e["n"], "plan": "점화식", "t": ["dp"], "why": "점화식", "d": 5} for e in entries_of(p)]})
+    classify(settings)
+    assert {n: cached(settings).entries[n].lv for n in box} == {9001: 5, 9002: 5, 9003: 5}
+    res = service.recommend_today(settings, now=NOW)
+    assert res.level.level == 5 and res.level.n_unknown == 0  # 난이도를 모르는 문제로 빠지지 않는다

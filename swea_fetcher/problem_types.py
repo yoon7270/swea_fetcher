@@ -28,7 +28,7 @@ from .config import Settings
 
 log = logging.getLogger("swea_fetcher.problem_types")
 
-TAXONOMY_VERSION = 3  # 3: 풀이 설계 기반 분류(M24.2) + recursion 유형 추가. 2: 제약 조건(N 범위) 기준 추가 — 이전 결과는 다시 분류
+TAXONOMY_VERSION = 4  # 4: AI 난이도 추정(lv) 추가. 3: 풀이 설계 기반 분류(M24.2) + recursion 유형 추가. 2: 제약 조건(N 범위) 기준 추가 — 이전 결과는 다시 분류
 CACHE_FILE = "problem_types.json"
 _FILE_VERSION = 1
 MAX_TYPES = 2  # 문제당 유형 수 상한 (첫 번째가 주 유형)
@@ -237,11 +237,14 @@ class TypeEntry:
     eng: str = ""
     at: str = ""
     why: str = ""  # "왜 이 유형?" 한 줄 (WHY_MAX 자 이내, 풀이를 알려 주지 않는 이유만). 풀이 설계(plan)는 저장하지 않는다
+    lv: int = 0  # AI 가 풀이를 설계해 보고 매긴 SWEA 난이도 추정 1~8 (0 = 없음). 공식 D 배지가 없는 문제(반 문제 상자 등)의 수준 계산에 쓴다
 
     def to_dict(self) -> dict:
         d = {"t": list(self.t), "src": self.src, "eng": self.eng, "at": self.at}
         if self.why:
             d["why"] = self.why
+        if self.lv:
+            d["lv"] = self.lv
         return d
 
 
@@ -366,7 +369,7 @@ def load(settings: Settings) -> TypeCache:
         if val.get("t") and not ids:
             continue  # 알 수 없는 id 만 있는 항목은 없는 것으로
         src = "title" if val.get("src") == "title" else "ai"
-        cache.entries[num] = TypeEntry(ids, src, str(val.get("eng") or ""), str(val.get("at") or ""), clean_why(val.get("why")))
+        cache.entries[num] = TypeEntry(ids, src, str(val.get("eng") or ""), str(val.get("at") or ""), clean_why(val.get("why")), clean_level(val.get("lv")))
     return cache
 
 
@@ -477,9 +480,42 @@ def parse_batch(text: str, batch_nums: Collection[int]) -> tuple[dict[int, tuple
     return valid, bad, whys
 
 
-def stamp_entries(valid: Mapping[int, Sequence[str]], bad: Iterable[int], engine: str, now: datetime, whys: Mapping[int, str] | None = None) -> dict[int, TypeEntry]:
+def clean_level(v) -> int:
+    """AI 난이도 추정 → 1~8 정수. 범위 밖·정수 아님(bool 포함)은 0 (없음)."""
+    if isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 8:
+        return 0
+    return v
+
+
+def parse_levels(text: str, batch_nums: Collection[int]) -> dict[int, int]:
+    """분류 응답의 `d`(SWEA 난이도 추정 1~8) → {번호: 난이도}. 요청한 번호·유효한 값만. 형식이 이상하면 빈 dict (유형 분류와 따로 실패)."""
+    if not isinstance(text, str):
+        return {}
+    start, end = text.find("{"), text.rfind("}")
+    try:
+        rows = json.loads(text[start : end + 1]).get("types") if 0 <= start < end else None
+    except (ValueError, AttributeError):
+        return {}
+    allowed = set(batch_nums)
+    out: dict[int, int] = {}
+    for row in rows if isinstance(rows, list) else []:
+        n = row.get("n") if isinstance(row, dict) else None
+        if isinstance(n, int) and not isinstance(n, bool) and n in allowed and n not in out:
+            lv = clean_level(row.get("d"))
+            if lv:
+                out[n] = lv
+    return out
+
+
+def ai_levels(cache: TypeCache) -> dict[int, int]:
+    """AI 가 매긴 난이도 {번호: 1~8} (매긴 것만)."""
+    return {n: e.lv for n, e in cache.entries.items() if e.lv}
+
+
+def stamp_entries(valid: Mapping[int, Sequence[str]], bad: Iterable[int], engine: str, now: datetime, whys: Mapping[int, str] | None = None,
+                  levels: Mapping[int, int] | None = None) -> dict[int, TypeEntry]:
     at = now.isoformat(timespec="seconds")
-    out = {n: TypeEntry(tuple(t), "ai", engine, at, (whys or {}).get(n, "")) for n, t in valid.items()}
+    out = {n: TypeEntry(tuple(t), "ai", engine, at, (whys or {}).get(n, ""), (levels or {}).get(n, 0)) for n, t in valid.items()}
     for n in bad:
         out[n] = TypeEntry((), "ai", engine, at)
     return out

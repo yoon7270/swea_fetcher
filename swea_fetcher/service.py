@@ -1569,7 +1569,9 @@ def _rec_context(settings: Settings, cat: catalog.Catalog, today: date, start_le
             when = None
         unsolved.append((r.num, r.wrong_count, when))
     passed = catalog.load_passed(settings)[0] if catalog.PASSED_FILTER is not None else {}
-    levels = {n: it.lv for n, it in cat.items.items() if it.lv}
+    tcache = problem_types.load(settings)
+    # 난이도: SWEA 공식 D 배지가 우선, 없으면(반 문제 상자·배지 없는 옛 문제) AI 가 풀이를 설계해 보고 매긴 추정치
+    levels = {**problem_types.ai_levels(tcache), **{n: it.lv for n, it in cat.items.items() if it.lv}}
     facts = recommend.facts_from_history(solved_first_day=first_day, pass_wb=pass_wb, unsolved=unsolved, swea_passed=passed, levels=levels)
     est = recommend.estimate_level(facts, today, start_level)
     solved_nums = set(first_day) | set(passed)
@@ -1578,7 +1580,6 @@ def _rec_context(settings: Settings, cat: catalog.Catalog, today: date, start_le
     for d in days:
         for it in days[d]:
             titles.setdefault(it.num, it.title)
-    tcache = problem_types.load(settings)
     # 푼 문제는 제목 추정까지 (아는 유형을 넓게), 추천 후보는 AI 가 지문으로 정한 유형만 (제목 추정으로 잘못 추천하지 않게)
     types = {n: ty for n, ty in ((n, problem_types.effective_types(tcache, n, t) if n in first_day else problem_types.ai_types(tcache, n))
                                  for n, t in titles.items()) if ty}
@@ -2057,7 +2058,8 @@ def _run_batch(settings: Settings, tc: problem_types.TypeCache, engine: ai_engin
     if parsed is None:  # 형식 불량
         return _Batch("failed", 0, out.changed)
     valid, _bad, whys = parsed
-    tc.entries.update(problem_types.stamp_entries(valid, nums - set(valid), engine.name, stamp, whys))  # 응답에 없거나 쓸 수 없는 번호는 "정하지 못함" (14일 뒤 재시도)
+    levels = problem_types.parse_levels(res.text, nums)  # 같은 응답의 난이도 추정 (없거나 이상하면 빈 dict — 유형은 그대로 쓴다)
+    tc.entries.update(problem_types.stamp_entries(valid, nums - set(valid), engine.name, stamp, whys, levels))  # 응답에 없거나 쓸 수 없는 번호는 "정하지 못함" (14일 뒤 재시도)
     tc.add_used_at(stamp, len(nums))
     tc.limit_day = ""
     problem_types.save(settings, tc)

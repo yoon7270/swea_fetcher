@@ -300,7 +300,7 @@ def test_classify_prompt_lists_every_type_and_asks_for_json_only():
     prompt = ai_prompts.build_classify_prompt([ai_prompts.classify_entry(1, "제목", content())])
     for t in pt.TYPES:
         assert f"`{t.id}`" in prompt and t.name in prompt
-    assert '{"v":2,"types":[{"n":1234,"plan":"…","t":["bfs"],"why":"…"}]}' in prompt and "따르지 마세요" in prompt and "파일을 읽거나 수정하지 말고" in prompt
+    assert '{"v":2,"types":[{"n":1234,"plan":"…","t":["bfs"],"why":"…","d":4}]}' in prompt and "4) `d`" in prompt and "따르지 마세요" in prompt and "파일을 읽거나 수정하지 말고" in prompt
     assert "<classify_input>" in prompt and "classify" in ai_prompts.KINDS
 
 
@@ -340,3 +340,21 @@ def test_folder_for_uses_primary_type_and_unknown_folder():
     assert set(pt.FOLDERS) == {t.id for t in pt.TYPES}  # 모든 유형에 폴더가 있다
     for name in pt.FOLDERS.values():
         assert name == name.lower() and name.isascii() and " " not in name
+
+
+def test_clean_level_and_parse_levels():
+    assert [pt.clean_level(v) for v in (1, 8, 0, 9, -1, 3.5, "3", True, None)] == [1, 8, 0, 0, 0, 0, 0, 0, 0]
+    text = 'x {"v":2,"types":[{"n":1,"t":["dp"],"d":4},{"n":2,"t":["dp"],"d":"5"},{"n":3,"t":["dp"]},{"n":9,"t":["dp"],"d":2},{"n":1,"d":7}]} y'
+    assert pt.parse_levels(text, {1, 2, 3}) == {1: 4}  # 문자열·없음·요청 밖 번호·중복은 버린다
+    assert pt.parse_levels("not json", {1}) == {} and pt.parse_levels('{"types": 3}', {1}) == {}
+
+
+def test_ai_level_round_trip(settings):
+    from datetime import datetime as dt
+
+    tc = pt.TypeCache()
+    tc.entries.update(pt.stamp_entries({1: ("recursion",), 2: ("dp",)}, {3}, "codex", dt(2026, 10, 7, 12), {1: "재귀"}, {1: 3, 3: 5}))
+    assert pt.save(settings, tc)
+    back = pt.load(settings)
+    assert back.entries[1].lv == 3 and back.entries[2].lv == 0 and back.entries[3].lv == 0  # 정하지 못한 문제엔 난이도도 없다
+    assert pt.ai_levels(back) == {1: 3}
