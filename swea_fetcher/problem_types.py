@@ -61,6 +61,35 @@ TYPE_IDS = tuple(t.id for t in TYPES)
 _BY_ID = {t.id: t for t in TYPES}
 
 # 학습 경로: 이 순서로 "다음 유형" 을 소개한다 (string/math 는 아무 때나 입문 가능해 맨 뒤).
+# 오늘의 추천에서 고른 문제를 저장할 주제 폴더 (주 유형 → 폴더 이름). 유형을 모르면 UNKNOWN_FOLDER
+FOLDERS = {
+    "impl": "implementation",
+    "brute": "bruteforce",
+    "backtrack": "backtracking",
+    "bfs": "bfs",
+    "shortest": "shortest_path",
+    "graph": "graph",
+    "tree": "tree",
+    "stackqueue": "stack_queue",
+    "sort_bs": "sort_search",
+    "greedy": "greedy",
+    "dp": "dp",
+    "string": "string",
+    "math": "math",
+    "prefix": "prefix_sum",
+}
+UNKNOWN_FOLDER = "recommend"
+
+
+def folder_for(types) -> str:
+    """주 유형(첫 번째)의 저장 폴더 이름. 유형이 없거나 모르는 id 면 UNKNOWN_FOLDER."""
+    for tid in types or ():
+        if tid in FOLDERS:
+            return FOLDERS[tid]
+        break
+    return UNKNOWN_FOLDER
+
+
 PATH_ORDER = ("impl", "brute", "backtrack", "stackqueue", "bfs", "sort_bs", "prefix", "greedy", "dp", "tree", "graph", "shortest", "string", "math")
 # 선행 유형: 값 중 **하나라도** 알면 충족 (bfs 는 백트래킹이나 스택·큐). 없는 유형은 입문 유형.
 PREREQS: dict[str, tuple[str, ...]] = {

@@ -1,7 +1,8 @@
 """오늘의 추천 카드 (M24): 성장 탭 풀이 잔디 아래. 수준 한 줄 · 추천 문제 3~5행 · AI 안내 줄 · 문제 목록 푸터.
 
 - 계산·네트워크·AI 는 전부 RecommendWorker(워커 스레드)가 한다. 이 위젯은 서비스 결과(RecommendResult)를 그리기만 한다 (파일·네트워크·AI 직접 호출 없음).
-- 항목을 누르면 recommend_open_requested(번호) — 메인 창이 문제 탭에서 지문을 연다 (저장·덮어쓰기 없음).
+- 항목을 누르면 recommend_open_requested(번호, 주제 폴더) — 메인 창이 주 유형 폴더(예: 스택·큐 → stack_queue)에 저장하고 문제 탭을 연다.
+  이미 루트 어딘가에 저장한 문제면 저장하지 않고 그 폴더로 연다.
 - 동의 게이트: AI 약점 분석은 성장/코치 동의(`growth_consent_ok`)가 없으면 호출하지 않고 카드에 안내 + [동의하고 사용] 만 띄운다 (앱 시작 시 모달 없음).
 - 색은 tokens/QSS/Badge 로만 (색 리터럴 금지 — tests/gui/test_no_hardcoded_colors).
 - 상태(self.state, 테스트·접근성용): loading · catalog_loading · ready · cold_start · empty · error · offline · logged_out · hidden.
@@ -27,7 +28,7 @@ from .workers import RecommendWorker
 
 START_LEVEL_KEY = "recommend/start_level"
 START_LEVELS = (1, 2, 3, 4, 5)
-OPEN_TOOLTIP = "클릭하면 문제 탭에서 지문을 봅니다 (저장되지 않아요)"
+OPEN_TOOLTIP = "클릭하면 풀이 유형 폴더에 저장하고 문제 탭에서 엽니다 (이미 저장한 문제면 그대로 열어요)"
 LEVEL_TOOLTIP = (
     "최근 90일에 푼 문제의 난이도(D1~D8)와 풀기 전 오답 횟수로 추정해요.\n"
     "오답 1회 이하로 깨끗하게 3문제 이상 푼 가장 높은 난이도가 내 수준이고, 그 난이도와 한 단계 위에서 골라요.\n"
@@ -252,7 +253,7 @@ class RecommendRow(QFrame):
 
 
 class RecommendCard(QFrame):
-    recommend_open_requested = Signal(int)
+    recommend_open_requested = Signal(int, str)  # 번호, 저장할 주제 폴더 (problem_types.folder_for)
     goto_requested = Signal(str)
 
     def __init__(self, qsettings: QSettings, parent=None) -> None:
@@ -625,7 +626,8 @@ class RecommendCard(QFrame):
 
     def _open(self, num: int) -> None:
         self._touched = True
-        self.recommend_open_requested.emit(num)
+        rec = next((r for r in (self.result.items if self.result is not None else []) if r.num == num), None)
+        self.recommend_open_requested.emit(num, problem_types.folder_for(rec.types if rec is not None else ()))
 
     def _level_picked(self, key: str) -> None:
         try:

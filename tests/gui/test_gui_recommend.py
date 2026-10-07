@@ -147,7 +147,7 @@ def test_rows_have_accessible_names_and_tooltips(card):
     for row in card.rows:
         name = row.accessibleName()
         assert str(row.rec.num) in name and row.rec.title in name and "난이도 D" in name and "정답률 75.8%" in name and "이유 문장" in name
-        assert row.toolTip() == "클릭하면 문제 탭에서 지문을 봅니다 (저장되지 않아요)"
+        assert row.toolTip() == recommend_card.OPEN_TOOLTIP and "유형 폴더에 저장" in row.toolTip()
         assert row.focusPolicy() == Qt.FocusPolicy.StrongFocus
 
 
@@ -312,21 +312,21 @@ def test_solved_badge_rendered_from_result(card):
 def test_click_enter_and_space_emit_open_request(card, qtbot):
     loaded(card)
     got: list[int] = []
-    card.recommend_open_requested.connect(got.append)
+    card.recommend_open_requested.connect(lambda n, folder: got.append((n, folder)))
     row = card.rows[1]
     qtbot.mouseClick(row, Qt.MouseButton.LeftButton)
     row.setFocus()
     qtbot.keyClick(row, Qt.Key.Key_Return)
     qtbot.keyClick(row, Qt.Key.Key_Space)
     qtbot.keyClick(row, Qt.Key.Key_Enter)
-    assert got == [1001, 1001, 1001, 1001]
+    assert got == [(1001, "recommend")] * 4  # 유형을 모르는 문제는 recommend 폴더
     assert card._touched
 
 
 def test_press_outside_row_does_not_open(card, qtbot):
     loaded(card)
-    got: list[int] = []
-    card.recommend_open_requested.connect(got.append)
+    got: list = []
+    card.recommend_open_requested.connect(lambda *a: got.append(a))
     row = card.rows[0]
     QTest.mousePress(row, Qt.MouseButton.LeftButton, pos=QPoint(5, 5))
     QTest.mouseRelease(row, Qt.MouseButton.LeftButton, pos=QPoint(row.width() + 50, row.height() + 50))
@@ -340,23 +340,20 @@ def test_rows_are_reachable_by_tab_in_visual_order(card):
     assert all(r.focusPolicy() == Qt.FocusPolicy.StrongFocus for r in chain)
 
 
-def test_click_reaches_open_problem_by_number_without_saving(qtbot, main_window, monkeypatch):
+def test_click_saves_into_primary_type_folder(qtbot, main_window, monkeypatch):
     w = main_window
     w.resize(880, 600)
     w.show()
     fetched = []
-    monkeypatch.setattr(w, "_fetch_statement", lambda num, topic, problem_dir, cache_topic=None: fetched.append((num, topic, cache_topic)))
+    monkeypatch.setattr(w.fetch_page, "start", lambda dry_run, opts_override=None: fetched.append((w.fetch_page.target.text(), w.fetch_page.topic.currentText(), dry_run)))
     monkeypatch.setattr(service, "find_problem", lambda settings, num: None)
     page = w.growth_page
     w.goto("growth")
     card = page.recommend
     assert not card.isHidden()
-    FakeRecommendWorker.last().rule_ready.emit(result(its=[rec(2072, level=1)] + items()[1:]))
+    FakeRecommendWorker.last().rule_ready.emit(result(its=[recommend.Recommendation(2072, "괄호 짝짓기", 1, 75.0, 700, "fit", "r", "rule", False, ("stackqueue", "string"))] + items()[1:]))
     qtbot.mouseClick(card.rows[0], Qt.MouseButton.LeftButton)
-    from swea_fetcher.gui.main_window import UNSAVED_TOPIC
-
-    assert fetched == [(2072, UNSAVED_TOPIC, "")]  # 지문만 (dry-run) — 저장 안 한 문제는 미리보기 주제로 연다
-    assert not any(p.is_dir() for p in w.settings.root.iterdir())  # 루트에 아무것도 만들지 않는다
+    assert fetched == [("2072", "stack_queue", False)]  # 주 유형(스택·큐) 폴더로 실제 저장
 
 
 def test_opening_a_saved_problem_routes_to_its_folder(qtbot, main_window, monkeypatch):

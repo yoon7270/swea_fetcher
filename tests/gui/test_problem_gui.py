@@ -539,3 +539,39 @@ def test_open_by_number_ignores_empty_input(main_window, monkeypatch):
     monkeypatch.setattr(service, "fetch_problem", lambda *a, **k: pytest.fail("빈 입력은 요청하지 않음"))
     w.problem_page.open_btn.click()
     assert w._stmt_worker is None
+
+
+def test_recommend_click_saves_into_type_folder_and_opens_problem(main_window, qtbot, monkeypatch, problem_info, content):
+    """오늘의 추천 항목: 저장 안 한 문제는 유형 폴더(예: stack_queue)에 실제로 저장하고, 자동 전환 토글이 꺼져 있어도 문제 탭을 연다."""
+    w = main_window
+    w.qs.setValue("fetch/auto_open_problem", False)
+    calls = []
+
+    def fake(settings, target, topic, opts, progress):
+        calls.append((target, topic, opts))
+        d = settings.root / topic / target
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{target}.py").write_text("x", encoding="utf-8")
+        info = dataclasses.replace(problem_info, num=int(target))
+        return FetchOutcome(info, SaveResult(d, [d / f"{target}.py"], []), None, [], topic, content)
+
+    monkeypatch.setattr(service, "fetch_problem", fake)
+    w.goto("growth")
+    w.growth_page.recommend_open_requested.emit(5432, "stack_queue")
+    qtbot.waitUntil(lambda: w.fetch_page._worker is None and w._recommend_saving is None, timeout=WAIT)
+    (target, topic, opts), = calls
+    assert target == "5432" and topic == "stack_queue" and not opts.dry_run and opts.with_content
+    assert (w.settings.root / "stack_queue" / "5432").is_dir()
+    assert w.stack.currentWidget() is w.problem_page and w.problem_page.badge.text() == "저장됨"
+
+
+def test_recommend_click_on_already_saved_problem_does_not_save_again(main_window, qtbot, monkeypatch, content):
+    w = main_window
+    d = w.settings.root / "BFS" / "5432"
+    d.mkdir(parents=True)
+    (d / "5432.py").write_text("# 5432. 이미 저장\n", encoding="utf-8")
+    content_cache.save(w.settings, 5432, "BFS", "이미 저장", content)
+    monkeypatch.setattr(service, "fetch_problem", lambda *a, **k: pytest.fail("이미 저장한 문제는 다시 저장하지 않음"))
+    w.growth_page.recommend_open_requested.emit(5432, "bfs")
+    assert w.fetch_page._worker is None
+    assert w.stack.currentWidget() is w.problem_page and not w.problem_page.open_dir_btn.isHidden()

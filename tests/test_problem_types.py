@@ -252,3 +252,13 @@ def test_classify_prompt_judges_by_constraints_not_title():
 
     prompt = ai_prompts.build_classify_prompt([{"n": 5260, "title": "부분 집합의 합", "text": "3<=N<=100"}])
     assert "제목이 아니라 입력 제약으로 판단" in prompt and "N>20" in prompt
+
+
+def test_folder_for_uses_primary_type_and_unknown_folder():
+    assert pt.folder_for(("stackqueue", "bfs")) == "stack_queue"
+    assert pt.folder_for(("bfs",)) == "bfs"
+    assert pt.folder_for(()) == pt.UNKNOWN_FOLDER == "recommend"
+    assert pt.folder_for(("zzz",)) == "recommend"
+    assert set(pt.FOLDERS) == {t.id for t in pt.TYPES}  # 모든 유형에 폴더가 있다
+    for name in pt.FOLDERS.values():
+        assert name == name.lower() and name.isascii() and " " not in name

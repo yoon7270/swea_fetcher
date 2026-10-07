@@ -107,7 +107,7 @@ class GrowthPage(QWidget):
     comment_requested = Signal(object)  # 주 월요일(date): 수동 [코멘트 받기]/[다시 받기]/동의 후 시작
     cancel_requested = Signal()
     problem_requested = Signal(str, int)  # 잔디 날짜 목록에서 고른 문제 (주제, 번호) — 메인이 문제 탭으로 연다
-    recommend_open_requested = Signal(int)  # 오늘의 추천 항목 (번호) — 메인이 문제 탭에서 지문을 연다 (저장 없음, M24)
+    recommend_open_requested = Signal(int, str)  # 오늘의 추천 항목 (번호, 주제 폴더) — 메인이 유형 폴더에 저장하고 문제 탭을 연다
 
     def __init__(self, qsettings: QSettings, parent=None) -> None:
         super().__init__(parent)

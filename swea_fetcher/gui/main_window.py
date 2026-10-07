@@ -63,6 +63,7 @@ class MainWindow(QMainWindow):
         self.settings: Settings | None = None
         self._update_worker: FuncWorker | None = None
         self._stmt_worker: FetchWorker | None = None  # 최근 탭 "문제 보기" 의 지문만 가져오기 (M14)
+        self._recommend_saving: int | None = None  # 오늘의 추천에서 저장 중인 문제 번호 (끝나면 문제 탭으로)
         self._growth_worker: GrowthWorker | None = None  # 성장 리포트 확정·주간 코멘트 (M19)
         self._growth_queued: date | None = None  # 워커 실행 중에 들어온 수동 코멘트 요청
         self._growth_unseen = 0
@@ -181,7 +182,7 @@ class MainWindow(QMainWindow):
         self.growth_page.comment_requested.connect(self._growth_comment_requested)
         self.growth_page.cancel_requested.connect(self._growth_cancel)
         self.growth_page.problem_requested.connect(self._open_recent_problem)  # 풀이 잔디의 날짜 목록 → 문제 탭
-        self.growth_page.recommend_open_requested.connect(self._open_problem_by_number)  # 오늘의 추천 → 문제 탭 (저장 없음, M24)
+        self.growth_page.recommend_open_requested.connect(self._open_recommended)  # 오늘의 추천 → 유형 폴더에 저장 후 문제 탭
         self.settings_page.heat_color_changed.connect(self.growth_page.apply_heat_color)
         self.settings_page.appearance_changed.connect(self.apply_appearance)
         self.fetch_page.problem_ready.connect(self._on_problem_ready)
@@ -251,10 +252,51 @@ class MainWindow(QMainWindow):
 
     # --- 문제 탭 (M12) ---------------------------------------------------------------
     def _on_problem_ready(self, outcome) -> None:
-        """fetch 결과의 지문을 문제 탭에 싣는다. 저장/뼈대 성공이고 토글이 켜져 있으면 탭도 전환 (미리보기는 전환 안 함)."""
+        """fetch 결과의 지문을 문제 탭에 싣는다. 저장/뼈대 성공이고 토글이 켜져 있으면 탭도 전환 (미리보기는 전환 안 함).
+        오늘의 추천에서 저장한 문제는 토글과 무관하게 문제 탭으로 간다."""
         self.problem_page.show_outcome(outcome)
-        if outcome.result is not None and self.qs.value("fetch/auto_open_problem", True, type=bool):
+        from_recommend = self._recommend_saving is not None and outcome.info.num == self._recommend_saving
+        if outcome.result is not None and (from_recommend or self.qs.value("fetch/auto_open_problem", True, type=bool)):
             self.goto("problem")
+
+    def _open_recommended(self, num: int, folder: str) -> None:
+        """오늘의 추천 항목: 이미 저장한 문제면 그 폴더로 열고, 아니면 주 유형 폴더(folder)에 저장(저장 탭과 같은 흐름 —
+        자동 동기화·최근 탭 갱신 포함)한 뒤 문제 탭을 연다. 실패하면 저장 탭으로 가서 오류 배너를 보여 준다."""
+        if self.settings is None:
+            self.flash("먼저 설정에서 루트 폴더와 계정을 정해 주세요", 6000)
+            return
+        try:
+            found = service.find_problem(self.settings, num)
+        except OSError:
+            found = None
+        if found is not None:
+            self._open_recent_problem(found.topic, num)
+            return
+        fp = self.fetch_page
+        if fp._worker is not None:
+            self.flash("다른 문제를 저장하는 중이에요. 끝난 뒤 다시 눌러 주세요", 5000)
+            return
+        fp.target.setText(str(num))
+        fp.topic.setCurrentText(folder)
+        opts = service.FetchOptions(with_content=True, cache_content=fp._cache_enabled())
+        self._recommend_saving = num
+        self.statusBar().showMessage(f"{num} 을 {folder} 폴더에 저장하는 중…")
+        fp.start(dry_run=False, opts_override=opts)
+        if fp._worker is None:  # 입력 검증 등으로 시작하지 못함
+            self._recommend_saving = None
+            self.goto("fetch")
+            return
+        fp._worker.finished.connect(lambda n=num: self._recommend_save_finished(n))
+
+    def _recommend_save_finished(self, num: int) -> None:
+        if self._recommend_saving != num:
+            return
+        self._recommend_saving = None
+        oc = self.fetch_page._last_outcome
+        if oc is not None and oc.result is not None and oc.info.num == num:
+            self.flash(f"{num} 을 {oc.topic} 폴더에 저장했어요", 5000)
+        else:
+            self.goto("fetch")  # 오류 배너는 저장 탭에 있다
 
     def _show_cached_problem(self, num: int) -> None:
         """앱 캐시에서 지문을 읽어 문제 탭으로 (네트워크 없음)."""
