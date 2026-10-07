@@ -65,9 +65,11 @@ AI_PICK_MIN = 3  # 유효 3개 미만이면 AI 실패로 본다
 AI_POOL_MAX = 30
 AI_REASON_MAX = 60
 
-# 풀이 유형 분류 예산 (service.classify_types): 한 번에 12문제, 하루 40문제, 한 번 실행에서 푼 문제 24 · 새 유형 후보 12 · 일반 후보 16
-CLASSIFY_BATCH = 12
-CLASSIFY_DAILY_CAP = 40
+# 풀이 유형 분류 예산 — 방문 때(service.classify_types)와 백그라운드(service.classify_background)가 같은 상한·카운터를 쓴다 (한 곳에서만 고친다)
+# 한 번 호출에 5문제(풀이 설계를 쓰게 하므로 작게), 시간당 60문제 · 하루 400문제. 방문 때는 한 번 실행에서 푼 문제 24 · 새 유형 후보 12 · 일반 후보 16 까지만
+CLASSIFY_BATCH = 5
+CLASSIFY_HOURLY_CAP = 60
+CLASSIFY_DAILY_CAP = 400
 CLASSIFY_SOLVED_MAX = 24
 CLASSIFY_NEWTYPE_MAX = 12
 CLASSIFY_CAND_MAX = 16
@@ -156,6 +158,7 @@ class Recommendation:
     source: str  # "rule" | "ai"
     solved_today: bool = False
     types: tuple[str, ...] = ()  # 풀이 유형 id (주 유형 먼저). 비어 있으면 유형 미확인
+    why: str = ""  # AI 가 그 유형이라고 본 이유 한 줄 (칩 툴팁 "왜 이 유형?"). 없으면 ""
 
 
 @dataclass
@@ -172,6 +175,8 @@ class RecommendResult:
     used_swea_passed: bool = False
     weak_tagged: int = 0  # 최근 28일 분류 그룹 수 (AI 안내 문구용)
     type_counts: dict = field(default_factory=dict)  # {유형 id: 앱에 Pass 기록된 문제 수} — "풀어 본 유형" 줄 (폴더 이름은 증거가 아니다)
+    type_progress: tuple[int, int] = (0, 0)  # (유형을 분류한 카탈로그 문제 수, 카탈로그 문제 수) — 카드 푸터 "풀이 유형 분류 312 / 926"
+    type_capped: str = ""  # 분류 상한에 막힌 상태: "" | "day"(오늘 한도 도달) | "hour"(이번 시간 한도 도달)
 
 
 # --- 수준 모델 ------------------------------------------------------------------------------------

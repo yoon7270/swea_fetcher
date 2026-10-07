@@ -97,6 +97,14 @@ def fake_keyring(monkeypatch: pytest.MonkeyPatch) -> FakeKeyring:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_codex_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """CODEX_HOME 을 빈 tmp 폴더로 돌려 실제 ~/.codex/models_cache.json 을 읽지 않게 한다 (유형 분류 모델 고르기가 PC 마다 달라지지 않게)."""
+    d = tmp_path / "_codex_home"
+    d.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(d))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """config.CONFIG_DIR 기본값을 tmp 로 돌려 실제 ~/.swea-fetch 를 읽지 않게 한다."""
     from swea_fetcher import config

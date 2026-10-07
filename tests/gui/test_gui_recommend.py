@@ -49,8 +49,8 @@ def cat_status(usable=True, wait=0):
                                  usable=usable, manual_wait=wait)
 
 
-def rec(num, kind="fit", level=3, solved=False, source="rule", title=None, reason="이유 문장", pr=75.8, pa=7000, types=()):
-    return recommend.Recommendation(num, title or f"문제 {num}", level, pr, pa, kind, reason, source, solved, tuple(types))
+def rec(num, kind="fit", level=3, solved=False, source="rule", title=None, reason="이유 문장", pr=75.8, pa=7000, types=(), why=""):
+    return recommend.Recommendation(num, title or f"문제 {num}", level, pr, pa, kind, reason, source, solved, tuple(types), why)
 
 
 def items(n=4, **kw):
@@ -457,9 +457,10 @@ def test_consent_dialog_defaults_to_cancel_and_lists_what_is_sent(qtbot, monkeyp
 
     monkeypatch.setattr(QMessageBox, "exec", fake_exec)
     assert recommend_card.ask_recommend_consent(None, "GPT (Codex)") is False
-    assert "공개 문제 지문·제목을 보내 풀이 유형을 분류합니다. 내 코드·계정 정보는 보내지 않습니다." in seen["text"]
+    assert "공개 문제 지문·제목을 보내 풀이 유형을 분류합니다" in seen["text"] and "풀이 설계" in seen["text"] and "내 코드·계정 정보는 보내지 않습니다." in seen["text"]
     assert "약점 분류 이름·수준 숫자·후보 문제 제목만" in seen["text"] and "폴더명·경로·아이디는 보내지 않습니다" in seen["text"]
     assert "푼 문제" in seen["text"]  # 푼 문제의 공개 지문·제목도 분류에 쓰인다는 고지
+    assert "백그라운드" in seen["text"] and "한가할 때" in seen["text"] and "시간당 60문제·하루 400문제" in seen["text"] and "끌 수 있어요" in seen["text"]  # 배경 분류 고지 (M24.2)
     assert seen["default"] == "취소" and seen["escape"] == "취소"
 
 
@@ -899,7 +900,7 @@ def test_known_types_line_hidden_without_items(card):
 def test_known_types_line_truncates_long_lists(card):
     many = {t: i + 1 for i, t in enumerate(recommend.pt.TYPE_IDS)}
     loaded(card, result(its=typed_items(), type_counts=many))
-    assert card.type_label.text().endswith("외 10개") and card.type_label.text().count(" · ") == 3
+    assert card.type_label.text().endswith(f"외 {len(recommend.pt.TYPE_IDS) - 4}개") and card.type_label.text().count(" · ") == 3
 
 
 def test_loading_text_while_classifying_types(card):
@@ -1114,3 +1115,132 @@ def test_settings_page_hint_mentions_type_classification(main_window):
     texts = [lb.text() for lb in sp.findChildren(__import__("PySide6.QtWidgets", fromlist=["QLabel"]).QLabel)]
     assert any("공개 문제 지문·제목을 보내 풀이 유형을 분류합니다" in t and "내 코드·계정 정보는 보내지 않습니다" in t for t in texts)
     assert sp.recommend_ai.text() == "추천에 AI 풀이 유형·약점 분석 사용" or "풀이 유형" in sp.recommend_ai.text()
+
+
+# --- 풀이 설계 기반 분류 · 배경 분류 (M24.2) ------------------------------------------------------------
+
+
+def test_type_chip_tooltip_answers_why_this_type(card):
+    loaded(card, result(its=[rec(1217, "fit", types=("recursion",), why="재귀 호출로 거듭제곱을 계산"), rec(1218, "fit", types=("brute",)), rec(1219, "fit")]))
+    first, plain, unknown = card.rows
+    chip = first.type_chips[0]
+    assert chip.text() == "재귀·분할정복" and chip.toolTip() == "왜 이 유형? 재귀 호출로 거듭제곱을 계산"
+    assert not chip.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)  # 툴팁이 뜨려면 호버를 받아야 한다
+    assert "재귀 호출로 거듭제곱을 계산" in first.accessibleName()
+    assert plain.type_chips[0].toolTip() == "" and unknown.type_chips[0].text() == "유형 미확인" and unknown.type_chips[0].toolTip() == ""
+
+
+def test_footer_shows_type_progress_and_cap_messages(card):
+    loaded(card, result(type_progress=(312, 926)))
+    assert card.footer.text() == "문제 목록 2026-10-06 기준 · 1,160문제 · 풀이 유형 분류 312 / 926"
+    card.set_type_progress(320, 926, "day")
+    assert card.footer.text().endswith("풀이 유형 분류 320 / 926 · 오늘 분류 한도 도달 — 내일 이어서")
+    card.set_type_progress(330, 926, "hour")
+    assert card.footer.text().endswith("풀이 유형 분류 330 / 926 · 이번 시간 분류 한도 도달 — 곧 이어서")
+    card.set_type_progress(340, 926, "")
+    assert card.footer.text().endswith("풀이 유형 분류 340 / 926")
+    assert [r.rec.num for r in card.rows] == [1000, 1001, 1002, 1003]  # 진행도만 바뀌고 추천 행은 그대로
+
+
+def test_footer_hides_progress_when_ai_analysis_is_off(card, settings):
+    import dataclasses
+
+    card.set_settings(dataclasses.replace(settings, recommend_ai=False))
+    loaded(card, result(type_progress=(312, 926)))
+    assert "풀이 유형 분류" not in card.footer.text()
+
+
+def test_new_background_types_rebuild_only_an_untouched_set_on_the_next_visit(card):
+    loaded(card)
+    card.types_updated()
+    n = len(FakeRecommendWorker.instances)
+    card.ensure_loaded()
+    assert len(FakeRecommendWorker.instances) == n  # 3초 안의 재방문은 무시 (throttle)
+    card._last_start = 0.0
+    card.ensure_loaded()
+    assert worker().mode == "rebuild"  # 안 만졌으면 새 유형을 세트에 반영
+    worker().finish()
+    card._last_start = 0.0
+    card.ensure_loaded()
+    assert worker().mode == "rules"  # 한 번 반영한 뒤에는 평소대로
+    worker().finish()
+    card.types_updated()
+    card._touched = True  # [다른 추천]·항목 열기를 한 뒤에는 보던 화면을 바꾸지 않는다
+    card._last_start = 0.0
+    card.ensure_loaded()
+    assert worker().mode == "rules"
+
+
+def test_limit_and_network_classification_messages_offer_retry(card):
+    w = loaded(card, mode_done=False)
+    w.classify_done.emit("limit")
+    assert "사용량 한도" in card.ai_note.text() and "내일 이어서" in card.ai_note.text() and card.ai_btn.text() == "다시 시도"
+    w.classify_done.emit("network")
+    assert "연결하지 못해" in card.ai_note.text() and card.ai_btn.text() == "다시 시도"
+
+
+def test_worker_rebuild_mode_rebuilds_only_when_untouched(qtbot, settings, cls_flow):
+    calls, st = cls_flow
+    run_cls_worker(qtbot, settings, "rebuild")
+    assert calls == [("today", False, True)]
+    run_cls_worker(qtbot, settings, "rebuild", touched=lambda: True)
+    assert calls[-1] == ("today", False, False)
+
+
+def _engine_status(models=(), claude=True):
+    from swea_fetcher import ai_models
+
+    engines = [EngineInfo("codex", "C:/c/codex.cmd", "1.0", True), EngineInfo("claude", "C:/c/claude.exe" if claude else "", "2.0", claude)]
+    return service.EngineStatus(engines, [], [ai_models.CodexModel(s, n, p, ("low", "medium")) for s, n, p in models])
+
+
+def test_settings_type_toggle_and_model_combo_save_env(main_window):
+    w = main_window
+    sp = w.settings_page
+    w.goto("settings")
+    assert sp.type_bg.isChecked() and sp.type_bg.isEnabled() and sp.type_model.currentData() == "auto" and w.settings.type_bg is True
+    sp.type_bg.setChecked(False)
+    assert config_values(w).get("SWEA_TYPE_BG") == "0" and w.settings.type_bg is False
+    sp._show_ai_status(_engine_status([("gpt-6-sol", "GPT-6-Sol", 3), ("gpt-6-luna", "GPT-6-Luna", 4)]))
+    datas = [sp.type_model.itemData(i) for i in range(sp.type_model.count())]
+    assert datas == ["auto", "codex:gpt-6-sol", "codex:gpt-6-luna", "claude:haiku"]
+    assert sp.type_model.itemText(0) == "자동 (가벼운 모델)" and sp.type_model.itemText(2) == "GPT-6-Luna" and sp.type_model.itemText(3) == "Claude Haiku"
+    sp.type_model.setCurrentIndex(2)
+    assert config_values(w).get("SWEA_TYPE_MODEL") == "codex:gpt-6-luna" and w.settings.type_model == "codex:gpt-6-luna"
+    sp._show_ai_status(_engine_status([("gpt-6-luna", "GPT-6-Luna", 4)], claude=False))  # 다시 감지해도 저장된 선택은 유지
+    assert sp.type_model.currentData() == "codex:gpt-6-luna" and [sp.type_model.itemData(i) for i in range(sp.type_model.count())] == ["auto", "codex:gpt-6-luna"]
+
+
+def test_settings_keeps_a_saved_claude_choice_even_when_claude_is_not_detected(main_window):
+    w = main_window
+    service.set_env_values(w.config_dir, SWEA_TYPE_MODEL="claude:haiku")
+    w.reload_settings(stay=True)
+    sp = w.settings_page
+    sp._show_ai_status(_engine_status(claude=False))
+    assert sp.type_model.currentData() == "claude:haiku" and "설치 안 됨" in sp.type_model.currentText()  # 설정을 조용히 바꾸지 않는다
+    assert config_values(w).get("SWEA_TYPE_MODEL") == "claude:haiku"
+
+
+def test_settings_type_controls_follow_the_ai_analysis_toggle_and_show_progress(main_window):
+    w = main_window
+    sp = w.settings_page
+    w.goto("settings")
+    sp.recommend_ai.setChecked(False)
+    assert not sp.type_bg.isEnabled() and not sp.type_model.isEnabled()
+    sp.recommend_ai.setChecked(True)
+    assert sp.type_bg.isEnabled() and sp.type_model.isEnabled()
+    sp.set_type_progress(312, 926, "")
+    assert sp.type_progress.text() == "풀이 유형 분류 312 / 926"
+    sp.set_type_progress(400, 926, "day")
+    assert sp.type_progress.text().endswith("오늘 분류 한도 도달 — 내일 이어서")
+    sp.set_type_progress(0, 0)
+    assert "문제 목록을 받으면" in sp.type_progress.text()
+
+
+def test_main_window_pushes_background_progress_to_card_and_settings(main_window):
+    w = main_window
+    w._on_type_progress(312, 926, "hour")
+    assert w.growth_page.recommend._type_progress == (312, 926) and w.growth_page.recommend._type_capped == "hour"
+    assert w.settings_page.type_progress.text().startswith("풀이 유형 분류 312 / 926")
+    w.type_scheduler.classified.emit()
+    assert w.growth_page.recommend._types_dirty is True

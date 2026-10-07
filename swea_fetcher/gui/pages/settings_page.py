@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import ai_engine, config, content_cache, doctor, gitops, service, solved, solved_sync, update
+from ... import ai_engine, ai_models, config, content_cache, doctor, gitops, service, solved, solved_sync, update
 from ...config import Settings
 from ...errors import AiError
 from ..coach_widgets import ask_consent, has_consent, reset_consents
@@ -139,6 +139,10 @@ class SettingsPage(QWidget):
         self._git_worker: FuncWorker | None = None
         self._ai_detect_worker: FuncWorker | None = None
         self._ai_ping_worker: CoachWorker | None = None
+        self._type_worker: FuncWorker | None = None  # 풀이 유형 분류 진행도 읽기 (M24.2)
+        self._type_models: list = []  # Codex 가 캐시한 모델 목록 (감지 때 채움)
+        self._claude_found = False
+        self._type_model_saved = ai_models.AUTO
         self._loading_ai = False
         self._last_ai_status = None  # 마지막 감지 결과 (엔진 콤보가 바뀌면 보조 문구만 다시 그린다)
         self._ai_status_stale = True
@@ -368,6 +372,14 @@ class SettingsPage(QWidget):
         self.recommend_enabled.setObjectName("RecommendEnabledCheck")
         self.recommend_ai = Toggle("추천에 AI 풀이 유형·약점 분석 사용")
         self.recommend_ai.setObjectName("RecommendAiCheck")
+        self.type_bg = Toggle("백그라운드 유형 분류")  # M24.2
+        self.type_bg.setObjectName("TypeBgCheck")
+        self.type_progress = _hint("")
+        self.type_progress.setObjectName("TypeProgressLabel")
+        self.type_model = ComboBox()
+        self.type_model.setObjectName("TypeModelCombo")
+        self.type_model.setAccessibleName("유형 분류 모델")
+        self.type_model.setMinimumWidth(220)
         gh3 = _hint("기록은 ~/.swea-fetch/coach/profile 에만 있고 GitHub 로 올라가지 않습니다. 풀이 잔디(하루에 푼 문제)도 여기에 저장됩니다.")
         self.growth_clear_btn = Button("성장 기록 지우기")  # 아래 "위험 영역" 카드에 놓인다
         set_class(self.growth_clear_btn, "danger")
@@ -424,6 +436,10 @@ class SettingsPage(QWidget):
         v8.addWidget(_toggle_row(self.recommend_enabled, "SWEA 공개 문제 목록(약 1,160문제)을 주 1회 받아 수준에 맞는 문제를 추천합니다. 끄면 목록도 받지 않습니다."))
         v8.addWidget(_divider())
         v8.addWidget(_toggle_row(self.recommend_ai, "공개 문제 지문·제목을 보내 풀이 유형을 분류합니다(결과는 저장해 재사용). 내 코드·계정 정보는 보내지 않습니다. 약점 분석(하루 1회)에는 약점 분류 이름·수준 숫자·후보 문제 제목만 씁니다."))
+        v8.addWidget(_divider())
+        v8.addWidget(_toggle_row(self.type_bg, "앱이 켜져 있고 한가할 때 문제 목록 전체의 풀이 유형을 AI 로 조금씩 분류해 저장합니다 (AI 가 문제를 풀어 보는 풀이 설계로 정해요). 시간당 60문제·하루 400문제까지, 사용량 한도에 걸리면 그날은 멈춥니다. 끄면 성장 탭을 열 때의 분류만 합니다."))
+        v8.addWidget(self.type_progress)
+        v8.addLayout(_field("유형 분류 모델", _left(self.type_model), _hint("분류는 가벼운 모델로 충분해요. 자동은 Codex 의 가벼운 모델(Luna 계열)을 쓰고, 없으면 Codex 기본 모델 → Claude Haiku 순입니다. AI 코치 엔진 설정과 별개이고, 전송에 동의한 엔진만 쓰여요.")))
         v8.addWidget(_divider())
         v8.addLayout(_field("풀이 잔디 색", heat_col, _hint("성장 탭 맨 위 풀이 잔디의 색입니다. 기본은 현재 테마 색을 따라가고, 직접 고르면 그 색 하나로 고정됩니다. 기준색에서 4단계 농도가 만들어집니다.")))
         v8.addWidget(self.heat_sync_row)
@@ -527,6 +543,8 @@ class SettingsPage(QWidget):
         self.growth_comment.toggled.connect(lambda on: self._growth_toggled("SWEA_GROWTH_COMMENT", on))
         self.recommend_enabled.toggled.connect(lambda on: self._growth_toggled("SWEA_RECOMMEND", on))
         self.recommend_ai.toggled.connect(lambda on: self._growth_toggled("SWEA_RECOMMEND_AI", on))
+        self.type_bg.toggled.connect(lambda on: self._growth_toggled("SWEA_TYPE_BG", on))
+        self.type_model.currentIndexChanged.connect(self._type_model_changed)
         self.heat_sync.toggled.connect(self._heat_sync_toggled)
         self.growth_clear_btn.clicked.connect(self._clear_growth)
         self.reduce_motion.toggled.connect(self._reduce_motion_toggled)
@@ -586,12 +604,16 @@ class SettingsPage(QWidget):
         self.growth_comment.setEnabled(self.growth_enabled.isChecked())
         self.recommend_enabled.setChecked(settings.recommend if settings else config._truthy(values.get("SWEA_RECOMMEND") or "1"))
         self.recommend_ai.setChecked(settings.recommend_ai if settings else config._truthy(values.get("SWEA_RECOMMEND_AI") or "1"))
+        self.type_bg.setChecked(settings.type_bg if settings else config._truthy(values.get("SWEA_TYPE_BG") or "1"))
+        self._type_model_saved = settings.type_model if settings else (values.get("SWEA_TYPE_MODEL") or ai_models.AUTO)
+        self._fill_type_models()
         self._sync_recommend_enabled()
         self._load_heat_sync(settings, values)
         self._loading_ai = False
         self._ai_status_stale = True
         if self.isVisible():
             self._detect_ai()
+            self._load_type_status()
         self._git_root = settings.root if settings else None
         self._git_status_stale = True
         if self.isVisible():
@@ -606,12 +628,13 @@ class SettingsPage(QWidget):
             self.refresh_git_status(getattr(self, "_git_root", None))
         if self._ai_status_stale:
             self._detect_ai()
+        self._load_type_status()
 
     def wait_workers(self, ms: int = 5000) -> None:
         """창 닫힐 때 워커가 살아 있으면 기다린다 (QThread 가 실행 중 파괴되면 abort)."""
         if self._ai_ping_worker is not None and self._ai_ping_worker.isRunning():
             self._ai_ping_worker.cancel()  # 최대 5분 대기 금지 — 프로세스 트리를 먼저 종료
-        for w in (self._git_worker, self._doctor_worker, self._worker, self._ai_detect_worker, self._ai_ping_worker):
+        for w in (self._git_worker, self._doctor_worker, self._worker, self._ai_detect_worker, self._ai_ping_worker, self._type_worker):
             if w is not None and w.isRunning():
                 w.wait(ms)
 
@@ -913,6 +936,9 @@ class SettingsPage(QWidget):
 
     def _show_ai_status(self, status) -> None:
         self._last_ai_status = status
+        self._type_models = list(getattr(status, "codex_models", []) or [])
+        self._claude_found = any(e.name == "claude" and e.found for e in status.engines)
+        self._fill_type_models()  # 유형 분류 모델 콤보: Codex 모델 목록·Claude 감지 결과 반영
         parts = []
         for e in status.engines:
             if not e.found:
@@ -1000,7 +1026,7 @@ class SettingsPage(QWidget):
         if key == "SWEA_GROWTH":
             self.growth_comment.setEnabled(on)
             self.heat_sync.setEnabled(on)
-        if key in ("SWEA_GROWTH", "SWEA_RECOMMEND"):
+        if key in ("SWEA_GROWTH", "SWEA_RECOMMEND", "SWEA_RECOMMEND_AI"):
             self._sync_recommend_enabled()
         if self._loading_ai:
             return
@@ -1012,7 +1038,52 @@ class SettingsPage(QWidget):
         """오늘의 추천 토글: 성장 기록이 꺼지면 둘 다 비활성, 추천이 꺼지면 AI 약점 분석만 비활성 (M24)."""
         growth_on = self.growth_enabled.isChecked()
         self.recommend_enabled.setEnabled(growth_on)
+        ai_on = growth_on and self.recommend_enabled.isChecked() and self.recommend_ai.isChecked()
         self.recommend_ai.setEnabled(growth_on and self.recommend_enabled.isChecked())
+        self.type_bg.setEnabled(ai_on)  # 백그라운드 분류는 풀이 유형 분류(AI 분석)가 켜져 있을 때만
+        self.type_model.setEnabled(ai_on)
+
+    def _fill_type_models(self) -> None:
+        """유형 분류 모델 콤보: 자동 · Codex 가 캐시한 모델 · (Claude 가 감지되면) Claude Haiku. 저장된 값이 목록에 없으면 그 값도 남긴다. 저장 시그널은 막는다."""
+        saved = getattr(self, "_type_model_saved", ai_models.AUTO) or ai_models.AUTO
+        self.type_model.blockSignals(True)
+        self.type_model.clear()
+        for value, text in ai_models.options(self._type_models, claude_found=self._claude_found, current=saved):
+            self.type_model.addItem(text, value)
+        self.type_model.setCurrentIndex(max(0, self.type_model.findData(saved)))
+        self.type_model.blockSignals(False)
+
+    def _type_model_changed(self, _idx: int) -> None:
+        value = str(self.type_model.currentData() or ai_models.AUTO)
+        self._type_model_saved = value
+        if self._loading_ai:
+            return
+        service.set_env_values(self.config_dir, SWEA_TYPE_MODEL=value)
+        self.status_message.emit("유형 분류 모델 설정을 저장했습니다")
+        self.coach_settings_changed.emit()
+
+    def set_type_progress(self, done: int, total: int, capped: str = "") -> None:
+        """"풀이 유형 분류 312 / 926" (+ 상한 안내). 배경 분류 신호와 페이지가 열릴 때 읽은 값이 함께 쓴다."""
+        text = f"풀이 유형 분류 {done:,} / {total:,}" if total else "풀이 유형 분류: 문제 목록을 받으면 시작해요"
+        if total and capped == "day":
+            text += " · 오늘 분류 한도 도달 — 내일 이어서"
+        elif total and capped == "hour":
+            text += " · 이번 시간 분류 한도 도달 — 곧 이어서"
+        self.type_progress.setText(text)
+
+    def _load_type_status(self) -> None:
+        """분류 진행도를 워커에서 읽는다 (캐시·카탈로그 파일). 페이지가 보일 때."""
+        if self._type_worker is not None or self.settings is None:
+            return
+        s = self.settings
+        w = FuncWorker(lambda: service.type_status(s), self)
+        w.finished_ok.connect(lambda st: self.set_type_progress(st.done, st.total, st.capped))
+        w.finished.connect(self._type_worker_cleanup)
+        self._type_worker = w
+        w.start()
+
+    def _type_worker_cleanup(self) -> None:
+        self._type_worker = None
 
     def _load_heat_sync(self, settings, values: dict) -> None:
         """잔디 동기화 토글 표시: 명시값(SWEA_SOLVED_SYNC) 우선, 비어 있으면 자동 기본값 (루트가 git 저장소+원격이면 켜짐). 저장 시그널은 막는다."""

@@ -178,6 +178,73 @@ def test_help_is_cached(monkeypatch, tmp_path):
     assert len(cli.aux) == 1
 
 
+# --- 모델 선택 (M24.2: 풀이 유형 분류용 가벼운 모델) --------------------------------------------
+
+
+CODEX_HELP_MODEL = CODEX_HELP + "  -m, --model <MODEL>\n  -c, --config <key=value>\n"
+CLAUDE_HELP_MODEL = CLAUDE_HELP + "  --model <model>\n"
+
+
+def test_codex_command_adds_model_and_low_effort_when_supported(monkeypatch, tmp_path):
+    monkeypatch.setattr(ai_engine, "_popen", FakeCLI(CODEX_HELP_MODEL))
+    argv, _answer = ai_engine.build_command(ENGINE_CODEX, str(tmp_path), model="gpt-6-luna", effort="low")
+    assert argv[argv.index("-m") + 1] == "gpt-6-luna"
+    assert "model_reasoning_effort=low" in argv and argv[argv.index("model_reasoning_effort=low") - 1] == "--config"  # 따옴표 없는 TOML 문자열 (Windows .cmd shim 안전)
+    assert argv[-1] == "-" and "mcp_servers={}" in argv  # 기존 옵션은 그대로
+
+
+def test_codex_command_without_model_args_is_unchanged(monkeypatch, tmp_path):
+    monkeypatch.setattr(ai_engine, "_popen", FakeCLI(CODEX_HELP_MODEL))
+    argv, _ = ai_engine.build_command(ENGINE_CODEX, str(tmp_path))
+    assert "-m" not in argv and "--model" not in argv and not any(a.startswith("model_reasoning_effort") for a in argv)
+    only_model, _ = ai_engine.build_command(ENGINE_CODEX, str(tmp_path), model="gpt-6-luna")
+    assert "-m" in only_model and not any(a.startswith("model_reasoning_effort") for a in only_model)
+
+
+def test_codex_model_flags_fall_back_when_help_lacks_them(monkeypatch, tmp_path):
+    monkeypatch.setattr(ai_engine, "_popen", FakeCLI(CODEX_HELP))  # --model / --config 없는 옛 버전
+    argv, _ = ai_engine.build_command(ENGINE_CODEX, str(tmp_path), model="gpt-6-luna", effort="low")
+    assert "-m" not in argv and "gpt-6-luna" not in argv and not any(a.startswith("model_reasoning_effort") for a in argv)  # 조용히 기본 모델로
+    ai_engine._HELP_CACHE.clear()
+    monkeypatch.setattr(ai_engine, "_popen", FakeCLI(""))  # help 를 못 읽은 경우도 선택 옵션만 뺀다
+    argv, _ = ai_engine.build_command(ENGINE_CODEX, str(tmp_path), model="gpt-6-luna", effort="low")
+    assert "-m" not in argv and argv[:2] == ["C:/bin/codex.cmd", "exec"]
+
+
+def test_claude_command_uses_model_alias_only_when_supported(monkeypatch, tmp_path):
+    monkeypatch.setattr(ai_engine, "_popen", FakeCLI(CLAUDE_HELP_MODEL))
+    argv, answer = ai_engine.build_command(ENGINE_CLAUDE, str(tmp_path), model="haiku", effort="low")
+    assert argv[argv.index("--model") + 1] == "haiku" and answer is None and not any("effort" in a for a in argv)
+    ai_engine._HELP_CACHE.clear()
+    monkeypatch.setattr(ai_engine, "_popen", FakeCLI(CLAUDE_HELP))
+    argv, _ = ai_engine.build_command(ENGINE_CLAUDE, str(tmp_path), model="haiku")
+    assert "--model" not in argv
+    plain, _ = ai_engine.build_command(ENGINE_CLAUDE, str(tmp_path))
+    assert "--model" not in plain
+
+
+def test_run_passes_model_flags_through_to_the_process(monkeypatch):
+    monkeypatch.setattr(ai_engine, "_which", lambda n: "C:/bin/codex.cmd" if n == "codex" else None)
+    cli = FakeCLI(CODEX_HELP_MODEL, out="응답".encode())
+    monkeypatch.setattr(ai_engine, "_popen", cli)
+    res = ai_engine.run(ENGINE_CODEX, "p", model="gpt-6-luna", effort="low")
+    assert "gpt-6-luna" in cli.runs[0].argv and res.argv == cli.runs[0].argv and cli.runs[0].stdin_data == b"p"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("exit 1: Rate limit exceeded, retry later", True),
+    ("You've hit your usage limit", True),
+    ("HTTP 429 Too Many Requests", True),
+    ("quota exceeded", True),
+    ("Error 4290 something else", False),
+    ("not logged in", False),
+    ("실행 실패 (코드 1)", False),
+])
+def test_is_limit_error_heuristic(text, expected):
+    assert ai_engine.is_limit_error(AiRunFailed("GPT 실행 실패", stderr=text)) is expected
+    assert ai_engine.is_limit_error(AiRunFailed(text)) is expected
+
+
 # --- 실행 -------------------------------------------------------------------------------
 
 

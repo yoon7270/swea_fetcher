@@ -75,7 +75,9 @@ def ask_recommend_consent(parent: QWidget | None, engine_label: str) -> bool:
     """AI 약점 분석 전송 동의 (엔진별 1회). 기본 포커스·Esc 는 [취소]. 동의하면 True (저장은 호출자)."""
     box = QMessageBox(
         QMessageBox.Icon.Question, "오늘의 추천 · AI 풀이 유형·약점 분석",
-        f"{engine_label} 로 공개 문제 지문·제목을 보내 풀이 유형을 분류합니다. 내 코드·계정 정보는 보내지 않습니다.\n"
+        f"{engine_label} 로 공개 문제 지문·제목을 보내 풀이 유형을 분류합니다 (AI 가 문제를 풀어 보는 풀이 설계를 쓴 뒤 유형을 정해요). 내 코드·계정 정보는 보내지 않습니다.\n"
+        "앱이 켜져 있고 한가할 때는 백그라운드에서 문제 목록 전체를 조금씩 분류해요 (가벼운 모델 사용, 시간당 60문제·하루 400문제 상한). "
+        "설정의 '백그라운드 유형 분류' 에서 끌 수 있어요.\n"
         "내가 푼 문제의 공개 지문·제목도 분류에 쓰이므로 어떤 문제를 풀었는지는 서비스가 알 수 있어요. 폴더명·경로·아이디는 보내지 않습니다.\n"
         "약점 분석에는 약점 분류 이름·수준 숫자·후보 문제 제목만 씁니다. 내용은 해당 서비스의 약관에 따라 처리됩니다.",
         parent=parent,
@@ -139,6 +141,7 @@ class RecommendRow(QFrame):
         self.level_badge.setObjectName("RecommendLevelBadge")
         text, state = KIND_BADGE.get(rec.kind, KIND_BADGE["fit"])
         type_names = problem_types.names_of(rec.types)
+        why_tip = f"왜 이 유형? {rec.why}" if rec.why else ""  # AI 가 남긴 이유 한 줄 (풀이는 알려 주지 않는다)
         if rec.kind == "newtype" and type_names:
             text = f"{text} · {type_names[0]}"
         self.kind_badge = Badge(text, state)
@@ -166,6 +169,8 @@ class RecommendRow(QFrame):
             for name in type_names or ["유형 미확인"]:
                 chip = Badge(name, "idle")
                 chip.setObjectName("RecommendTypeChip" if type_names else "RecommendTypeUnknown")
+                if why_tip and type_names:
+                    chip.setToolTip(why_tip)
                 chips.addWidget(chip)
                 self.type_chips.append(chip)
             chips.addStretch(1)
@@ -180,10 +185,12 @@ class RecommendRow(QFrame):
         self.meta.setWordWrap(True)
         self.meta.setVisible(bool(meta))
         lay.addWidget(self.meta)
-        for w in self.findChildren(QWidget):  # 클릭·호버는 행이 받는다
+        for w in self.findChildren(QWidget):  # 클릭·호버는 행이 받는다 (이유 툴팁이 있는 유형 칩만 빼고 — 라벨이라 클릭은 행으로 전달된다)
+            if why_tip and w in self.type_chips:
+                continue
             w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         parts = [f"{rec.num}번 {rec.title}".strip(), f"난이도 D{rec.level}" if rec.level else "", self.kind_badge.text(),
-                 ("풀이 유형 " + ", ".join(type_names)) if type_names else "풀이 유형 미확인",
+                 ("풀이 유형 " + ", ".join(type_names) + (f" ({rec.why})" if rec.why else "")) if type_names else "풀이 유형 미확인",
                  f"정답률 {rec.pass_rate:.1f}%" if rec.pass_rate is not None else "", rec.reason, "해결함" if rec.solved_today else ""]
         self.setAccessibleName(", ".join(p for p in parts if p))
         self.setToolTip(OPEN_TOOLTIP)
@@ -274,6 +281,9 @@ class RecommendCard(QFrame):
         self._ai_pending = False
         self._cls_status = ""  # 풀이 유형 분류: "" | pending | ok | nothing | off | needs_consent | no_engine | failed | partial | cancelled
         self._cls_done = 0
+        self._type_progress: tuple[int, int] = (0, 0)  # (분류한 문제 수, 카탈로그 문제 수) — 푸터 "풀이 유형 분류 312 / 926"
+        self._type_capped = ""  # "" | day | hour (분류 상한에 막힘)
+        self._types_dirty = False  # 배경 분류로 새 유형이 쌓였다 — 다음에 읽을 때 (안 만졌으면) 세트에 반영
         self._items_key: tuple = ()
         self._last_start = 0.0
         self._footer_warn = ""
@@ -448,6 +458,7 @@ class RecommendCard(QFrame):
         self._dl = None
         self._ai_status, self._ai_engines, self._ai_pending = "none", [], False
         self._cls_status, self._cls_done = "", 0
+        self._type_progress, self._type_capped, self._types_dirty = (0, 0), "", False
         self._touched = False
         self._footer_warn = ""
         self._last_start = 0.0
@@ -480,11 +491,24 @@ class RecommendCard(QFrame):
             self.result, self._failure, self._notices, self._touched = None, None, set(), False
             self._ai_status, self._ai_engines = "none", []
         if self.result is not None and self.result.items:
-            self._start("rules")
+            rebuild = self._types_dirty and not self._touched  # 배경 분류로 새로 알게 된 유형은 안 만진 세트에만 반영한다
+            self._types_dirty = False
+            self._start("rebuild" if rebuild else "rules")
         elif self._failure is not None:
             self._render()  # 실패 상태는 [다시 시도] 로만 (탭에 들어올 때마다 요청하지 않는다)
         else:
             self._start("auto")
+
+    # --- 배경 분류 (M24.2) -------------------------------------------------------------------
+    def set_type_progress(self, done: int, total: int, capped: str = "") -> None:
+        """배경 분류가 진행됨: 푸터의 진행도만 갱신한다 (추천 행은 바꾸지 않는다)."""
+        self._type_progress, self._type_capped = (int(done), int(total)), capped
+        if self.enabled() and self.result is not None:
+            self._fill_footer(self.result)
+
+    def types_updated(self) -> None:
+        """배경 분류로 새 유형이 쌓였다: 다음에 이 카드를 읽을 때 반영한다 (보던 화면은 건드리지 않는다)."""
+        self._types_dirty = True
 
     # --- 워커 ------------------------------------------------------------------------------
     def _consented(self) -> frozenset:
@@ -546,6 +570,7 @@ class RecommendCard(QFrame):
     # --- 워커 신호 ---------------------------------------------------------------------------
     def _on_rule(self, res) -> None:
         self.result = res
+        self._type_progress, self._type_capped = tuple(res.type_progress), res.type_capped
         self._failure = None if res.items else self._failure
         self._dl = None
         st = res.ai_status
@@ -640,7 +665,7 @@ class RecommendCard(QFrame):
 
     def _issue(self) -> str:
         """카드 안내 줄이 다룰 상태: 풀이 유형 분류의 문제(동의·엔진·실패)가 약점 분석 상태보다 먼저다 (같은 동의로 함께 풀린다)."""
-        return self._cls_status if self._cls_status in ("needs_consent", "no_engine", "failed", "partial", "cancelled") else self._ai_status
+        return self._cls_status if self._cls_status in ("needs_consent", "no_engine", "failed", "partial", "cancelled", "limit", "network") else self._ai_status
 
     def _ai_action(self) -> None:
         st = self._issue()
@@ -657,7 +682,7 @@ class RecommendCard(QFrame):
             self._start("retry_ai")
         elif st == "no_engine":
             self.goto_requested.emit("settings")
-        elif st in ("failed", "cancelled", "partial"):
+        elif st in ("failed", "cancelled", "partial", "limit", "network"):
             self._start("retry_ai")
 
     # --- 그리기 ---------------------------------------------------------------------------------
@@ -744,7 +769,7 @@ class RecommendCard(QFrame):
         self.type_label.show()
 
     def _fill_rows(self, res, animate: bool) -> None:
-        key = tuple((i.num, i.kind, i.reason, i.source, i.solved_today, i.title, i.level, i.types) for i in res.items) if res is not None else ()
+        key = tuple((i.num, i.kind, i.reason, i.source, i.solved_today, i.title, i.level, i.types, i.why) for i in res.items) if res is not None else ()
         if key == self._items_key:
             return
         self._items_key = key
@@ -776,7 +801,7 @@ class RecommendCard(QFrame):
         elif state == "loading":
             if self._cls_status == "pending":
                 title = "풀이 유형 분석 중…" + (f" ({self._cls_done}문제 완료)" if self._cls_done else "")
-                hint = "공개 문제의 풀이 유형을 AI 로 분류해 저장해 둬요. 처음에는 몇 분 걸릴 수 있고, 다음부터는 저장된 결과를 써요"
+                hint = "공개 문제의 풀이 유형을 AI 로 분류해 저장해 둬요. 처음에는 몇 분 걸릴 수 있고, 다음부터는 저장된 결과를 써요 (나머지는 앱이 한가할 때 조금씩 분류해요)"
             else:
                 title = "추천을 고르는 중…"
         elif state in ("error", "offline"):
@@ -827,6 +852,10 @@ class RecommendCard(QFrame):
             text, btn = "AI 엔진을 찾지 못해 풀이 유형은 제목으로만 추정했어요", "설정으로 이동"
         elif cls == "failed":
             text, btn = "풀이 유형 분석에 실패해 제목으로만 추정했어요", "다시 시도"
+        elif cls == "limit":
+            text, btn = "AI 사용량 한도에 걸린 것 같아요 · 풀이 유형은 내일 이어서 분석해요", "다시 시도"
+        elif cls == "network":
+            text, btn = "SWEA 에 연결하지 못해 풀이 유형 분석을 멈췄어요", "다시 시도"
         elif cls == "partial":
             text, btn = "풀이 유형을 일부만 분석했어요 · 나머지는 이어서 분석해요", "다시 시도"
         elif cls == "cancelled":
@@ -863,6 +892,13 @@ class RecommendCard(QFrame):
             return
         when = cat.fetched_at.strftime("%Y-%m-%d") if cat.fetched_at else "-"
         text = f"문제 목록 {when} 기준 · {cat.count:,}문제"
+        done, total = self._type_progress
+        if total and self.settings is not None and self.settings.recommend_ai:
+            text += f" · 풀이 유형 분류 {done:,} / {total:,}"
+            if self._type_capped == "day":
+                text += " · 오늘 분류 한도 도달 — 내일 이어서"
+            elif self._type_capped == "hour":
+                text += " · 이번 시간 분류 한도 도달 — 곧 이어서"
         if self._footer_warn:
             text += f" · {self._footer_warn}"
         self.footer.setText(text)

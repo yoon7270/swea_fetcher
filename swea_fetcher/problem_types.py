@@ -6,7 +6,8 @@
 
 - 이 분류는 growth_tags(약점 분류)와 **별개**다 (growth_tags 는 DFS/BFS 를 한 덩어리로 묶고 오답 원인도 섞여 있다).
 - 유형 id 는 append-only: 캐시가 id 만 저장한다. 표시 이름·정의는 바꿔도 되고, 의미가 바뀌면 TAXONOMY_VERSION 을 올려 캐시를 무효화한다.
-- 유형은 문제당 1~2개, 첫 번째가 주 유형. AI 가 지문을 읽어 정하고(service.classify_types), 제목 키워드는 보조/폴백이다.
+- 유형은 문제당 1~2개, 첫 번째가 주 유형. AI 가 문제를 직접 풀어 보는 짧은 풀이 설계(plan)를 쓰고, 그 설계가 쓰는 기법으로 정한다
+  (service.classify_types / classify_background, M24.2). 설계(plan)는 스포일러라 저장하지 않고, 이유 한 줄(why)만 칩 툴팁용으로 저장한다. 제목 키워드는 보조/폴백이다.
 - 폴더 이름(BFS, DFS1 …)은 "그 유형을 안다" 는 증거가 아니다. 앱에 기록된 Pass 문제의 유형만 증거다 (count_known).
 - 캐시는 공개 데이터라 `cache/problem_types.json` (루트·GitHub 밖). `logout --all` 이 카탈로그와 함께 지운다.
 """
@@ -27,7 +28,7 @@ from .config import Settings
 
 log = logging.getLogger("swea_fetcher.problem_types")
 
-TAXONOMY_VERSION = 2  # 2: 분류 프롬프트에 제약 조건(N 범위) 기준 추가 — 1 의 결과는 다시 분류
+TAXONOMY_VERSION = 3  # 3: 풀이 설계 기반 분류(M24.2) + recursion 유형 추가. 2: 제약 조건(N 범위) 기준 추가 — 이전 결과는 다시 분류
 CACHE_FILE = "problem_types.json"
 _FILE_VERSION = 1
 MAX_TYPES = 2  # 문제당 유형 수 상한 (첫 번째가 주 유형)
@@ -44,7 +45,7 @@ class PType:
 TYPES: tuple[PType, ...] = (
     PType("impl", "구현·시뮬레이션", "규칙·절차를 그대로 코드로 옮기는 문제 (격자·배열 시뮬레이션, 단순 조건 처리). 다른 뚜렷한 알고리즘이 없을 때"),
     PType("brute", "완전탐색", "순열·조합·부분집합·중첩 반복으로 모든 경우를 직접 열거해 확인하는 문제 (재귀 DFS 가 핵심이 아닌 단순 열거)"),
-    PType("backtrack", "DFS·백트래킹", "재귀/스택 DFS 로 깊이 우선 탐색하거나, 가지치기하며 상태를 되돌리는 탐색 문제"),
+    PType("backtrack", "DFS·백트래킹", "탐색 문제: 재귀/스택 DFS 로 깊이 우선 탐색하거나, 가지치기하며 상태를 되돌리는 백트래킹"),
     PType("bfs", "BFS", "큐로 가까운 곳부터 퍼져 나가는 탐색 (최소 이동 횟수, 단계별 확산, 가중치 없는 최단 거리)"),
     PType("shortest", "최단경로", "가중치 있는 그래프의 최단 경로 (다익스트라, 벨만-포드, 플로이드-워셜, 우선순위 큐 활용)"),
     PType("graph", "그래프·유니온파인드", "정점·간선 모델링, 연결 요소, 서로소 집합(유니온 파인드), 위상 정렬, 최소 신장 트리"),
@@ -56,6 +57,7 @@ TYPES: tuple[PType, ...] = (
     PType("string", "문자열", "문자열 처리·패턴 검색·회문·파싱이 핵심인 문제"),
     PType("math", "수학", "소수·약수·진법·나머지·조합론·기하 등 수식과 수학적 관찰이 핵심인 문제"),
     PType("prefix", "누적합·투포인터", "누적합, 슬라이딩 윈도우, 투 포인터로 구간을 효율적으로 다루는 문제"),
+    PType("recursion", "재귀·분할정복", "재귀 함수로 문제를 작게 나눠 푸는 문제 (거듭제곱·하노이·팩토리얼·병합/퀵 정렬·분할 정복). 탐색(DFS)이 아니라 재귀 구조 자체가 핵심"),
 )
 TYPE_IDS = tuple(t.id for t in TYPES)
 _BY_ID = {t.id: t for t in TYPES}
@@ -77,6 +79,7 @@ FOLDERS = {
     "string": "string",
     "math": "math",
     "prefix": "prefix_sum",
+    "recursion": "recursion",
 }
 UNKNOWN_FOLDER = "recommend"
 
@@ -90,10 +93,11 @@ def folder_for(types) -> str:
     return UNKNOWN_FOLDER
 
 
-PATH_ORDER = ("impl", "brute", "backtrack", "stackqueue", "bfs", "sort_bs", "prefix", "greedy", "dp", "tree", "graph", "shortest", "string", "math")
+PATH_ORDER = ("impl", "brute", "recursion", "backtrack", "stackqueue", "bfs", "sort_bs", "prefix", "greedy", "dp", "tree", "graph", "shortest", "string", "math")
 # 선행 유형: 값 중 **하나라도** 알면 충족 (bfs 는 백트래킹이나 스택·큐). 없는 유형은 입문 유형.
 PREREQS: dict[str, tuple[str, ...]] = {
-    "backtrack": ("brute",),
+    "recursion": ("brute", "impl"),
+    "backtrack": ("recursion", "brute"),
     "bfs": ("backtrack", "stackqueue"),
     "shortest": ("bfs",),
     "graph": ("bfs",),
@@ -211,6 +215,7 @@ _KEYWORDS: tuple[tuple[str, re.Pattern], ...] = tuple(
         ("greedy", r"그리디|탐욕"),
         ("dp", r"(?<![A-Za-z])DP(?![A-Za-z])|동적\s*계획|다이나믹"),
         ("prefix", r"누적\s*합|투\s*포인터|슬라이딩\s*윈도우"),
+        ("recursion", r"재귀|하노이|분할\s*정복"),
     )
 )
 
@@ -231,9 +236,13 @@ class TypeEntry:
     src: str = "ai"  # "ai" | "title"
     eng: str = ""
     at: str = ""
+    why: str = ""  # "왜 이 유형?" 한 줄 (WHY_MAX 자 이내, 풀이를 알려 주지 않는 이유만). 풀이 설계(plan)는 저장하지 않는다
 
     def to_dict(self) -> dict:
-        return {"t": list(self.t), "src": self.src, "eng": self.eng, "at": self.at}
+        d = {"t": list(self.t), "src": self.src, "eng": self.eng, "at": self.at}
+        if self.why:
+            d["why"] = self.why
+        return d
 
 
 @dataclass
@@ -242,6 +251,9 @@ class TypeCache:
     day: str = ""  # 오늘 분류에 쓴 개수를 센 날짜
     used: int = 0  # day 에 분류를 시도한 문제 수 (일일 상한)
     fail_day: str = ""  # 엔진 호출이 실패한 날 (같은 날 자동 재시도 금지)
+    hour: str = ""  # 시간당 상한을 세는 시각 ("YYYY-MM-DDTHH", 시계 기준 1시간 단위)
+    hour_used: int = 0
+    limit_day: str = ""  # AI 사용량·요청 한도 오류를 만난 날 (그날은 더 부르지 않는다)
 
     def used_on(self, today: date) -> int:
         return self.used if self.day == today.isoformat() else 0
@@ -250,6 +262,27 @@ class TypeCache:
         if self.day != today.isoformat():
             self.day, self.used = today.isoformat(), 0
         self.used += n
+
+    def used_in_hour(self, stamp: datetime) -> int:
+        return self.hour_used if self.hour == hour_key(stamp) else 0
+
+    def add_used_at(self, stamp: datetime, n: int) -> None:
+        """하루·시간 사용량을 함께 올린다 (분류 한 묶음을 시도할 때마다)."""
+        self.add_used(stamp.date(), n)
+        key = hour_key(stamp)
+        if self.hour != key:
+            self.hour, self.hour_used = key, 0
+        self.hour_used += n
+
+    def budget(self, stamp: datetime, day_cap: int, hour_cap: int) -> tuple[int, str]:
+        """지금 더 분류할 수 있는 문제 수와 막힌 이유 ("" | "day" | "hour"). 일일 상한이 시간 상한보다 먼저 보고된다."""
+        day_left = day_cap - self.used_on(stamp.date())
+        if day_left <= 0:
+            return 0, "day"
+        hour_left = hour_cap - self.used_in_hour(stamp)
+        if hour_left <= 0:
+            return 0, "hour"
+        return min(day_left, hour_left), ""
 
     def types_of(self, num: int) -> tuple[str, ...]:
         e = self.entries.get(num)
@@ -269,7 +302,12 @@ class TypeCache:
 
     def to_dict(self) -> dict:
         return {"v": _FILE_VERSION, "tax": TAXONOMY_VERSION, "day": self.day, "used": self.used, "fail_day": self.fail_day,
+                "hour": self.hour, "hour_used": self.hour_used, "limit_day": self.limit_day,
                 "types": {str(n): e.to_dict() for n, e in sorted(self.entries.items())}}
+
+
+def hour_key(stamp: datetime) -> str:
+    return stamp.strftime("%Y-%m-%dT%H")
 
 
 def cache_path(settings: Settings) -> Path:
@@ -309,7 +347,12 @@ def load(settings: Settings) -> TypeCache:
         used = int(raw.get("used") or 0)
     except (TypeError, ValueError):
         used = 0
-    cache = TypeCache(day=str(raw.get("day") or ""), used=max(0, used), fail_day=str(raw.get("fail_day") or ""))
+    try:
+        hour_used = int(raw.get("hour_used") or 0)
+    except (TypeError, ValueError):
+        hour_used = 0
+    cache = TypeCache(day=str(raw.get("day") or ""), used=max(0, used), fail_day=str(raw.get("fail_day") or ""),
+                      hour=str(raw.get("hour") or ""), hour_used=max(0, hour_used), limit_day=str(raw.get("limit_day") or ""))
     if raw.get("tax") != TAXONOMY_VERSION or not isinstance(raw.get("types"), dict):
         return TypeCache()  # 분류 체계가 바뀌었다: 옛 결과는 쓰지 않고, 다시 분류할 수 있게 오늘 사용량도 0 부터
     for key, val in raw["types"].items():
@@ -323,7 +366,7 @@ def load(settings: Settings) -> TypeCache:
         if val.get("t") and not ids:
             continue  # 알 수 없는 id 만 있는 항목은 없는 것으로
         src = "title" if val.get("src") == "title" else "ai"
-        cache.entries[num] = TypeEntry(ids, src, str(val.get("eng") or ""), str(val.get("at") or ""))
+        cache.entries[num] = TypeEntry(ids, src, str(val.get("eng") or ""), str(val.get("at") or ""), clean_why(val.get("why")))
     return cache
 
 
@@ -378,11 +421,24 @@ def ai_types(cache: TypeCache, num: int) -> tuple[str, ...]:
 
 # --- AI 응답 검증 -----------------------------------------------------------------------------------
 
+WHY_MAX = 40  # "왜 이 유형?" 한 줄의 글자 상한
+_WHY_STRIP_RE = re.compile(r"```|~~~|`|https?://\S*|www\.\S*|\[[^\]]*\]\([^)]*\)|[\x00-\x1f\x7f]")
 
-def parse_batch(text: str, batch_nums: Collection[int]) -> tuple[dict[int, tuple[str, ...]], set[int]] | None:
-    """AI 응답 → (유효한 {번호: 유형}, 응답에 있었지만 쓸 수 없는 번호). 첫 `{` ~ 마지막 `}` 를 JSON 으로 읽는다 (코드 펜스·잡문 허용).
 
-    검증: 요청한 번호만, id 는 분류에 있는 것만, 유형은 1~2개 (3개 이상·0개·형식 오류는 "유형 미확인"). JSON 자체가 아니면 None.
+def clean_why(raw: object) -> str:
+    """AI 가 쓴 이유 한 줄 정리: 코드 펜스·백틱·링크·제어 문자를 지우고 공백을 하나로, WHY_MAX 자로 자른다 (문자열이 아니면 "")."""
+    if not isinstance(raw, str):
+        return ""
+    text = " ".join(_WHY_STRIP_RE.sub(" ", raw).split())
+    return text[:WHY_MAX].rstrip()
+
+
+def parse_batch(text: str, batch_nums: Collection[int]) -> tuple[dict[int, tuple[str, ...]], set[int], dict[int, str]] | None:
+    """AI 응답 → (유효한 {번호: 유형}, 응답에 있었지만 쓸 수 없는 번호, {번호: 이유 한 줄}). 첫 `{` ~ 마지막 `}` 를 JSON 으로 읽는다 (코드 펜스·잡문 허용).
+
+    형식 {"v":2,"types":[{"n":1217,"plan":"…","t":["recursion"],"why":"…"}]}. 검증: 요청한 번호만, id 는 분류에 있는 것만, 유형은 1~2개
+    (3개 이상·0개·형식 오류는 "유형 미확인"). `plan`(풀이 설계)은 AI 가 근거를 쓰게 하는 용도라 읽지도 저장하지도 않는다 (스포일러).
+    `why` 는 clean_why 로 정리해 돌려준다 (없으면 해당 번호가 빠진다). JSON 자체가 아니면 None.
     """
     if not isinstance(text, str):
         return None
@@ -398,6 +454,7 @@ def parse_batch(text: str, batch_nums: Collection[int]) -> tuple[dict[int, tuple
         return None
     allowed = set(batch_nums)
     valid: dict[int, tuple[str, ...]] = {}
+    whys: dict[int, str] = {}
     bad: set[int] = set()
     for row in rows:
         if not isinstance(row, dict):
@@ -414,13 +471,15 @@ def parse_batch(text: str, batch_nums: Collection[int]) -> tuple[dict[int, tuple
             bad.add(n)
             continue
         valid[n] = ids
-    return valid, bad
+        why = clean_why(row.get("why"))
+        if why:
+            whys[n] = why
+    return valid, bad, whys
 
 
-def stamp_entries(valid: Mapping[int, Sequence[str]], bad: Iterable[int], engine: str, now: datetime) -> dict[int, TypeEntry]:
+def stamp_entries(valid: Mapping[int, Sequence[str]], bad: Iterable[int], engine: str, now: datetime, whys: Mapping[int, str] | None = None) -> dict[int, TypeEntry]:
     at = now.isoformat(timespec="seconds")
-    out = {n: TypeEntry(tuple(t), "ai", engine, at) for n, t in valid.items()}
+    out = {n: TypeEntry(tuple(t), "ai", engine, at, (whys or {}).get(n, "")) for n, t in valid.items()}
     for n in bad:
         out[n] = TypeEntry((), "ai", engine, at)
     return out
-

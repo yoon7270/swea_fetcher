@@ -35,6 +35,7 @@ from .theme import appearance, tokens
 from .theme.bus import bus
 from .theme.qt_palette import qt_palette
 from . import motion
+from .type_scheduler import TypeScheduler
 from .widgets import Button, NavDelegate, StatusDot, Toast, nav_icon, set_class, svg_icon
 from .workers import FetchWorker, FuncWorker, GrowthWorker
 
@@ -226,6 +227,14 @@ class MainWindow(QMainWindow):
         self._growth_timer.setInterval(GROWTH_TICK_MS)
         self._growth_timer.timeout.connect(self._growth_kick)
         self._growth_timer.start()
+
+        # 배경 풀이 유형 분류 (M24.2): 2분마다 틱, 앱이 한가하고 동의·설정이 켜져 있을 때만 한 묶음씩. 설정은 틱마다 다시 읽는다
+        self.type_scheduler = TypeScheduler(
+            lambda: self.settings, self._consented_engines, self.is_busy, self.growth_page.recommend.start_level, parent=self,
+        )
+        self.type_scheduler.progress_changed.connect(self._on_type_progress)
+        self.type_scheduler.classified.connect(self.growth_page.recommend.types_updated)
+        self.type_scheduler.start()
 
     def _pages(self) -> tuple:
         """스택에 넣는 순서 = PAGES 순서."""
@@ -426,6 +435,24 @@ class MainWindow(QMainWindow):
     def _goto_submit(self, topic: str, num: int) -> None:
         self.goto("check")
         self.check_page.request_submit(topic, num)
+
+    def _consented_engines(self) -> frozenset:
+        """AI 전송에 동의한 엔진 키 (UI 스레드에서 QSettings 를 읽어 워커에 넘긴다)."""
+        return frozenset(k for k in ("codex", "claude") if growth_consent_ok(self.qs, k))
+
+    def is_busy(self) -> bool:
+        """사용자가 시킨 일(저장·검증·제출·코치·로그인·지문·성장·추천)이 돌고 있는가. 배경 분류가 끼어들지 않게 스케줄러가 묻는다 (워커 참조만 읽는다)."""
+        c, f, st = self.check_page, self.fetch_page, self.settings_page
+        workers = (
+            f._worker, c._worker, c._submit_worker, c._target_worker, c._git_worker, c._coach_worker,
+            st._worker, st._ai_ping_worker, self.growth_page.recommend._worker, self._stmt_worker, self._growth_worker,
+        )
+        return any(w is not None for w in workers)
+
+    def _on_type_progress(self, done: int, total: int, capped: str) -> None:
+        """배경 분류 진행: 추천 카드 푸터와 설정 페이지의 "풀이 유형 분류 312 / 926" 을 갱신."""
+        self.growth_page.recommend.set_type_progress(done, total, capped)
+        self.settings_page.set_type_progress(done, total, capped)
 
     def _set_busy(self, busy: bool, suffix: str) -> None:
         self.setWindowTitle(f"{APP_TITLE} — {suffix}" if busy and suffix else APP_TITLE)
@@ -719,6 +746,7 @@ class MainWindow(QMainWindow):
                 self.autosync.sync_on_close()
         self._growth_first.stop()
         self._growth_timer.stop()
+        self.type_scheduler.wait_workers()  # 배경 분류의 AI 프로세스부터 종료 (최대 몇 분을 기다리지 않게)
         if self._growth_worker is not None and self._growth_worker.isRunning():
             self._growth_worker.cancel()  # 최대 5분을 기다리지 않고 프로세스 트리를 먼저 종료
             self._growth_worker.wait(5000)

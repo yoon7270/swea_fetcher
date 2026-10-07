@@ -486,3 +486,49 @@ AI 안내줄 문구: `pending` "AI 가 약점을 분석하는 중… (Spinner)" 
 - 처음에는 하루 40문제 상한 때문에 "유형 미확인" 이 며칠간 남을 수 있다 (상한은 `recommend.CLASSIFY_*` 한 곳).
 - 새 유형 후보는 난이도 C-1 의 상위 정답률 문제에서 찾는다. 후보 안에 다음 유형이 없으면 경로상 그다음 유형으로 넘어가고, 모두 없으면 칸이 비어 일반 칸이 채운다.
 - `fetch_problem_page` 의 solver 경로(POST)를 쓰는 앱의 기존 지문 흐름과 같은 요청이라 SWEA 쪽 반응은 같다고 보지만, 분류용으로 최대 40건/일을 0.3초 간격으로 받는다 (실사용에서 로그인 가드·429 여부 확인).
+
+## M24.2 풀이 설계 기반 분류 · 백그라운드 분류
+
+계기: 1217 "거듭 제곱"("재귀호출을 이용하여 구현해 보아라")이 `math` 로 분류됐다 (재귀 유형이 없었고, 지문 읽기만으로는 지정된 기법을 놓침). 사용자 결정: ① AI 가 짧은 **풀이 설계(코드 없이)**를 쓰고 그 설계가 쓰는 기법으로 유형을 정한다 ② 앱이 열려 있고 한가할 때 백그라운드로 ③ 가벼운 Codex 모델로 ④ 카탈로그 전체를 덮는다.
+
+### 분류 체계 (`problem_types`)
+
+- 새 유형 `recursion` "재귀·분할정복"(폴더 `recursion`, 키워드 재귀·하노이·분할 정복). `backtrack` 정의는 "탐색"(DFS·가지치기·되돌리기)으로 명확히. `TAXONOMY_VERSION = 3` → 옛 결과(와 카운터)는 버리고 다시 분류.
+- 경로 `impl → brute → recursion → backtrack → stackqueue → bfs → …`. 선행: `recursion` ← (brute | impl), `backtrack` ← (recursion | brute) — 이미 백트래킹을 푼 사용자는 그대로 유효(선행이 둘 이상이면 `implied` 가 어느 쪽도 단정하지 않음 → `{backtrack}` 의 암묵 유형은 `{impl}` 뿐).
+- 캐시 항목에 `why`(≤40자) 추가. 캐시 루트에 `hour`/`hour_used`(시계 기준 1시간 버킷)·`limit_day`(AI 한도 오류가 난 날) 추가.
+
+### 프롬프트 v2 (`ai_prompts._classify_instruction`)
+
+문제마다 `plan`(핵심 풀이 2~4문장, 코드 없이, N 범위로 복잡도 판단) → `t`(plan 이 실제로 쓰는 기법의 유형 1~2개, 주 유형 먼저) → `why`(40자 이내, 풀이를 알려 주지 않는 이유). 지문이 기법을 지정하면("재귀호출을 이용하여"·"스택을 이용하여"·"BFS 로") 반드시 포함해 주 유형으로. 제목이 아니라 입력 제약으로 판단(기존 문구 유지). 출력 `{"v":2,"types":[{"n":..,"plan":"…","t":[..],"why":".."}]}`. 한 번에 **5문제**(지문 2,500자 상한 유지).
+`parse_batch` → `(valid, bad, whys)`. `plan` 은 읽지도 저장하지도 않는다(스포일러). `why` 는 `clean_why`(코드 펜스·백틱·링크·제어 문자 제거, 공백 정리, 40자)로 정리해 저장하고 카드 유형 칩 툴팁 "왜 이 유형? …" 으로만 보인다 (`Recommendation.why`, 세트에 저장된 유형과 캐시 유형이 같을 때만).
+
+### 엔진·모델 (`ai_models`, `ai_engine`)
+
+- 분류는 AI 코치 엔진 설정(`SWEA_AI_ENGINE`)과 **독립**: 설치돼 있고 전송에 동의한 엔진 중에서 `SWEA_TYPE_MODEL`(auto | `codex:<slug>` | `claude:haiku`)에 맞게 고른다 (`service._classify_engine`; Codex 우선, 고른 엔진을 못 쓰면 동의한 다른 엔진으로).
+- Codex 모델 목록: `<CODEX_HOME 또는 ~/.codex>/models_cache.json` **한 파일만** 읽는다(`auth.json` 은 열지 않음 — `tests/test_ai_models.py` 가 접근 이름을 감시). 기존 코드에는 홈 해석이 없어 `CODEX_HOME` → `~/.codex` 로 새로 정했다. 자동 = `visibility == "list"` 이고 slug 에 `luna` 가 든 모델 중 priority 숫자가 가장 작은 것(이 PC: `gpt-6-luna`, priority 4) · 없으면 Codex 기본(`-m` 없음). 추론 강도는 `low`(모델이 `supported_reasoning_levels` 에 low 를 안 가지면 생략).
+- `ai_engine.build_command(..., model, effort)` / `run(..., model=, effort=)`: Codex 는 help 에 `--model` 이 있을 때 `-m <slug>`, `--config` 가 있을 때 `--config model_reasoning_effort=low`(**따옴표 없음** — Codex 가 TOML 로 못 읽으면 문자열로 취급하고, Windows `.cmd` shim 이 따옴표를 깨뜨리지 않게; 요청서의 `="low"` 와 다른 점). Claude 는 `--model haiku`. 옵션이 help 에 없거나 help 를 못 읽으면 조용히 빼고 기본 모델로. `ai_engine.is_limit_error(e)` = rate limit·usage limit·429·quota·too many requests 휴리스틱(메시지·hint·stderr).
+- 설정: `.env` `SWEA_TYPE_BG`(기본 1)·`SWEA_TYPE_MODEL`(기본 auto) → `Settings.type_bg`/`type_model`. 콤보는 `detect_engines` 결과(`EngineStatus.codex_models`)로 채우고 Claude 는 감지될 때만. 저장된 값이 목록에 없으면(모델 삭제·Claude 미설치) 조용히 바꾸지 않고 "(목록에 없음/설치 안 됨)" 항목으로 남긴다.
+
+### 서비스 (`service`)
+
+- 공통: `_run_batch`(지문 읽기 → AI 1회 → 검증 → 캐시 저장), `_Statements`(지문 캐시 → 카탈로그 id 로 지문 페이지, 요청 사이 `CLASSIFY_FETCH_PACE` = **1.0초**, 비명시 로그인 실행당 1회·재시도 없음, 네트워크·로그인 문제는 `network` 로 중단, `ProblemNotFound`/`ParseError`·빈 지문은 "정하지 못함"(14일 뒤 재시도)으로 기록해 같은 문제가 계속 막지 않게), `_CLASSIFY_LOCK`(분류는 한 번에 하나 — 방문 분류는 기다리고 배경 분류는 `busy` 로 물러남).
+- 상한(모두 `recommend.CLASSIFY_*`): 묶음 5 · **시간당 60 · 하루 400**(옛 하루 40 대체). 방문 분류와 배경 분류가 같은 카운터·캐시를 쓴다 (`TypeCache.budget`: 하루 상한이 시간 상한보다 먼저 보고됨). 방문 분류는 한 실행에서 푼 24·새 유형 12·후보 16 까지만(나머지는 배경이).
+- `classify_background(...)`: 한 묶음만. `ClassifyResult.status` = off | nothing | needs_consent | no_engine | ok | failed | limit | network | capped | paused | busy | cancelled. 순서 `_bg_order`: ① 앱 Pass 푼 문제(최근 날짜부터) ② 오늘 세트 ③ 내 수준 C → C+1 → C-1 → C+2 … (각 수준은 `ranked_pool` 품질순, 푼/재도전 제외) ④ 나머지(난이도 모름·푼 문제 포함, 수준 거리순). 이미 분류했거나 14일 안에 정하지 못한 문제·`exclude`(이번 앱 실행에서 실패한 묶음) 제외. AI 한도 오류는 `limit_day` 를 남겨 앱을 다시 켜도 그날은 멈춘다. 오늘 방문 분류가 실패(`fail_day`)했으면 `paused`.
+- `RecommendResult.type_progress`(분류한 카탈로그 문제 수, 카탈로그 문제 수; 유형을 정하지 못한 항목은 안 센다)·`type_capped`("" | day | hour; 한도 오류도 day) → 카드 푸터. `type_status(settings)` = 설정 페이지용 진행도.
+
+### GUI
+
+- `gui/type_scheduler.py` `TypeScheduler`(MainWindow 소유, `QTimer` 2분): `blocker()` = off(설정·토글) | consent | running | starting(<60초) | stopped(그날 멈춤) | cooldown | busy(`MainWindow.is_busy()` — 저장·검증·제출·git·코치·로그인·핑·추천·지문·성장 워커 참조만 읽음) | "". 설정은 틱마다 다시 읽으므로 토글을 끄면 다음 틱부터 멈춘다(도는 묶음은 완료). 결과 처리: limit/paused/일일 상한 → 그날 멈춤, 시간당 상한 → 다음 정시, network → 10분, nothing/no_engine → 30분, failed → 연속 3회면 그날 멈춤(실패 묶음은 세션 동안 제외). `progress_changed`/`classified` 시그널 → 카드 푸터·설정 진행도 갱신, 카드는 `types_updated()` 로 표시만 하고 **다음에 읽을 때**(`RecommendWorker` mode `rebuild`, 사용자가 안 만졌을 때만) 세트에 반영.
+- `TypeBgWorker`(QThread): 취소 시 AI 프로세스 트리 종료. `MainWindow.closeEvent` 가 가장 먼저 `type_scheduler.wait_workers()`.
+- 동의 문구(`ask_recommend_consent`)·설정 힌트·카드 안내(limit/network)에 배경 분류·상한·끄는 방법을 추가.
+
+### 테스트
+
+`tests/test_problem_types.py`(재귀·경로·v2 파싱·why 정리·시간당 카운터), `tests/test_ai_models.py`(models_cache.json·luna 선택·auth.json 비접근·콤보 항목), `tests/test_ai_engine.py`(`-m`/`--config`/`--model` 구성·폴백·한도 휴리스틱), `tests/test_service_types.py`(방문 분류 갱신), `tests/test_service_background.py`(게이트·순서·상한·한도/실패/네트워크·잠금·모델), `tests/gui/test_type_scheduler.py`(한가함·동의/토글·멈춤 규칙·종료), `tests/gui/test_gui_recommend.py`(칩 툴팁·푸터 진행도·rebuild·설정 콤보). `tests/conftest.py` 가 `CODEX_HOME` 을 빈 tmp 폴더로 격리(실제 `~/.codex` 를 읽지 않음). 네트워크·AI 는 전부 스텁.
+
+### 남은 위험
+
+- 풀이 설계를 쓰게 하면 호출당 출력이 길어져 느리고 사용량이 늘 수 있다 (5문제/호출, 시간당 60문제 상한으로 제한). 실사용에서 호출 시간(`AI_CLASSIFY_TIMEOUT` = 180초)과 Luna 모델의 JSON 준수율을 확인해야 한다.
+- `-m gpt-6-luna` 는 설치된 Codex CLI 버전이 받아들이는 slug 여야 한다 (캐시 목록은 CLI 가 만든 것이라 일반적으로 일치). 거부되면 분류가 `failed` 로 쌓이고 3회 뒤 그날 멈춘다 — 설정에서 "자동"/다른 모델로.
+- 한도 오류 감지는 메시지 글자 휴리스틱이다 (CLI 가 다른 문구를 쓰면 일반 실패로 처리되어 연속 3회 규칙이 대신 멈춘다).
+- 배경 분류 중 사용자가 추천 카드를 열면 방문 분류가 잠금을 기다린다 (한 묶음 길이만큼 "풀이 유형 분석 중…").

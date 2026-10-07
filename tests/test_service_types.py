@@ -14,7 +14,7 @@ import pytest
 
 from swea_fetcher import ai_engine, catalog, content_cache, growth, problem_types, recommend, service, solved
 from swea_fetcher.ai_engine import AiResult, EngineInfo
-from swea_fetcher.errors import AiRunFailed, NetworkError
+from swea_fetcher.errors import AiRunFailed, NetworkError, ProblemNotFound
 from swea_fetcher.models import ProblemContent
 from tests.conftest import DUMMY_ID, DUMMY_PW
 from tests.test_service_recommend import seed_catalog, seed_types
@@ -38,10 +38,10 @@ def entries_of(prompt: str) -> list[dict]:
 @pytest.fixture
 def env(settings, monkeypatch):
     """엔진·지문 fake. replies[key] = 함수(prompt) → 텍스트 또는 예외. 기본은 모든 문제를 완전탐색으로."""
-    st = {"calls": [], "found": [CODEX], "fetched": [], "lock": threading.Lock(), "fetch_fail": set(), "session_fail": False}
+    st = {"calls": [], "found": [CODEX], "fetched": [], "lock": threading.Lock(), "fetch_fail": set(), "fetch_missing": set(), "session_fail": False}
 
     def brute_all(prompt):
-        return json.dumps({"v": 1, "types": [{"n": e["n"], "t": ["brute"]} for e in entries_of(prompt)]})
+        return json.dumps({"v": 2, "types": [{"n": e["n"], "plan": "모든 경우를 열거한다", "t": ["brute"], "why": "모든 경우를 직접 열거"} for e in entries_of(prompt)]})
 
     st["replies"] = {"codex": brute_all, "claude": brute_all}
 
@@ -68,6 +68,8 @@ def env(settings, monkeypatch):
         st["fetched"].append(cid)
         if cid in st["fetch_fail"]:
             raise NetworkError("지문 실패")
+        if cid in st["fetch_missing"]:
+            raise ProblemNotFound("없는 문제")
         return f"PAGE:{cid}", "detail"
 
     monkeypatch.setattr(service.ai_engine, "resolve_all", resolve_all)
@@ -167,28 +169,57 @@ def test_solved_problems_are_classified_first_and_saved_with_engine_and_time(set
     assert {3000, 3001, 3002} <= first  # 푼 문제부터
     entry = cached(settings).entries[3000]
     assert entry.t == ("brute",) and entry.src == "ai" and entry.eng == "codex" and entry.at == "2026-10-06T12:00:00"
+    assert entry.why == "모든 경우를 직접 열거"  # 이유 한 줄은 저장하고 plan(풀이 설계)은 어디에도 저장하지 않는다
+    assert "모든 경우를 열거한다" not in problem_types.cache_path(settings).read_text(encoding="utf-8")
     kw = env["calls"][0][2]
     assert kw["timeout"] == service.AI_CLASSIFY_TIMEOUT
 
 
 def test_default_budget_constants():
-    assert (recommend.CLASSIFY_BATCH, recommend.CLASSIFY_DAILY_CAP) == (12, 40)
+    assert (recommend.CLASSIFY_BATCH, recommend.CLASSIFY_HOURLY_CAP, recommend.CLASSIFY_DAILY_CAP) == (5, 60, 400)
 
 
-def test_batches_have_at_most_twelve_problems_and_the_daily_cap_applies(settings, env, monkeypatch):
-    monkeypatch.setattr(recommend, "CLASSIFY_DAILY_CAP", 20)
+def test_batches_have_at_most_five_problems_and_the_daily_cap_applies(settings, env, monkeypatch):
+    monkeypatch.setattr(recommend, "CLASSIFY_DAILY_CAP", 12)
     seed_catalog(settings, levels=(1, 2, 3, 4, 5), per=40)
     solve(settings, range(1000, 1040))  # 푼 문제가 많다
     res = classify(settings)
     sizes = [len(entries_of(c[1])) for c in env["calls"]]
-    assert sizes == [12, 8] and sum(sizes) == recommend.CLASSIFY_DAILY_CAP
-    assert cached(settings).used_on(NOW.date()) == 20 == len(cached(settings).entries)
-    assert res.status == "partial"
+    assert sizes == [5, 5, 2] and sum(sizes) == recommend.CLASSIFY_DAILY_CAP
+    assert cached(settings).used_on(NOW.date()) == 12 == len(cached(settings).entries)
+    assert res.status == "partial" and res.capped == "day"
     n_calls = len(env["calls"])
     again = classify(settings)
     assert again.status == "partial" and len(env["calls"]) == n_calls  # 같은 날은 더 부르지 않는다
     tomorrow = classify(settings, now=NOW + timedelta(days=1))
     assert len(env["calls"]) > n_calls and tomorrow.changed  # 다음 날 이어서
+
+
+def test_the_hourly_cap_is_shared_and_reopens_next_hour(settings, env, monkeypatch):
+    monkeypatch.setattr(recommend, "CLASSIFY_HOURLY_CAP", 7)
+    seed_catalog(settings, levels=(1, 2, 3, 4, 5), per=40)
+    solve(settings, range(1000, 1040))
+    res = classify(settings)
+    assert [len(entries_of(c[1])) for c in env["calls"]] == [5, 2] and res.status == "partial" and res.capped == "hour"
+    assert cached(settings).used_in_hour(NOW) == 7
+    n_calls = len(env["calls"])
+    assert classify(settings).status == "partial" and len(env["calls"]) == n_calls  # 같은 시간에는 더 부르지 않는다
+    assert classify(settings, now=NOW + timedelta(hours=1)).changed and len(env["calls"]) > n_calls  # 다음 시간에 이어서
+
+
+def test_visit_classification_uses_the_light_model_and_ignores_the_coach_engine_setting(settings, env):
+    import dataclasses
+
+    seed_catalog(settings)
+    solve(settings, (3000, 3001, 3002))
+    env["found"] = [CODEX, CLAUDE]
+    assert classify(dataclasses.replace(settings, ai_engine="claude")).changed  # AI 코치를 Claude 로 고정해도 분류는 모델 설정을 따른다
+    kw = env["calls"][0][2]
+    assert env["calls"][0][0] == "codex" and kw["effort"] == "low" and kw["model"] == ""  # models_cache.json 이 없으면 Codex 기본 모델 (-m 없음)
+    env["calls"].clear()
+    problem_types.clear(settings.config_dir)
+    classify(dataclasses.replace(settings, type_model="claude:haiku"))
+    assert env["calls"][0][0] == "claude" and env["calls"][0][2]["model"] == "haiku"
 
 
 def test_per_run_solved_limit_leaves_budget_for_candidates(settings, env):
@@ -242,12 +273,23 @@ def test_statement_text_is_clipped(settings, env, monkeypatch):
     assert all(len(e["text"]) < 2_600 for c in env["calls"] for e in entries_of(c[1]))
 
 
-def test_fetch_failures_skip_the_problem_without_caching(settings, env):
+def test_network_failure_stops_the_run_without_caching_or_ai_call(settings, env):
     items = seed_catalog(settings, over={3001: {"id": "FAILFAILFAILFAIL"}})
     solve(settings, (3000, 3001, 3002))
     env["fetch_fail"] = {items[3001].id}
-    classify(settings)
-    assert 3001 not in prompted_nums(env) and 3001 not in cached(settings).entries and 3000 in cached(settings).entries
+    res = classify(settings)
+    assert res.status == "network" and env["calls"] == [] and cached(settings).entries == {}  # 연결 문제는 이번 실행을 멈춘다 (캐시에 "정하지 못함" 으로 남기지 않는다)
+    assert len(env["fetched"]) <= 2  # 실패 뒤에는 더 받지 않는다
+
+
+def test_missing_statement_is_remembered_as_undecided_and_the_rest_continue(settings, env):
+    items = seed_catalog(settings, over={3001: {"id": "GONEGONEGONEGONE"}})
+    solve(settings, (3000, 3001, 3002))
+    env["fetch_missing"] = {items[3001].id}
+    res = classify(settings)
+    tc = cached(settings)
+    assert res.status in ("ok", "partial") and tc.entries[3001].t == () and tc.fresh(3001, NOW.date())  # 없는 지문은 14일 뒤에 다시
+    assert 3001 not in prompted_nums(env) and tc.entries[3000].t == ("brute",)
 
 
 def test_session_failure_stops_fetching_and_makes_no_ai_call(settings, env):
@@ -255,7 +297,29 @@ def test_session_failure_stops_fetching_and_makes_no_ai_call(settings, env):
     solve(settings, (3000, 3001, 3002))
     env["session_fail"] = True
     res = classify(settings)
-    assert env["calls"] == [] and env["fetched"] == [] and res.status == "ok" and not res.changed  # 지문을 못 구하면 AI 도 안 부른다
+    assert env["calls"] == [] and env["fetched"] == [] and res.status == "network" and not res.changed  # 지문을 못 구하면 AI 도 안 부른다
+
+
+def test_fetches_are_paced_one_second_apart(settings, env):
+    seed_catalog(settings)
+    solve(settings, (3000, 3001, 3002))
+    sleeps: list[float] = []
+    classify(settings, sleep=sleeps.append)
+    assert service.CLASSIFY_FETCH_PACE >= 1.0 and sleeps and set(sleeps) == {service.CLASSIFY_FETCH_PACE}
+    assert len(sleeps) == len(env["fetched"]) - 1  # 첫 요청 앞에서는 기다리지 않는다
+
+
+def test_rate_limit_error_stops_for_the_day(settings, env):
+    seed_catalog(settings)
+    solve(settings, (3000, 3001, 3002))
+    env["replies"]["codex"] = AiRunFailed("GPT (Codex) 실행 실패 (코드 1)", stderr="Error: 429 Too Many Requests — usage limit reached")
+    res = classify(settings)
+    assert res.status == "limit" and cached(settings).limit_day == "2026-10-06" and cached(settings).fail_day == ""
+    assert len(env["calls"]) == 1
+    assert classify(settings).status == "limit" and len(env["calls"]) == 1  # 그날은 더 부르지 않는다
+    env["replies"]["codex"] = lambda p: json.dumps({"v": 2, "types": [{"n": e["n"], "t": ["dp"], "why": "점화식"} for e in entries_of(p)]})
+    assert classify(settings, retry=True).changed and cached(settings).limit_day == ""  # [다시 시도] 가 통하면 한도 표시를 지운다
+    assert classify(settings, now=NOW + timedelta(days=1)).status != "limit"
 
 
 def test_new_type_candidates_come_after_solved_and_target_one_step_easier_level(settings, env):
@@ -271,7 +335,7 @@ def test_new_type_candidate_search_stops_when_the_next_type_already_has_candidat
     items = seed_catalog(settings)
     solve(settings, (3000, 3001, 3002))
     seed_types(settings, (3000, 3001, 3002))
-    seed_types(settings, [n for n, it in items.items() if it.lv == 2][:3], types=("backtrack",))  # D2 에 DFS·백트래킹 문제가 이미 있다
+    seed_types(settings, [n for n, it in items.items() if it.lv == 2][:3], types=("recursion",))  # D2 에 다음 유형(재귀·분할정복) 문제가 이미 있다
     classify(settings)
     assert not any(items[n].lv == 2 for n in prompted_nums(env))
 
@@ -329,7 +393,7 @@ def test_mid_run_failure_keeps_what_was_done(settings, env):
 
     env["replies"]["codex"] = flaky
     res = classify(settings)
-    assert res.status == "partial" and res.changed and len(cached(settings).entries) == 12  # 앞 배치는 남는다
+    assert res.status == "partial" and res.changed and len(cached(settings).entries) == recommend.CLASSIFY_BATCH  # 앞 배치는 남는다
 
 
 def test_cancel_during_run_is_not_a_failure(settings, env):

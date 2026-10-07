@@ -33,9 +33,9 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable, Sequence
 
-from . import ai_engine, ai_prompts, auth, catalog, checker, client, coach, config, content_cache, gitops, growth, growth_tags, lookup, parser, problem_types, recommend, solved, solved_sync, storage, submit, time_limits
+from . import ai_engine, ai_models, ai_prompts, auth, catalog, checker, client, coach, config, content_cache, gitops, growth, growth_tags, lookup, parser, problem_types, recommend, solved, solved_sync, storage, submit, time_limits
 from .config import Settings
-from .errors import AiError, GitError, InvalidInput, SweaFetchError
+from .errors import AiError, GitError, InvalidInput, ParseError, ProblemNotFound, SweaFetchError
 from .gitops import GitResult
 from .submit import SubmitResult
 from .models import ImageRef, ProblemContent, ProblemInfo, SaveResult
@@ -841,11 +841,12 @@ class CoachResult:
 class EngineStatus:
     engines: list[ai_engine.EngineInfo]
     api_keys: list[str]  # 설정된 API 키 환경변수 이름 (경고용)
+    codex_models: list[ai_models.CodexModel] = field(default_factory=list)  # Codex 가 캐시한 모델 목록 (유형 분류 모델 콤보용, M24.2)
 
 
 def detect_engines(settings: Settings | None = None) -> EngineStatus:
     """설치된 AI 엔진과 버전 (설정 페이지·연결 테스트). --version 을 실행하므로 워커에서 호출한다."""
-    return EngineStatus(ai_engine.detect(), ai_engine.api_key_env())
+    return EngineStatus(ai_engine.detect(), ai_engine.api_key_env(), ai_models.load_codex_models())
 
 
 def resolve_engine(settings: Settings) -> ai_engine.EngineInfo:
@@ -1603,7 +1604,9 @@ def _assemble(settings: Settings, ds: recommend.DaySet, ctx: _RecCtx, today: dat
         if it is None:
             continue
         ty = problem_types.clean_ids(raw.get("ty")) or ctx.types.get(it.num, ())  # 세트에 저장된 유형 우선, 없으면 그 뒤에 알게 된 유형
-        items.append(recommend.Recommendation(it.num, it.title, it.lv, it.pr, it.pa, raw["k"], raw["r"], raw["src"], it.num in ctx.solved_nums, ty))
+        entry = ctx.tcache.entries.get(it.num)
+        why = entry.why if entry is not None and entry.t and entry.t == ty else ""  # 칩 툴팁 "왜 이 유형?" (같은 유형일 때만 — 다시 분류돼 달라졌으면 옛 이유는 쓰지 않는다)
+        items.append(recommend.Recommendation(it.num, it.title, it.lv, it.pr, it.pa, raw["k"], raw["r"], raw["src"], it.num in ctx.solved_nums, ty, why))
     sources = {i.source for i in items}
     tagged = _tagged_groups(ctx.events, stamp)
     ai_status = _ai_status_of(settings, ds)
@@ -1613,6 +1616,7 @@ def _assemble(settings: Settings, ds: recommend.DaySet, ctx: _RecCtx, today: dat
         day=today, items=items, level=ctx.est, source=("mixed" if len(sources) > 1 else (sources.pop() if sources else "rule")),
         ai_status=ai_status, ai_engines=[str(e) for e in ds.ai.get("engines") or []], catalog=status,
         shuffle=ds.shuffle, used_swea_passed=ctx.used_swea_passed, weak_tagged=tagged, type_counts=dict(ctx.counts),
+        type_progress=classify_progress(ctx.cat, ctx.tcache), type_capped=_cap_state(ctx.tcache, stamp),
     )
 
 
@@ -1861,29 +1865,203 @@ def _recommend_ai(settings, base, consent_ok, now, on_start, on_begin, is_cancel
     return out
 
 
-# --- 풀이 유형 분류 (M24.1) -------------------------------------------------------------------
-# "난이도만 같은" 추천을 막기 위해 문제마다 풀이 유형(problem_types)을 붙인다. 공개 문제의 지문 앞부분·제목만 AI 로 보내 분류하고
-# 결과는 cache/problem_types.json 에 영구 저장한다 (내 코드·계정·경로는 보내지 않는다). 워커 전용 (네트워크·AI).
+# --- 풀이 유형 분류 (M24.1 · 풀이 설계 기반 M24.2) --------------------------------------------------
+# "난이도만 같은" 추천을 막기 위해 문제마다 풀이 유형(problem_types)을 붙인다. AI 가 공개 문제의 지문 앞부분·제목만 읽고 짧은 풀이 설계(plan)를 쓴 뒤
+# 그 설계가 쓰는 기법으로 유형을 정한다. 결과(유형 + 이유 한 줄)는 cache/problem_types.json 에 영구 저장한다 (설계 본문·내 코드·계정·경로는 저장·전송하지 않는다).
+# 두 경로가 같은 캐시·같은 시간당/하루 상한을 쓴다: ① 성장 탭을 열 때(classify_types, RecommendWorker) ② 앱이 한가할 때 한 묶음씩(classify_background, 스케줄러).
+# 워커 전용 (네트워크·AI).
 
-AI_CLASSIFY_TIMEOUT = 180.0  # 12문제 분류 JSON 한 개
-CLASSIFY_FETCH_PACE = 0.3  # 지문을 새로 받을 때 요청 사이 대기(초)
-ENOUGH_TYPED = 6  # 일반 칸 후보 풀(C, C+1)에 유형을 아는 문제가 이만큼 있으면 후보 분류를 더 하지 않는다
+AI_CLASSIFY_TIMEOUT = 180.0  # 5문제 분류 JSON 한 개 (풀이 설계 포함)
+CLASSIFY_FETCH_PACE = 1.0  # 지문 페이지를 새로 받을 때 요청 사이 대기(초)
+ENOUGH_TYPED = 6  # 일반 칸 후보 풀(C, C+1)에 유형을 아는 문제가 이만큼 있으면 후보 분류를 더 하지 않는다 (방문 때만)
+CLASSIFY_FAIL_STOP = 3  # 배경 분류가 연속 이만큼 실패하면 그날은 멈춘다 (스케줄러가 센다)
+
+_CLASSIFY_LOCK = threading.Lock()  # 분류 실행은 한 번에 하나 (방문 분류와 배경 분류가 같은 캐시 파일을 동시에 고쳐 쓰지 않게)
 
 
 @dataclass
 class ClassifyResult:
-    """status: off(AI 분석 꺼짐) | nothing(할 일 없음) | needs_consent | no_engine | failed | cancelled | partial(일일 상한·중간 실패로 일부만) | ok."""
+    """status: off(AI 분석·배경 분류 꺼짐) | nothing(할 일 없음) | needs_consent | no_engine | failed | cancelled | partial(상한·중간 실패로 일부만) | ok |
+    limit(AI 사용량·요청 한도 — 그날은 멈춤) | network(SWEA 연결·로그인 문제 — 이번 실행은 멈춤) | capped(배경: 시간당/하루 상한) |
+    paused(오늘 이미 AI 호출이 실패해 배경 분류는 쉼) | busy(다른 분류가 실행 중, 배경만)."""
 
     status: str = "nothing"
     done: int = 0  # 이번에 분류를 시도한 문제 수
     changed: bool = False  # 캐시가 바뀌었다 (세트를 다시 만들 수 있다)
     engine: str = ""
+    capped: str = ""  # 끝난 뒤 막혀 있는 상한: "" | "day" | "hour"
+    attempted: tuple = ()  # 이번에 지문을 읽거나 AI 에 보내려 한 문제 번호 (배경 스케줄러가 실패한 묶음을 이번 실행에서 건너뛰는 데 쓴다)
+    progress: tuple = (0, 0)  # (분류한 카탈로그 문제 수, 카탈로그 문제 수)
+
+
+@dataclass(frozen=True)
+class TypeStatus:
+    """분류 진행 요약 (설정 페이지·카드 푸터). 파일 읽기만으로 만든다."""
+
+    done: int = 0
+    total: int = 0
+    capped: str = ""  # "" | "day" | "hour"
+
+
+def classify_progress(cat: catalog.Catalog, tc: problem_types.TypeCache) -> tuple[int, int]:
+    """(AI 가 유형을 정한 카탈로그 문제 수, 카탈로그 문제 수). 유형을 정하지 못한 항목은 세지 않는다."""
+    done = sum(1 for n in cat.items if (e := tc.entries.get(n)) is not None and e.t and e.src == "ai")
+    return done, len(cat.items)
+
+
+def _cap_state(tc: problem_types.TypeCache, stamp: datetime) -> str:
+    """분류 상한에 막혔는가: "" | "day" | "hour". 사용량 한도 오류를 만난 날도 "day" 로 본다."""
+    if tc.limit_day == stamp.date().isoformat():
+        return "day"
+    return tc.budget(stamp, recommend.CLASSIFY_DAILY_CAP, recommend.CLASSIFY_HOURLY_CAP)[1]
+
+
+def type_status(settings: Settings, now: datetime | None = None) -> TypeStatus:
+    """분류 진행도 (카탈로그가 없으면 0/0). 예외 없음."""
+    try:
+        cat = catalog.load(settings)
+        if cat is None:
+            return TypeStatus()
+        tc = problem_types.load(settings)
+        done, total = classify_progress(cat, tc)
+        return TypeStatus(done, total, _cap_state(tc, growth._now(now)))
+    except Exception:  # noqa: BLE001
+        log.exception("풀이 유형 진행도 읽기 오류")
+        return TypeStatus()
 
 
 def has_day_set(settings: Settings, now: datetime | None = None) -> bool:
     """오늘 이미 만들어 둔 세트가 있는가 (파일 읽기만)."""
     ds = recommend.load_day(settings)
     return ds is not None and ds.date == growth._now(now).date().isoformat() and bool(ds.items)
+
+
+def _classify_engine(settings: Settings, consent_ok: ConsentCheck) -> tuple[ai_engine.EngineInfo, ai_models.ClassifyModel] | str:
+    """분류에 쓸 (엔진, 모델) 또는 실패 상태 문자열 ("no_engine" | "needs_consent").
+
+    AI 코치의 엔진 설정과는 독립이다: 설치돼 있고 전송에 동의한 엔진 중에서 SWEA_TYPE_MODEL 에 맞는 가벼운 모델을 고른다 (ai_models.choose).
+    """
+    try:
+        engines = ai_engine.resolve_all("both").engines
+    except AiError:
+        return "no_engine"
+    if not engines:
+        return "no_engine"
+    consented = [e for e in engines if consent_ok(e.name)]
+    if not consented:
+        return "needs_consent"  # 호출 0
+    model = ai_models.choose(settings.type_model, [e.name for e in consented], ai_models.load_codex_models())
+    if model is None:
+        return "no_engine"
+    return next(e for e in consented if e.name == model.engine), model
+
+
+def _acquire_classify(is_cancelled: Callable[[], bool] | None) -> bool:
+    """분류 잠금 (방문 분류용): 다른 분류가 끝나기를 기다리되 취소되면 포기."""
+    while not _CLASSIFY_LOCK.acquire(timeout=0.5):
+        if is_cancelled is not None and is_cancelled():
+            return False
+    return True
+
+
+class _Statements:
+    """분류용 지문 읽기: 앱 지문 캐시 → SWEA 지문 페이지. 폴더·저장·지문 캐시 쓰기 없음 (분류용 수백 건이 사용자가 열어 본 최근 50건을 밀어내지 않게).
+
+    새로 받을 때는 요청 사이를 CLASSIFY_FETCH_PACE 초 띄우고, 로그인은 실행당 비명시 1회 (재시도 루프 없음).
+    네트워크·로그인 문제를 만나면 dead — 이번 실행에서는 더 받지 않는다.
+    """
+
+    def __init__(self, settings: Settings, cat: catalog.Catalog, index: dict, titles: dict[int, str], session, sleep: Callable[[float], None]) -> None:
+        self.settings, self.cat, self.index, self.titles, self.session, self.sleep = settings, cat, index, titles, session, sleep
+        self.fetched = 0
+        self.dead = False
+
+    def get(self, n: int) -> tuple[str, ProblemContent | None, str]:
+        """(제목, 지문, 오류). 오류: "" | "missing"(지문을 찾을 수 없음 — 다시 시도해도 같다) | "network"(연결·로그인 문제)."""
+        title = self.titles.get(n, "")
+        cached = content_cache.load(self.settings, n)
+        if cached is not None and cached.content is not None:
+            return title or cached.title, cached.content, ""
+        cid = self.cat.items[n].id if n in self.cat.items else str((self.index.get(str(n)) or {}).get("id") or "")
+        if not cid:
+            return title, None, "missing"
+        if self.dead:
+            return title, None, "network"
+        try:
+            if self.session is None:
+                self.session = auth.get_session(self.settings)
+            if self.fetched:
+                self.sleep(CLASSIFY_FETCH_PACE)
+            self.fetched += 1
+            html, _kind = client.fetch_problem_page(self.session, self.settings, cid)
+            return title, parser.parse_content(html), ""
+        except (ProblemNotFound, ParseError) as e:
+            log.info("분류용 지문을 찾을 수 없습니다 (%s): %s", n, e)
+            return title, None, "missing"
+        except (SweaFetchError, OSError) as e:
+            log.info("분류용 지문을 받지 못했습니다 (%s): %s", n, e)
+            self.dead = True
+            return title, None, "network"
+
+
+@dataclass
+class _Batch:
+    status: str = "ok"  # ok | failed | limit | network | cancelled
+    count: int = 0  # AI 에 보낸 문제 수
+    changed: bool = False  # 캐시 항목이 바뀌었다
+
+
+def _run_batch(settings: Settings, tc: problem_types.TypeCache, engine: ai_engine.EngineInfo, model: ai_models.ClassifyModel, batch: Sequence[int],
+               src: _Statements, now: datetime | None, on_start, is_cancelled) -> _Batch:
+    """한 묶음(최대 CLASSIFY_BATCH 문제)을 분류해 캐시에 반영·저장한다. AI 호출은 1회. 지문을 못 찾은 문제는 "정하지 못함" 으로 남겨 14일 뒤에 다시 본다."""
+    entries: list[dict] = []
+    missing: list[int] = []
+    for n in batch:
+        if is_cancelled is not None and is_cancelled():
+            return _Batch("cancelled")
+        title, content, err = src.get(n)
+        if err == "network":
+            return _Batch("network")  # 이번 실행은 멈춘다 — 이미 받은 지문은 버려도 다음에 캐시·다시 받기로 채운다
+        entry = ai_prompts.classify_entry(n, title, content) if content is not None else None
+        if entry is None or not entry["text"].strip():
+            missing.append(n)
+        else:
+            entries.append(entry)
+    stamp = growth._now(now)
+    out = _Batch()
+    if missing:
+        tc.entries.update(problem_types.stamp_entries({}, missing, engine.name, stamp))
+        problem_types.save(settings, tc)
+        out.changed = True
+    if not entries:
+        return out
+    nums = {e["n"] for e in entries}
+    try:
+        res = ai_engine.run(
+            engine, ai_prompts.build_classify_prompt(entries), timeout=AI_CLASSIFY_TIMEOUT, on_start=on_start, is_cancelled=is_cancelled,
+            model=model.model, effort=model.effort,
+        )
+    except AiError as e:
+        log.info("풀이 유형 분류 AI 실패 (%s): %s", engine.name, e)
+        if ai_engine.is_limit_error(e):  # 사용량·요청 한도: 그날은 더 부르지 않는다
+            tc.limit_day = stamp.date().isoformat()
+            problem_types.save(settings, tc)
+            return _Batch("limit", 0, out.changed)
+        return _Batch("failed", 0, out.changed)
+    except Exception:  # noqa: BLE001
+        log.exception("풀이 유형 분류 AI 내부 오류 (%s)", engine.name)
+        return _Batch("failed", 0, out.changed)
+    if res.cancelled or (is_cancelled is not None and is_cancelled()):
+        return _Batch("cancelled", 0, out.changed)
+    parsed = problem_types.parse_batch(res.text, nums)
+    if parsed is None:  # 형식 불량
+        return _Batch("failed", 0, out.changed)
+    valid, _bad, whys = parsed
+    tc.entries.update(problem_types.stamp_entries(valid, nums - set(valid), engine.name, stamp, whys))  # 응답에 없거나 쓸 수 없는 번호는 "정하지 못함" (14일 뒤 재시도)
+    tc.add_used_at(stamp, len(nums))
+    tc.limit_day = ""
+    problem_types.save(settings, tc)
+    return _Batch("ok", len(nums), True)
 
 
 def classify_types(
@@ -1900,13 +2078,12 @@ def classify_types(
     session=None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> ClassifyResult:
-    """풀이 유형을 AI 로 분류해 캐시에 쌓는다 (하루 40문제 상한, 한 번에 12문제). 예외는 던지지 않고 ClassifyResult.status 로 알린다.
+    """풀이 유형을 AI 로 분류해 캐시에 쌓는다 (성장 탭을 열 때·[다시 시도]; 한 번에 5문제, 시간당·하루 상한은 배경 분류와 공유). 예외는 던지지 않고 ClassifyResult.status 로 알린다.
 
     대상(우선순위): ① 내가 푼 문제(앱 Pass 기록, 최근 것부터 — "내가 아는 유형"의 증거) ② 새 유형 후보(경로상 다음 유형을 찾는 난이도 C-1 의 상위 문제)
-    ③ 일반 칸 후보(C, C+1 의 상위 문제). 이미 분류했거나 제목 키워드로 분명한 문제는 건너뛴다.
-    입력은 공개 문제의 번호·제목·지문 앞부분뿐이다. 엔진은 동의한 엔진 중 첫 번째(Codex 우선) **하나만** 쓴다 (사용량 절약).
-    지문은 (캐시에 있으면 그것을, 없으면) 카탈로그의 contestProbId 로 지문 페이지만 받아 온다 — 폴더·저장 없음, 지문 캐시도 쓰지 않는다
-    (분류용으로 받은 수십 건이 사용자가 열어 본 최근 50건을 밀어내지 않게).
+    ③ 일반 칸 후보(C, C+1 의 상위 문제). 이미 분류한 문제는 건너뛴다. 한 번 실행에서 ①~③ 은 각각 24·12·16문제까지만 한다 (나머지는 배경 분류가 한가할 때 한다).
+    입력은 공개 문제의 번호·제목·지문 앞부분뿐이다. 엔진·모델은 _classify_engine (동의한 엔진 하나만, 가벼운 모델 — 사용량 절약).
+    지문은 (캐시에 있으면 그것을, 없으면) 카탈로그의 contestProbId 로 지문 페이지만 받아 온다 — 폴더·저장 없음, 지문 캐시도 쓰지 않는다.
     """
     try:
         return _classify_types(settings, consent_ok, now, start_level, on_start, on_begin, on_progress, is_cancelled, retry, session, sleep)
@@ -1918,6 +2095,15 @@ def classify_types(
 def _classify_types(settings, consent_ok, now, start_level, on_start, on_begin, on_progress, is_cancelled, retry, session, sleep) -> ClassifyResult:
     if not (recommend_enabled(settings) and settings.recommend_ai):
         return ClassifyResult("off")
+    if not _acquire_classify(is_cancelled):
+        return ClassifyResult("cancelled")
+    try:
+        return _classify_visit(settings, consent_ok, now, start_level, on_start, on_begin, on_progress, is_cancelled, retry, session, sleep)
+    finally:
+        _CLASSIFY_LOCK.release()
+
+
+def _classify_visit(settings, consent_ok, now, start_level, on_start, on_begin, on_progress, is_cancelled, retry, session, sleep) -> ClassifyResult:
     stamp = growth._now(now)
     today = stamp.date()
     cat = catalog.load(settings)
@@ -1982,96 +2168,155 @@ def _classify_types(settings, consent_ok, now, start_level, on_start, on_begin, 
     first = pick_batch(recommend.CLASSIFY_BATCH)
     used.update(snapshot)
     if not first:
-        return ClassifyResult("nothing")
-    if recommend.CLASSIFY_DAILY_CAP - tc.used_on(today) <= 0:
-        return ClassifyResult("partial")
+        return ClassifyResult("nothing", progress=classify_progress(cat, tc))
+    room, why_capped = tc.budget(stamp, recommend.CLASSIFY_DAILY_CAP, recommend.CLASSIFY_HOURLY_CAP)
+    if room <= 0:
+        return ClassifyResult("partial", capped=why_capped, progress=classify_progress(cat, tc))
+    if tc.limit_day == today.isoformat() and not retry:
+        return ClassifyResult("limit", capped="day", progress=classify_progress(cat, tc))
     if tc.fail_day == today.isoformat() and not retry:
         return ClassifyResult("failed")  # 같은 날 자동 재시도는 하지 않는다 ([다시 시도] 만)
-    try:
-        engines = ai_engine.resolve_all(settings.ai_engine).engines
-    except AiError:
-        return ClassifyResult("no_engine")
-    if not engines:
-        return ClassifyResult("no_engine")
-    consented = [e for e in engines if consent_ok(e.name)]
-    if not consented:
-        return ClassifyResult("needs_consent")  # 호출 0
-    engine = consented[0]  # 분류는 한 엔진만 (사용량 절약) — 둘 다 설치돼 있으면 Codex 우선
+    picked = _classify_engine(settings, consent_ok)
+    if isinstance(picked, str):
+        return ClassifyResult(picked)  # needs_consent: 호출 0
+    engine, model = picked
     if is_cancelled is not None and is_cancelled():
         return ClassifyResult("cancelled")
 
     result = ClassifyResult("ok", engine=engine.name)
     if on_begin is not None:
         on_begin(engine.name)
-    box: dict = {"session": session, "failed": False, "fetched": 0}
-
-    def statement_of(n: int) -> tuple[str, ProblemContent | None]:
-        title = ctx.titles.get(n, "")
-        cached = content_cache.load(settings, n)
-        if cached is not None and cached.content is not None:
-            return title or cached.title, cached.content
-        cid = cat.items[n].id if n in cat.items else str((index.get(str(n)) or {}).get("id") or "")
-        if not cid or box["failed"]:
-            return title, None
-        try:
-            if box["session"] is None:
-                box["session"] = auth.get_session(settings)
-            if box["fetched"]:
-                sleep(CLASSIFY_FETCH_PACE)
-            box["fetched"] += 1
-            html, _kind = client.fetch_problem_page(box["session"], settings, cid)
-            return title, parser.parse_content(html)
-        except (SweaFetchError, OSError) as e:
-            log.info("분류용 지문을 받지 못했습니다 (%s): %s", n, e)
-            if box["session"] is None:
-                box["failed"] = True  # 세션을 못 만들면 이번 실행에서 더 시도하지 않는다
-            return title, None
-
+    src = _Statements(settings, cat, index, ctx.titles, session, sleep)
     while True:
         if is_cancelled is not None and is_cancelled():
             result.status = "cancelled"
             break
-        limit = recommend.CLASSIFY_DAILY_CAP - tc.used_on(today)
-        if limit <= 0:
-            result.status = "partial"
+        room, why_capped = tc.budget(growth._now(now), recommend.CLASSIFY_DAILY_CAP, recommend.CLASSIFY_HOURLY_CAP)
+        if room <= 0:
+            result.status, result.capped = "partial", why_capped
             break
-        batch = pick_batch(limit)
+        batch = pick_batch(room)
         if not batch:
             break
-        entries: list[dict] = []
-        for n in batch:
-            tried.add(n)
-            title, content = statement_of(n)
-            entry = ai_prompts.classify_entry(n, title, content) if content is not None else None
-            if entry is not None and entry["text"].strip():
-                entries.append(entry)
-        if not entries:
-            continue
-        nums = {e["n"] for e in entries}
-        cancelled = False
-        parsed = None
-        try:
-            res = ai_engine.run(engine, ai_prompts.build_classify_prompt(entries), timeout=AI_CLASSIFY_TIMEOUT, on_start=on_start, is_cancelled=is_cancelled)
-            cancelled = res.cancelled or (is_cancelled is not None and is_cancelled())
-            parsed = None if cancelled else problem_types.parse_batch(res.text, nums)
-        except AiError as e:
-            log.info("풀이 유형 분류 AI 실패 (%s): %s", engine.name, e)
-        except Exception:  # noqa: BLE001
-            log.exception("풀이 유형 분류 AI 내부 오류 (%s)", engine.name)
-        if cancelled:
+        tried.update(batch)
+        out = _run_batch(settings, tc, engine, model, batch, src, now, on_start, is_cancelled)
+        result.changed = result.changed or out.changed
+        if out.status == "cancelled":
             result.status = "cancelled"
             break
-        if parsed is None:  # 엔진 실패·형식 불량: 오늘은 더 부르지 않는다
+        if out.status == "network":
+            result.status = "partial" if result.changed else "network"
+            break
+        if out.status == "limit":
+            result.status = "partial" if result.changed else "limit"
+            result.capped = "day"
+            break
+        if out.status == "failed":  # 엔진 실패·형식 불량: 오늘은 더 부르지 않는다
             tc.fail_day = today.isoformat()
             problem_types.save(settings, tc)
             result.status = "partial" if result.changed else "failed"
             break
-        valid, _bad = parsed
-        tc.entries.update(problem_types.stamp_entries(valid, nums - set(valid), engine.name, stamp))  # 응답에 없거나 쓸 수 없는 번호는 "정하지 못함" (14일 뒤 재시도)
-        tc.add_used(today, len(nums))
-        problem_types.save(settings, tc)
-        result.done += len(nums)
-        result.changed = True
+        result.done += out.count
         if on_progress is not None:
             on_progress(result.done)
+    result.progress = classify_progress(cat, tc)
     return result
+
+
+# --- 배경 분류 (M24.2) ---------------------------------------------------------------------------
+
+
+def classify_background(
+    settings: Settings,
+    *,
+    consent_ok: ConsentCheck,
+    now: datetime | None = None,
+    start_level: int | None = None,
+    exclude: Sequence[int] = (),
+    on_start: Callable[[object], None] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+    session=None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> ClassifyResult:
+    """앱이 한가할 때 카탈로그의 풀이 유형을 **한 묶음(5문제)** 분류한다 (GUI 스케줄러가 2분마다 부른다). 예외는 던지지 않고 status 로 알린다.
+
+    순서: 푼 문제(앱 기록, 최근 것부터) → 오늘 추천 세트 → 내 수준 C 의 문제 → C+1, C-1, C+2 … → 나머지. 이미 분류했거나 14일 안에 정하지 못한 문제는 건너뛴다.
+    시간당 CLASSIFY_HOURLY_CAP · 하루 CLASSIFY_DAILY_CAP 문제 (방문 분류와 같은 카운터). 상한·한도 오류·오늘 실패한 날은 AI 를 부르지 않는다.
+    exclude: 이번 앱 실행에서 건너뛸 문제 (스케줄러가 실패한 묶음을 넘긴다). 로그인은 비명시 1회 — 네트워크·로그인 문제는 status="network" 로 멈추고 재시도하지 않는다.
+    """
+    try:
+        return _classify_background(settings, consent_ok, now, start_level, set(exclude), on_start, is_cancelled, session, sleep)
+    except Exception:  # noqa: BLE001
+        log.exception("배경 풀이 유형 분류 내부 오류")
+        return ClassifyResult("failed")
+
+
+def _bg_order(settings: Settings, ctx: _RecCtx, cat: catalog.Catalog, today: date):
+    """배경 분류 순서대로 문제 번호를 하나씩 (중복 없음)."""
+    seen: set[int] = set()
+
+    def emit(nums):
+        for n in nums:
+            if n not in seen:
+                seen.add(n)
+                yield n
+
+    yield from emit(sorted(ctx.first_day, key=lambda n: (ctx.first_day[n], n), reverse=True))  # ① 푼 문제 (내가 아는 유형의 증거)
+    ds = recommend.load_day(settings)
+    if ds is not None and ds.date == today.isoformat():  # ② 오늘 추천 세트
+        yield from emit(r["n"] for r in ds.items)
+    c = ctx.est.level
+    skip = set(ctx.solved_nums) | {r.num for r in ctx.retry}
+    levels = [c]  # ③ 내 수준에서 가까운 순 (한 단계 위 먼저)
+    for d in range(1, recommend.MAX_LEVEL):
+        levels += [c + d, c - d]
+    for lv in [x for x in levels if 1 <= x <= recommend.MAX_LEVEL]:
+        yield from emit(it.num for it in recommend.ranked_pool(cat.items, lv, recommend.WEIGHTS_FIT, skip))
+    yield from emit(sorted(cat.items, key=lambda n: (abs(cat.items[n].lv - c) if cat.items[n].lv else 99, n)))  # ④ 나머지 (난이도 모름·품질 하한 미달·푼 문제 포함)
+
+
+def _classify_background(settings, consent_ok, now, start_level, exclude, on_start, is_cancelled, session, sleep) -> ClassifyResult:
+    if not (recommend_enabled(settings) and settings.recommend_ai and settings.type_bg):
+        return ClassifyResult("off")
+    if not _CLASSIFY_LOCK.acquire(blocking=False):
+        return ClassifyResult("busy")  # 방문 분류가 돌고 있다 — 다음 틱에
+    try:
+        stamp = growth._now(now)
+        today = stamp.date()
+        cat = catalog.load(settings)
+        if cat is None:
+            return ClassifyResult("nothing")
+        ctx = _rec_context(settings, cat, today, start_level)
+        tc = ctx.tcache
+        progress = classify_progress(cat, tc)
+        if tc.limit_day == today.isoformat():
+            return ClassifyResult("limit", capped="day", progress=progress)
+        if tc.fail_day == today.isoformat():
+            return ClassifyResult("paused", progress=progress)
+        room, why_capped = tc.budget(stamp, recommend.CLASSIFY_DAILY_CAP, recommend.CLASSIFY_HOURLY_CAP)
+        if room <= 0:
+            return ClassifyResult("capped", capped=why_capped, progress=progress)
+        index = lookup.load_index(settings)
+
+        def need(n: int) -> bool:
+            return n not in exclude and not tc.fresh(n, today) and (n in cat.items or bool((index.get(str(n)) or {}).get("id")) or content_cache.has(settings, n))
+
+        batch: list[int] = []
+        for n in _bg_order(settings, ctx, cat, today):
+            if need(n):
+                batch.append(n)
+                if len(batch) >= min(recommend.CLASSIFY_BATCH, room):
+                    break
+        if not batch:
+            return ClassifyResult("nothing", progress=progress)
+        picked = _classify_engine(settings, consent_ok)
+        if isinstance(picked, str):
+            return ClassifyResult(picked, progress=progress)
+        engine, model = picked
+        if is_cancelled is not None and is_cancelled():
+            return ClassifyResult("cancelled", progress=progress)
+        out = _run_batch(settings, tc, engine, model, batch, _Statements(settings, cat, index, ctx.titles, session, sleep), now, on_start, is_cancelled)
+        status = {"ok": "ok", "failed": "failed", "limit": "limit", "network": "network", "cancelled": "cancelled"}[out.status]
+        return ClassifyResult(status, out.count, out.changed, engine.name, _cap_state(tc, growth._now(now)), tuple(batch), classify_progress(cat, tc))
+    finally:
+        _CLASSIFY_LOCK.release()

@@ -163,7 +163,8 @@ class RecommendWorker(BaseWorker):
     """오늘의 추천 (M24): 카탈로그 갱신 · 수준·세트 계산 · AI 선별. 파일·네트워크·AI 는 전부 여기서 (UI 스레드 금지).
 
     mode: "auto"(성장 탭이 처음 보일 때·날짜가 바뀐 뒤: 카탈로그 확인 → 규칙 세트 → AI → 오래된 카탈로그 조용히 갱신) /
-          "rules"(규칙 세트만 다시 읽기: 시작 수준 변경·해결 배지 갱신) / "shuffle"([다른 추천]) / "retry_ai"(동의·[다시 시도] 뒤 AI 만) /
+          "rules"(규칙 세트만 다시 읽기: 시작 수준 변경·해결 배지 갱신) / "rebuild"(규칙 세트를 읽되 배경 분류로 새로 알게 된 유형을 반영) /
+          "shuffle"([다른 추천]) / "retry_ai"(동의·[다시 시도] 뒤 AI 만) /
           "refresh_catalog"(수동 [새로 받기]/[다시 시도]).
     consented: UI 스레드에서 미리 읽은 "동의받은 엔진 키" 집합 (QSettings 를 워커 스레드에서 읽지 않는다). touched: 사용자가 이미 만졌는지 (R11).
     풀이 유형 분류 (M24.1): 세트를 만들기 전에 (오늘 세트가 없을 때) 또는 세트를 보여 준 뒤 (있을 때) AI 로 유형을 분류해 캐시에 쌓는다.
@@ -261,6 +262,9 @@ class RecommendWorker(BaseWorker):
         if self.mode == "shuffle":
             self._rules(shuffle=True)
             return None
+        if self.mode == "rebuild":  # 배경 분류로 새로 알게 된 유형을 반영 (사용자가 아직 안 만졌을 때만 세트를 다시 만든다)
+            self._rules(rebuild=not self._is_touched())
+            return None
         if self.mode == "retry_ai":
             cls = self._classify(retry=True)
             self._ai(self._rules(rebuild=bool(cls and cls.changed and not self._is_touched())), retry=True)
@@ -290,6 +294,38 @@ class RecommendWorker(BaseWorker):
 
     def _is_touched(self) -> bool:
         return bool(self.touched is not None and self.touched())
+
+
+class TypeBgWorker(BaseWorker):
+    """배경 풀이 유형 분류 **한 묶음** (M24.2). 결과는 service.ClassifyResult (finished_ok). 파일·네트워크·AI 는 전부 여기서.
+
+    consented: UI 스레드에서 미리 읽은 "동의받은 엔진 키" 집합. exclude: 이번 앱 실행에서 건너뛸 문제 번호 (실패한 묶음).
+    cancel(): 플래그 + AI 프로세스 트리 종료 (앱을 닫을 때 최대 몇 분을 기다리지 않게).
+    """
+
+    def __init__(self, settings: Settings, consented: frozenset | set = frozenset(), start_level: int | None = None, exclude=(), parent=None) -> None:
+        super().__init__(parent)
+        self.settings, self.start_level = settings, start_level
+        self.consented = frozenset(consented)
+        self.exclude = tuple(exclude)
+        self._procs: list[Any] = []
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+        for proc in list(self._procs):
+            ai_engine.kill_tree(proc)
+
+    def _on_start(self, proc) -> None:
+        self._procs.append(proc)
+        if self._cancel_requested:
+            ai_engine.kill_tree(proc)
+
+    def work(self) -> service.ClassifyResult:
+        return service.classify_background(
+            self.settings, consent_ok=lambda key: key in self.consented, start_level=self.start_level, exclude=self.exclude,
+            on_start=self._on_start, is_cancelled=lambda: self._cancel_requested,
+        )
 
 
 class FuncWorker(BaseWorker):

@@ -383,6 +383,20 @@ def test_recommend_settings_defaults_and_parsing(root_dir, config_dir, fake_keyr
     assert s2.recommend is True and s2.recommend_ai is True and "recommend=" not in repr(s2)
 
 
+def test_type_classification_settings_defaults_and_parsing(root_dir, config_dir, fake_keyring, caplog):
+    s = _load_ai(root_dir, config_dir, fake_keyring)
+    assert (s.type_bg, s.type_model) == (True, "auto")
+    s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_TYPE_BG="0", SWEA_TYPE_MODEL="codex:gpt-6-luna")
+    assert (s.type_bg, s.type_model) == (False, "codex:gpt-6-luna")
+    s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_TYPE_MODEL="claude:haiku")
+    assert s.type_model == "claude:haiku"
+    s2 = Settings(root=root_dir, user_id="u", password="p")  # 기존 생성 코드 호환
+    assert (s2.type_bg, s2.type_model) == (True, "auto")
+    with caplog.at_level(logging.WARNING, logger="swea_fetcher.config"):
+        s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_TYPE_BG="maybe", SWEA_TYPE_MODEL="codex:bad slug;rm")
+    assert (s.type_bg, s.type_model) == (True, "auto") and "SWEA_TYPE_BG" in caplog.text and "SWEA_TYPE_MODEL" in caplog.text
+
+
 def test_recommend_settings_invalid_falls_back_to_default(root_dir, config_dir, fake_keyring, caplog):
     with caplog.at_level(logging.WARNING, logger="swea_fetcher.config"):
         s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_RECOMMEND="maybe", SWEA_RECOMMEND_AI="2")

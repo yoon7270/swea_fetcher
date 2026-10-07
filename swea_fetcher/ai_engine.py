@@ -256,11 +256,13 @@ def _supports(help_text: str, option: str) -> bool:
     return re.search(rf"(?<![\w-]){re.escape(option)}(?![\w-])", help_text) is not None
 
 
-def build_command(engine: EngineInfo, scratch: str) -> tuple[list[str], Path | None]:
+def build_command(engine: EngineInfo, scratch: str, *, model: str = "", effort: str = "") -> tuple[list[str], Path | None]:
     """(argv, 최종 답을 담을 파일 경로 또는 None). 프롬프트는 argv 에 넣지 않는다 (stdin).
 
     --help 출력을 읽어 선택 옵션은 지원할 때만 붙인다. help 를 읽지 못하면(빈 출력) 필수 옵션은 그대로 두고 선택 옵션만 뺀다.
     필수 옵션이 help 에 없으면 AiRunFailed (CLI 버전이 오래됨).
+    model/effort (M24.2 분류용): 빈 문자열이면 CLI 기본값. Codex 는 `-m <모델>` 과 `--config model_reasoning_effort=<강도>`,
+    Claude 는 `--model <별칭>` (강도 옵션 없음). 해당 옵션을 help 에서 찾지 못하면 조용히 빼고 기본 모델로 돈다.
     """
     if engine.name == "codex":
         helptxt = _help_text(engine.path, "exec")
@@ -277,6 +279,10 @@ def build_command(engine: EngineInfo, scratch: str) -> tuple[list[str], Path | N
         ):
             if _supports(helptxt, opt):
                 argv += [opt] if val is None else [opt, val]
+        if model and _supports(helptxt, "--model"):
+            argv += ["-m", model]
+        if effort and model_effort_ok(helptxt):
+            argv += ["--config", f"model_reasoning_effort={effort}"]  # 따옴표 없는 값은 TOML 로 못 읽으면 문자열로 쓰인다 (.cmd shim 이 따옴표를 깨뜨리지 않게)
         use_answer = _supports(helptxt, "--output-last-message")
         return [*argv, "-"], (answer if use_answer else None)
     if engine.name == "claude":
@@ -291,8 +297,15 @@ def build_command(engine: EngineInfo, scratch: str) -> tuple[list[str], Path | N
             argv += ["--no-session-persistence"]
         if _supports(helptxt, "--strict-mcp-config"):
             argv += ["--strict-mcp-config"]  # --mcp-config 없이 쓰면 MCP 서버 0개
+        if model and _supports(helptxt, "--model"):
+            argv += ["--model", model]
         return argv, None
     raise AiRunFailed(f"알 수 없는 엔진입니다: {engine.name}")
+
+
+def model_effort_ok(helptxt: str) -> bool:
+    """추론 강도는 별도 옵션이 아니라 `--config` 로 넘긴다 — config 옵션이 있을 때만."""
+    return _supports(helptxt, "--config")
 
 
 def _require(engine: EngineInfo, helptxt: str, options: tuple[str, ...]) -> None:
@@ -326,6 +339,15 @@ def kill_tree(proc) -> None:
         pass
 
 
+_LIMIT_ERR_RE = re.compile(r"rate.?limit|usage.?limit|quota|too many requests|limit reached|(?<!\d)429(?!\d)", re.I)
+
+
+def is_limit_error(error: BaseException) -> bool:
+    """AI 호출 실패가 사용량·요청 한도 때문으로 보이는가 (휴리스틱: 메시지·hint·stderr 글자). 배경 분류가 그날 멈출지 정하는 데 쓴다."""
+    text = " ".join(str(x) for x in (error, getattr(error, "hint", ""), getattr(error, "stderr", "")) if x)
+    return bool(_LIMIT_ERR_RE.search(text))
+
+
 def _failure_hint(engine: EngineInfo, text: str) -> str:
     login_cmd = "codex login" if engine.name == "codex" else "claude"
     if _AUTH_RE.search(text):
@@ -349,10 +371,13 @@ def run(
     timeout: float = AI_TIMEOUT,
     on_start: Callable[[subprocess.Popen], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
+    model: str = "",
+    effort: str = "",
 ) -> AiResult:
     """프롬프트를 stdin 으로 넘겨 엔진을 1회 실행하고 응답 텍스트를 돌려준다.
 
     호출 전 사용자 동의 필수 (프롬프트에 코드·지문이 포함되어 외부 서비스로 전송됨).
+    model/effort: 풀이 유형 분류처럼 가벼운 모델을 쓰고 싶을 때 (build_command 참고). 기본은 CLI 설정 그대로.
     on_start(proc): 프로세스가 뜬 직후 호출 (GUI 가 취소 핸들로 쓴다). 취소는 예외 없이 cancelled=True.
     실패는 AiRunFailed / 타임아웃은 AiTimeout (프로세스 트리 종료 후).
     """
@@ -361,7 +386,7 @@ def run(
     try:
         if is_cancelled is not None and is_cancelled():
             return AiResult("", [], 0.0, cancelled=True)
-        argv, answer = build_command(engine, scratch)
+        argv, answer = build_command(engine, scratch, model=model, effort=effort)
         log.debug("AI 실행: %s", argv)
         kwargs: dict = dict(cwd=scratch, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_env(), creationflags=_creation_flags())
         if sys.platform != "win32":
