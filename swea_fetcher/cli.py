@@ -64,7 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("check", help="풀이 실행 후 output.txt 와 비교")
     c.add_argument("topic", help="주제 폴더 이름 (test/IM_test 처럼 중첩 가능)")
     c.add_argument("num", type=int, help="문제 번호")
-    c.add_argument("--timeout", type=float, default=checker.DEFAULT_TIMEOUT, help="실행 제한 시간(초), 기본 10")
+    c.add_argument("--timeout", type=float, default=None, help="실행 제한 시간(초). 생략하면 문제에 적힌 Python 시간 제한 (모르면 10)")
     c.add_argument("--no-push", action="store_true", help="통과해도 이번엔 자동 동기화하지 않습니다 (설정이 켜져 있어도)")
     c.add_argument("-v", "--verbose", action="store_true", help="상세 로그(DEBUG)")
 
@@ -306,7 +306,7 @@ def run_logout(all_: bool = False, config_dir: Path | None = None) -> int:
 # --- check --------------------------------------------------------------------------
 
 
-def run_check(topic: str, num: int, timeout: float, no_push: bool = False) -> int:
+def run_check(topic: str, num: int, timeout: float | None, no_push: bool = False) -> int:
     """풀이 실행 → 비교 → 결과 출력. 실패면 CheckFailed (exit 6). 통과 시 설정에 따라 자동 동기화 (M11)."""
     settings = config.load_settings()
     from . import storage  # 지연 import — resolve_problem_dir 만 필요

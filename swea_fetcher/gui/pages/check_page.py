@@ -39,6 +39,11 @@ REVERT_HELP_URL = "https://github.com/yoon7270/swea_fetcher/blob/main/docs/troub
 DEFAULT_TIMEOUT = checker.DEFAULT_TIMEOUT
 
 
+def _secs(v: float) -> str:
+    """4.0 → "4", 1.5 → "1.5"."""
+    return f"{v:g}"
+
+
 class CheckPage(QWidget):
     busy_changed = Signal(bool, str)
     status_message = Signal(str)
@@ -50,6 +55,7 @@ class CheckPage(QWidget):
         self.setObjectName("page")
         self.qs = qsettings
         self.settings: Settings | None = None
+        self._timeout_used = DEFAULT_TIMEOUT  # 마지막 검증에 쓴 제한 시간 (시간 초과 안내용)
         self._worker: CheckWorker | None = None
         self._git_worker: GitWorker | None = None
         self._submit_worker: SubmitWorker | None = None
@@ -224,11 +230,14 @@ class CheckPage(QWidget):
         self.num.setText(str(num))
         self.run_btn.setFocus()
 
-    def timeout(self) -> float:
-        return float(self.qs.value("check/timeout", DEFAULT_TIMEOUT, type=float))
+    def timeout(self, problem_dir: Path | None = None) -> float:
+        """검증 타임아웃: 문제 지문의 "Python의 경우 N초" (M25). 모르면 기본 10초."""
+        if problem_dir is None or self.settings is None:
+            return DEFAULT_TIMEOUT
+        return service.check_timeout(self.settings, problem_dir)[0]
 
     def _hint_text(self) -> str:
-        return f"또는 .py 파일이나 {{번호}} 폴더를 이 창에 끌어다 놓으세요 · 타임아웃 {self.timeout():.0f}초 (설정에서 변경)"
+        return f"또는 .py 파일이나 {{번호}} 폴더를 이 창에 끌어다 놓으세요 · 제한 시간은 문제에 적힌 Python 시간 (모르면 {DEFAULT_TIMEOUT:.0f}초)"
 
     def refresh_hint(self) -> None:
         self.hint.setText(self._hint_text())
@@ -338,7 +347,8 @@ class CheckPage(QWidget):
         self.git_badge.hide()
         self.submit_badge.hide()
         self._last_target = (topic, int(num_s))
-        self._worker = CheckWorker(problem_dir, self.settings, self.timeout(), self)
+        self._timeout_used = self.timeout(problem_dir)
+        self._worker = CheckWorker(problem_dir, self.settings, self._timeout_used, self)
         self._worker.progress.connect(self.status_message)
         self._worker.finished_ok.connect(self._on_done)
         self._worker.failed.connect(self._on_failed)
@@ -387,8 +397,8 @@ class CheckPage(QWidget):
             self.status_message.emit(f"통과 · {res.elapsed:.2f}s")
         elif res.timed_out:
             self.badge.set_state("시간 초과", "error")
-            self.banner.show_message("error", f"{self.timeout():.0f}초 안에 끝나지 않아 중단했습니다",
-                                     "무한 루프이거나 입력을 읽지 못한 경우입니다. 설정에서 타임아웃을 늘릴 수 있습니다", [("settings", "설정으로 이동")])
+            self.banner.show_message("error", f"제한 시간 {_secs(self._timeout_used)}초 안에 끝나지 않아 중단했습니다",
+                                     "문제에 적힌 Python 시간 제한입니다. 무한 루프이거나 입력을 읽지 못했거나, 더 빠른 풀이가 필요한 경우입니다")
         elif not res.expected.strip():
             self.badge.set_state("기대 출력 없음", "warning")
             self.banner.show_message("warning", f"{self.settings.output_name} 가 없습니다 — 뼈대만 받은 문제입니다",

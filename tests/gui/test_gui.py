@@ -366,11 +366,18 @@ def test_settings_logout_session(main_window, qtbot):
     assert w.settings_page.id_edit.text() == DUMMY_ID  # 계정 정보는 유지
 
 
-def test_settings_timeout_persists_and_updates_check_hint(main_window):
+def test_check_timeout_follows_problem_time_limit_not_settings(main_window):
+    """검증 타임아웃은 설정이 아니라 문제 지문의 "Python의 경우 N초" (M25). 모르면 10초."""
+    from swea_fetcher import time_limits
+
     w = main_window
-    w.settings_page.timeout.setValue(25)
-    assert w.check_page.timeout() == 25.0
-    assert "25초" in w.check_page.hint.text()
+    assert not hasattr(w.settings_page, "timeout")
+    assert "문제에 적힌 Python 시간" in w.check_page.hint.text()
+    d = w.settings.root / "sim" / "4321"
+    d.mkdir(parents=True)
+    assert w.check_page.timeout(d) == 10.0
+    time_limits.remember(w.settings, 4321, "<li>시간 : 10개 테스트케이스를 합쳐서 C++의 경우 1초 / Java의 경우 2초 / Python의 경우 4초</li>")
+    assert w.check_page.timeout(d) == 4.0
 
 
 # =============================================================================

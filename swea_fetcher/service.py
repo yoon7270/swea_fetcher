@@ -33,7 +33,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable, Sequence
 
-from . import ai_engine, ai_prompts, auth, catalog, checker, client, coach, config, content_cache, gitops, growth, growth_tags, lookup, parser, problem_types, recommend, solved, solved_sync, storage, submit
+from . import ai_engine, ai_prompts, auth, catalog, checker, client, coach, config, content_cache, gitops, growth, growth_tags, lookup, parser, problem_types, recommend, solved, solved_sync, storage, submit, time_limits
 from .config import Settings
 from .errors import AiError, GitError, InvalidInput, SweaFetchError
 from .gitops import GitResult
@@ -273,6 +273,8 @@ def fetch_problem(
     # 지문 캐시는 저장 단계 전에 기록한다: "이미 저장된 파일" 충돌로 저장이 실패해도 지문은 다시 볼 수 있게
     if content is not None and opts.cache_content:
         content_cache.save(settings, info.num, topic, info.title, content)
+    if content is not None:  # 검증 타임아웃용 Python 시간 제한 (config_dir 에 기록 — 지문 캐시를 꺼도 남는다, M25)
+        time_limits.remember(settings, info.num, content.limits_html)
 
     _emit(progress, "저장 중")
     try:
@@ -703,8 +705,20 @@ def _record_solved(settings: Settings, topic: str, num: int, via: str) -> None:
         log.warning("풀이 잔디 기록 실패: %s", e)
 
 
-def check_problem(settings: Settings, problem_dir: Path, timeout: float = checker.DEFAULT_TIMEOUT, on_start=None) -> checker.CheckResult:
-    """로컬 검증 (checker.run_and_compare) + 통과하면 풀이 잔디에 기록 (M20). CLI `check` 와 GUI 검증이 공통으로 거친다."""
+def check_timeout(settings: Settings, problem_dir: Path) -> tuple[float, bool]:
+    """검증 타임아웃 (초, 문제에서 읽었는가). 지문의 "Python의 경우 N초" (M25), 모르면 checker.DEFAULT_TIMEOUT."""
+    try:
+        seconds = time_limits.lookup(settings, int(Path(problem_dir).name))
+    except ValueError:
+        seconds = None
+    return (seconds, True) if seconds is not None else (checker.DEFAULT_TIMEOUT, False)
+
+
+def check_problem(settings: Settings, problem_dir: Path, timeout: float | None = None, on_start=None) -> checker.CheckResult:
+    """로컬 검증 (checker.run_and_compare) + 통과하면 풀이 잔디에 기록 (M20). CLI `check` 와 GUI 검증이 공통으로 거친다.
+    timeout 이 None 이면 문제에 적힌 Python 시간 제한 (check_timeout)."""
+    if timeout is None:
+        timeout = check_timeout(settings, problem_dir)[0]
     res = checker.run_and_compare(problem_dir, settings, timeout, on_start=on_start) if on_start else checker.run_and_compare(problem_dir, settings, timeout)
     if res.passed and not res.cancelled:
         pd = Path(problem_dir)
@@ -744,6 +758,8 @@ def logout(config_dir: Path, all_: bool = False) -> list[str]:
             removed.append("문제 목록 캐시")
         if problem_types.clear(config_dir):  # 풀이 유형 캐시도 같은 cache/ 아래 (M24.1)
             removed.append("풀이 유형 캐시")
+        if time_limits.clear(config_dir):  # 문제별 Python 시간 제한 (M25)
+            removed.append("시간 제한 기록")
         if content_cache.clear(config_dir / config.CACHE_DIR_NAME):
             removed.append("지문 캐시")
         if coach.clear(config_dir):

@@ -1,4 +1,4 @@
-"""설정 페이지 (스펙 §6.4): 계정(루트·ID·비밀번호) / 검증 타임아웃 / GitHub 연동(M7) / 진단·업데이트(M6) / 세션·계정 삭제. QScrollArea 안."""
+"""설정 페이지 (스펙 §6.4): 계정(루트·ID·비밀번호) / GitHub 연동(M7) / 진단·업데이트(M6) / 세션·계정 삭제. QScrollArea 안."""
 
 from __future__ import annotations
 
@@ -122,7 +122,6 @@ class SettingsPage(QWidget):
     busy_changed = Signal(bool, str)
     settings_changed = Signal()  # 저장/삭제 후 MainWindow 가 load_settings 를 다시 시도
     status_message = Signal(str)
-    timeout_changed = Signal(float)
     cache_settings_changed = Signal()  # 지문 캐시 사용 토글 (문제 탭 안내문 갱신용)
     heat_color_changed = Signal()  # 풀이 잔디 색 변경 (M20) — 성장 탭이 즉시 다시 칠한다
     theme_changed = Signal(str)  # 테마(색 조합) 변경 (M21, 하위 호환용 — 메인은 appearance_changed 를 쓴다). 인자 = 테마 key
@@ -213,22 +212,7 @@ class SettingsPage(QWidget):
         v.addLayout(btns)
         root.addWidget(card)
 
-        # --- 검증
-        section("검증")
-        card2, v2 = _card_box()
-        self.timeout = QSpinBox()
-        self.timeout.setRange(1, 120)
-        self.timeout.setSuffix(" 초")
-        self.timeout.setFixedWidth(96)
-        self.timeout.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)  # 스핀 버튼이 높이 제약에 깨져 보임 (W5)
-        self.timeout.setValue(int(float(self.qs.value("check/timeout", 10.0, type=float))))
-        self.timeout.valueChanged.connect(self._timeout_changed)
-        trow = QHBoxLayout()
-        trow.setSpacing(tokens.BTN_GAP)
-        trow.addWidget(self.timeout)
-        trow.addWidget(_hint("풀이 실행 제한 시간"), 1)
-        v2.addLayout(_field("타임아웃", trow, None, self.timeout))
-        root.addWidget(card2)
+        # 검증 타임아웃 설정은 없앴다: 문제 지문의 "Python의 경우 N초" 를 따른다 (M25, service.check_timeout)
 
         # --- GitHub 연동 (M7)
         section("GitHub 연동")
@@ -773,10 +757,6 @@ class SettingsPage(QWidget):
             self.root_edit.setText(path)
             set_invalid(self.root_edit, False)
             self.root_err.hide()
-
-    def _timeout_changed(self, v: int) -> None:
-        self.qs.setValue("check/timeout", float(v))
-        self.timeout_changed.emit(float(v))
 
     def _set_busy(self, busy: bool) -> None:
         for w in (self.save_btn, self.save_only_btn, self.root_edit, self.id_edit, self.pw_edit, self.logout_btn, self.logout_all_btn):
