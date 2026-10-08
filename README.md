@@ -1,13 +1,13 @@
 # SWEA Fetch
 
-SWEA(SW Expert Academy) **문제 번호 하나**로 샘플 입력·출력과 풀이 뼈대를 내 풀이 폴더에 만들어 주고, 풀이를 돌려 정답과 비교해 주는 Windows 도구.
+SWEA(SW Expert Academy) **문제 번호 하나**로 샘플 입력·출력과 풀이 뼈대를 내 풀이 폴더에 만들어 주고, 풀이를 돌려 정답과 비교해 주는 Windows · macOS 도구.
 
 ![저장 화면](docs/gui-screenshots/3b-fetch-success.png)
 
 **하는 일**
 - 문제 번호(예: `25730`) + 주제 폴더 → `swea\{주제}\{번호}\` 에 `input.txt`, `output.txt`, `{번호}.py` 뼈대 생성
 - `{번호}.py` 를 `input.txt` 로 실행해 `output.txt` 와 줄 단위로 비교 (검증)
-- 로그인·세션·문제 찾기를 알아서 처리. 비밀번호는 Windows 자격 증명 관리자에만 저장
+- 로그인·세션·문제 찾기를 알아서 처리. 비밀번호는 OS 보안 저장소(Windows 자격 증명 관리자 / macOS 키체인)에만 저장
 - (선택) **AI 앱(Codex, Claude Code 등)에서 "1231번 DFS1 에 받아줘"** 로 저장 → [AI 앱에서 쓰기](#ai-앱에서-쓰기-mcp-선택)
 - **SWEA 에 제출**해 채점 결과를 받고, **Pass 면 그 문제 폴더만 git 커밋 + 푸시** (루트가 git 저장소일 때, 옵트인)
 
@@ -33,7 +33,7 @@ Python 이 없어도 됩니다.
    |---|---|
    | 루트 폴더 | 풀이를 모아 두는 폴더 (예: `C:\Users\you\Desktop\swea`). 이 아래에 `{주제}\{번호}\` 가 만들어집니다 |
    | SWEA ID | SWEA 로그인 ID (이메일) |
-   | 비밀번호 | Windows 자격 증명 관리자에만 저장됩니다. 화면에 표시되지 않고, 파일에도 남지 않습니다 |
+   | 비밀번호 | OS 보안 저장소(Windows 자격 증명 관리자 / macOS 키체인)에만 저장됩니다. 화면에 표시되지 않고, 파일에도 남지 않습니다 |
 
    **[저장 후 로그인 확인]** → 상태바에 `● 로그인됨` 이 보이면 끝.
 
@@ -104,7 +104,37 @@ swea-fetch 25730 IM_test
      25730.py    (뼈대 생성)
 ```
 
-GUI 는 `swea-fetch-gui` 로 실행합니다. CLI 와 같은 설정(`%USERPROFILE%\.swea-fetch\`)을 씁니다.
+GUI 는 `swea-fetch-gui` 로 실행합니다. CLI 와 같은 설정(Windows `%USERPROFILE%\.swea-fetch\`, macOS `~/.swea-fetch/`)을 씁니다.
+
+---
+
+## macOS 에서 쓰기
+
+Windows 와 같은 코드로 동작합니다. exe 대신 **소스로 실행**하거나 직접 `.app` 을 빌드합니다 (Releases 의 exe 는 Windows 전용). Python 3.11 이상, 터미널(zsh) 기준.
+
+```bash
+git clone https://github.com/yoon7270/swea_fetcher.git
+cd swea_fetcher
+python3 -m venv ~/.venvs/swea_fetcher   # Desktop·Documents 밖 권장 (아래 참고)
+source ~/.venvs/swea_fetcher/bin/activate
+pip install -e ".[gui]"
+swea-fetch init
+swea-fetch-gui
+```
+
+| 달라지는 점 | macOS |
+|---|---|
+| 설정 폴더 | `~/.swea-fetch/` |
+| 비밀번호 저장 | 키체인 (키체인 접근 → `swea-fetch`). 처음 읽을 때 허용 창이 뜨면 **항상 허용** |
+| 폴더 열기 / 파일 열기 | Finder · `open` |
+| 에디터 열기 | `/Applications` 의 VS Code → PyCharm 순으로 찾아 `open -a`. 없으면 기본 연결 앱 |
+| 단축키 | `Ctrl` 대신 `⌘` (화면 표기도 ⌘) |
+| Git 인증 | `brew install git` 후 첫 푸시 때 [Git Credential Manager](https://github.com/git-ecosystem/git-credential-manager) 또는 `gh auth login` |
+| 풀이 실행 Python | `python3` (설정 화면 또는 `SWEA_PYTHON` 으로 지정 가능) |
+
+가상환경을 Desktop·Documents 안(`.venv`)에 두면 macOS 가 파일에 숨김 플래그를 붙여 `Could not find the Qt platform plugin` 으로 종료될 수 있습니다. `~/.venvs/` 처럼 밖에 두세요.
+
+`.app` 으로 묶으려면: [docs/development.md](docs/development.md) 의 "macOS 앱 빌드" 참고.
 
 ---
 
@@ -269,7 +299,7 @@ Contest 진행 중인 문제나 **가입하지 않은** Solving Club 의 문제�
 
 **전제 (한 번만)**
 1. 루트 폴더가 git 저장소이고 `origin` 이 있어야 합니다. 도구는 저장소를 만들어 주지 않습니다.
-2. GitHub 인증은 [Git for Windows](https://git-scm.com/download/win) 에 포함된 **Git Credential Manager** 가 맡습니다. 첫 푸시 때 브라우저 로그인 창이 한 번 뜹니다.
+2. GitHub 인증은 [Git for Windows](https://git-scm.com/download/win) 에 포함된 **Git Credential Manager** 가 맡습니다 (macOS 는 `gh auth login` 또는 Git Credential Manager 설치). 첫 푸시 때 브라우저 로그인 창이 한 번 뜹니다.
 
 처음 설정하는 사람 (GitHub 에서 빈 저장소를 먼저 만든 뒤, 루트 폴더에서):
 
@@ -355,7 +385,7 @@ swea-fetch push IM_test 25730 -m "solve: 25730"
 
 ## AI 앱에서 쓰기 (MCP, 선택)
 
-Codex / Claude Code / Claude Desktop / Cursor 같은 AI 앱에서 "1231번 DFS1 에 받아줘" 로 저장할 수 있습니다. 표준 MCP(stdio) 서버라 MCP 를 지원하는 앱이면 어디서나 됩니다. **Python 이 있는 Windows 사용자용**이며, exe 버전에는 들어 있지 않습니다. 이 PC 에서만 동작하는 로컬 서버입니다 (별도 서버·비용 없음).
+Codex / Claude Code / Claude Desktop / Cursor 같은 AI 앱에서 "1231번 DFS1 에 받아줘" 로 저장할 수 있습니다. 표준 MCP(stdio) 서버라 MCP 를 지원하는 앱이면 어디서나 됩니다. **Python 이 있는 사용자용**(아래 명령은 Windows 기준 — macOS 는 `python3 -m venv ~/swea-fetch-venv`, 실행 파일 `~/swea-fetch-venv/bin/swea-fetch-mcp`, Codex 설정 `~/.codex/config.toml`)이며, exe 버전에는 들어 있지 않습니다. 이 PC 에서만 동작하는 로컬 서버입니다 (별도 서버·비용 없음).
 
 1. 전용 가상환경 만들기:
 
@@ -490,7 +520,7 @@ pytest
 ```
 
 - 모듈 구조와 역할, 선택자 수정 위치(`swea_fetcher/parser.py` 상단 상수), 페이지 조사 기록([docs/swea-page-notes.md](docs/swea-page-notes.md))
-- exe 빌드: `pyinstaller packaging\swea-fetch-gui.spec` → `dist\swea-fetch-gui.exe` (커밋하지 않음), 자가진단 `SWEA_FETCH_SELFTEST`
+- exe 빌드: `pyinstaller packaging\swea-fetch-gui.spec` → `dist\swea-fetch-gui.exe` (커밋하지 않음). macOS: `python packaging/make_icns.py` 후 같은 spec → `dist/SWEA Fetch.app`, 자가진단 `SWEA_FETCH_SELFTEST`
 - 디자인 스펙 [design/design-spec.md](design/design-spec.md), 화면 캡처 [docs/gui-screenshots/](docs/gui-screenshots/)
 
 </details>

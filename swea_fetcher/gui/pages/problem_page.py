@@ -14,6 +14,7 @@ from PySide6.QtCore import QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QImage, QIntValidator, QKeySequence, QShortcut, QTextDocument
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QStackedLayout, QTextBrowser, QVBoxLayout, QWidget
 
+from ... import platform_text
 from ...config import Settings
 from ...content_cache import CachedStatement
 from ...models import ProblemContent
@@ -258,8 +259,8 @@ class ProblemPage(QWidget):
         self.open_py_btn = Button("에디터에서 열기")
         self.zoom_out_btn = Button("글자 −")
         self.zoom_in_btn = Button("글자 +")
-        self.zoom_out_btn.setToolTip("글자 작게 (Ctrl+−)")
-        self.zoom_in_btn.setToolTip("글자 크게 (Ctrl++)")
+        self.zoom_out_btn.setToolTip(platform_text.keys("글자 작게 (Ctrl+−)"))
+        self.zoom_in_btn.setToolTip(platform_text.keys("글자 크게 (Ctrl++)"))
         for b in (self.open_dir_btn, self.open_py_btn, self.zoom_out_btn, self.zoom_in_btn):
             set_class(b, "tonal")  # 바닥 위 버튼 (회색 secondary 는 바닥에 묻힌다)
         bar.addWidget(self.open_dir_btn)

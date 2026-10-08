@@ -91,6 +91,33 @@ gh release create vX.Y.Z dist\swea-fetch-gui.exe dist\swea-fetch-gui.exe.sha256 
 $env:SWEA_FETCH_SELFTEST="$env:TEMP\swea_selftest.txt"; .\dist\swea-fetch-gui.exe; Get-Content $env:SWEA_FETCH_SELFTEST
 ```
 
+### macOS 앱 빌드
+
+macOS 에서 `.app` 을 만듭니다 (Windows exe 와 별개 산출물, 빌드는 해당 OS 에서만 가능).
+
+```bash
+pip install pyinstaller
+```
+
+```bash
+python packaging/make_icns.py
+```
+
+```bash
+pyinstaller packaging/swea-fetch-gui.spec --noconfirm
+```
+
+- 산출: `dist/SWEA Fetch.app` (onedir 기반 번들, 약 130MB). `dist/`·`build/` 는 커밋하지 않습니다
+- 서명 단계가 `detritus not allowed` 로 실패하면 확장 속성을 지우고 직접 서명합니다 (ad-hoc, 개인용):
+
+```bash
+xattr -cr "dist/SWEA Fetch.app" && codesign -s - --force --deep "dist/SWEA Fetch.app"
+```
+
+- 자가진단: `SWEA_FETCH_SELFTEST=/tmp/st.txt "dist/SWEA Fetch.app/Contents/MacOS/swea-fetch-gui"; cat /tmp/st.txt`
+- 다른 Mac 에 배포하려면 Apple Developer 서명·공증이 필요합니다. ad-hoc 서명본은 받은 Mac 에서 처음 열 때 우클릭 → 열기가 필요합니다
+- `.venv` 가 Desktop/Documents 처럼 iCloud 동기화되는 폴더에 있으면 macOS 가 파일에 숨김 플래그를 붙여 Qt 플러그인을 못 찾는 경우가 있습니다 (`Could not find the Qt platform plugin`). `chflags -R nohidden .venv` 로 풀리며, 반복되면 `.venv` 를 `~/.venvs/` 같은 곳으로 옮기세요
+
 - 백신 오탐이 잦으면 `packaging\swea-fetch-gui.spec` 의 `ONEFILE = False` 로 폴더형 빌드
 - 새 버전 알림(`update.py`)은 Release 의 태그 이름(`vX.Y.Z`)을 현재 `__version__` 과 비교합니다 — 태그를 빼먹으면 알림이 가지 않습니다
 

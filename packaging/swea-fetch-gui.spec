@@ -1,12 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 r"""PyInstaller 스펙 — swea-fetch-gui (M4c).
 
-빌드:  .venv\Scripts\pyinstaller packaging\swea-fetch-gui.spec --noconfirm
-산출:  dist\swea-fetch-gui.exe  (커밋하지 않음 — .gitignore 의 dist/)
-onefile + windowed. 백신 오탐 시 아래 ONEFILE 을 False 로 바꿔 onedir 로.
+빌드(Windows):  .venv\Scripts\pyinstaller packaging\swea-fetch-gui.spec --noconfirm
+산출:          dist\swea-fetch-gui.exe  (커밋하지 않음 — .gitignore 의 dist/)
+빌드(macOS):    python packaging/make_icns.py && .venv/bin/pyinstaller packaging/swea-fetch-gui.spec --noconfirm
+산출:          dist/SWEA Fetch.app
+Windows 는 onefile + windowed (백신 오탐 시 ONEFILE 을 False 로). macOS 는 .app 번들(onedir 기반).
 """
 from pathlib import Path
 import os
+import sys
+
+IS_MAC = sys.platform == "darwin"
 
 # Qt는 Windows ICU를 사용한다. 다른 앱의 PATH에 있는 동명 ICU/UCRT를
 # 수집하면 QtCore import가 실패하므로 시스템 DLL 경로를 먼저 검색한다.
@@ -26,13 +31,18 @@ def _qt_svg_plugins():
     except Exception:  # noqa: BLE001
         return []
     out = []
-    for sub, name in (("imageformats", "qsvg.dll"), ("iconengines", "qsvgicon.dll")):
+    ext = "dylib" if IS_MAC else "dll"
+    prefix = "lib" if IS_MAC else ""
+    for sub, name in (("imageformats", f"{prefix}qsvg.{ext}"), ("iconengines", f"{prefix}qsvgicon.{ext}")):
         f = base / sub / name
+        if not f.exists():  # PySide6 휠은 plugins 가 Qt/ 아래에 있기도 하다
+            f = base.parent / "Qt" / "plugins" / sub / name
         if f.exists():
             out.append((str(f), f"PySide6/plugins/{sub}"))
     return out
 PKG = ROOT / "swea_fetcher"
-ONEFILE = True
+ONEFILE = not IS_MAC  # macOS 는 .app 번들 안에 풀어 둔다 (onefile+windowed 는 권장되지 않음)
+ICON = ROOT / "design" / "icons" / ("app.icns" if IS_MAC else "app.ico")
 
 a = Analysis(
     [str(ROOT / "packaging" / "launch_gui.py")],
@@ -44,7 +54,7 @@ a = Analysis(
         (str(PKG / "gui" / "theme" / "fonts"), "swea_fetcher/gui/theme/fonts"),
     ],
     hiddenimports=[
-        "keyring.backends.Windows",
+        "keyring.backends.macOS" if IS_MAC else "keyring.backends.Windows",
         "keyring.backends.chainer",
         "keyring.backends.fail",
         "PySide6.QtSvg",
@@ -69,7 +79,7 @@ if ONEFILE:
     exe = EXE(
         pyz, a.scripts, a.binaries, a.datas, [],
         name="swea-fetch-gui",
-        icon=str(ROOT / "design" / "icons" / "app.ico"),
+        icon=str(ICON) if ICON.exists() else None,
         console=False,
         upx=False,
         strip=False,
@@ -79,8 +89,22 @@ else:
         pyz, a.scripts, [],
         exclude_binaries=True,
         name="swea-fetch-gui",
-        icon=str(ROOT / "design" / "icons" / "app.ico"),
+        icon=str(ICON) if ICON.exists() else None,
         console=False,
         upx=False,
     )
     coll = COLLECT(exe, a.binaries, a.datas, name="swea-fetch-gui")
+
+if IS_MAC:
+    app = BUNDLE(
+        coll if not ONEFILE else exe,
+        name="SWEA Fetch.app",
+        icon=str(ICON) if ICON.exists() else None,
+        bundle_identifier="com.yoon7270.swea-fetch",
+        info_plist={
+            "CFBundleName": "SWEA Fetch",
+            "CFBundleDisplayName": "SWEA Fetch",
+            "NSHighResolutionCapable": True,
+            "LSMinimumSystemVersion": "11.0",
+        },
+    )

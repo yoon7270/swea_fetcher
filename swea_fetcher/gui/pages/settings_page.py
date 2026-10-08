@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import ai_engine, ai_models, config, content_cache, doctor, gitops, service, solved, solved_sync, update
+from ... import platform_text, ai_engine, ai_models, config, content_cache, doctor, gitops, service, solved, solved_sync, update
 from ...config import Settings
 from ...errors import AiError
 from ..coach_widgets import ask_consent, has_consent, reset_consents
@@ -179,7 +179,7 @@ class SettingsPage(QWidget):
         card, v = _card_box()
         self.root_edit = QLineEdit()
         self.root_edit.setObjectName("RootInput")
-        self.root_edit.setPlaceholderText("예: C:\\Users\\<you>\\Desktop\\swea")
+        self.root_edit.setPlaceholderText(platform_text.example_root())
         browse = Button("찾아보기")
         browse.clicked.connect(self._browse)
         row = QHBoxLayout()

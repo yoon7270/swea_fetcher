@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import content_cache, service, storage
+from ... import content_cache, platform_text, service, storage
 from ...config import Settings
 from ...service import FetchOptions, FetchOutcome
 from ..theme import tokens
@@ -75,7 +75,7 @@ class FetchPage(QWidget):
         head = QHBoxLayout()
         title = QLabel("문제 저장")
         set_class(title, "title")
-        keys = QLabel("Enter 저장 · Ctrl+Enter 미리보기 · Esc 로그 지우기")
+        keys = QLabel(platform_text.keys("Enter 저장 · Ctrl+Enter 미리보기 · Esc 로그 지우기"))
         set_class(keys, "hint")
         head.addWidget(title)
         head.addStretch(1)

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from . import platform_text
+
 INPUT_EXAMPLES = (
     "25730",
     "https://swexpertacademy.com/main/common/contestProb/contestProbDown.do?downType=in&contestProbId=AZq-gSmq_RfHBISS",
@@ -78,7 +80,7 @@ class MfaRequired(LoginFailed):
 class LoginLocked(LoginFailed):
     """도구 자체의 누적 실패 카운터 초과로 로그인 시도를 차단."""
 
-    default_hint = "브라우저에서 직접 로그인이 되는지 확인한 뒤 %USERPROFILE%\\.swea-fetch\\login_state.json 을 삭제하세요"
+    default_hint = f"브라우저에서 직접 로그인이 되는지 확인한 뒤 {platform_text.login_state_hint()} 을 삭제하세요"
 
 
 class SessionExpired(SweaFetchError):
