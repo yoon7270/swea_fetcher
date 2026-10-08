@@ -102,11 +102,55 @@ class AiResult:
 
 
 def _which(name: str) -> str | None:
-    """PATH 우선 (Windows 는 PATHEXT 로 .cmd/.exe). Codex 는 PATH 에 없어도 앱·확장 번들의 codex.exe 를 찾는다."""
+    """PATH 우선 (Windows 는 PATHEXT 로 .cmd/.exe). 못 찾으면 번들·흔한 설치 위치를 뒤진다.
+
+    Codex 는 Windows 에서 앱·확장 번들의 codex.exe, macOS 에서 Codex.app·확장 번들까지 본다.
+    macOS 는 Finder/Dock 으로 연 앱의 PATH 가 /usr/bin:/bin 뿐이라 터미널에서 되던 claude·codex 를 못 찾으므로
+    사용자 설치 위치(~/.local/bin, Homebrew, npm 전역, nvm 등)와 Claude 데스크톱 앱·VS Code 확장 번들을 직접 확인한다.
+    """
     found = shutil.which(name)
-    if found or name != "codex" or sys.platform not in ("win32", "darwin"):
+    if found:
         return found
-    return bundled_codex()
+    if sys.platform == "darwin":
+        return _mac_find(name)
+    if name == "codex" and sys.platform == "win32":
+        return bundled_codex()
+    return None
+
+
+def _mac_bin_dirs() -> list[str]:
+    """macOS 에서 CLI 가 흔히 설치되는 디렉터리 (존재하는 것만, 중복 제거)."""
+    home = Path.home()
+    dirs = [
+        home / ".local/bin", home / ".claude/local", home / ".npm-global/bin", home / ".volta/bin", home / ".bun/bin",
+        Path("/opt/homebrew/bin"), Path("/usr/local/bin"),
+    ]
+    dirs += sorted((home / ".nvm/versions/node").glob("*/bin"), reverse=True)  # 최신 node 우선
+    dirs += sorted((home / ".fnm/node-versions").glob("*/installation/bin"), reverse=True)
+    seen: list[str] = []
+    for d in dirs:
+        if d.is_dir() and str(d) not in seen:
+            seen.append(str(d))
+    return seen
+
+
+def _newest(paths) -> str | None:
+    hits = [p for p in paths if p.is_file() and os.access(p, os.X_OK)]
+    return str(max(hits, key=lambda p: p.stat().st_mtime)) if hits else None
+
+
+def _mac_find(name: str) -> str | None:
+    found = shutil.which(name, path=os.pathsep.join(_mac_bin_dirs()))
+    if found:
+        return found
+    if name == "codex":
+        return bundled_codex()
+    home = Path.home()
+    return _newest(  # Claude 데스크톱 앱이 받아 둔 Claude Code, VS Code·Cursor 확장의 네이티브 바이너리
+        list((home / "Library/Application Support/Claude/claude-code").glob("*/claude.app/Contents/MacOS/claude"))
+        + list((home / ".vscode/extensions").glob("anthropic.claude-code-*/resources/native-binary/claude"))
+        + list((home / ".cursor/extensions").glob("anthropic.claude-code-*/resources/native-binary/claude"))
+    )
 
 
 # Codex 앱 / VS Code·Cursor 의 Codex(ChatGPT) 확장은 codex.exe 를 PATH 밖에 넣어 둔다 (버전별 폴더).
@@ -161,6 +205,9 @@ def _creation_flags() -> int:
 def _env() -> dict[str, str]:
     env = dict(os.environ)
     env["NO_COLOR"] = "1"
+    if sys.platform == "darwin":  # npm 으로 깐 CLI 는 `#!/usr/bin/env node` — Finder 로 연 앱의 PATH 엔 node 가 없다
+        extra = [d for d in _mac_bin_dirs() if d not in env.get("PATH", "").split(os.pathsep)]
+        env["PATH"] = os.pathsep.join([env.get("PATH", ""), *extra]).strip(os.pathsep)
     return env
 
 

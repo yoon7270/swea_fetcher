@@ -472,3 +472,58 @@ def test_resolve_all_both(monkeypatch):
     _which_map(monkeypatch, {})
     with pytest.raises(AiEngineMissing):
         ai_engine.resolve_all("both")
+
+
+# --- macOS: Finder 로 연 앱은 PATH 가 비어 있어도 CLI 를 찾는다 ----------------------------------
+
+
+_REAL_WHICH = ai_engine._which  # conftest 의 autouse 픽스처가 대체하기 전의 진짜 함수
+
+
+def _fake_exe(p):
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("#!/bin/sh\n")
+    p.chmod(0o755)
+    return p
+
+
+def test_mac_finds_claude_outside_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(ai_engine, "_which", _REAL_WHICH)
+    monkeypatch.setattr(ai_engine.sys, "platform", "darwin")
+    monkeypatch.setattr(ai_engine.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    assert ai_engine._which("claude") is None
+    exe = _fake_exe(tmp_path / ".local/bin/claude")
+    assert ai_engine._which("claude") == str(exe)
+
+
+def test_mac_finds_claude_desktop_bundle_and_prefers_newest(tmp_path, monkeypatch):
+    monkeypatch.setattr(ai_engine, "_which", _REAL_WHICH)
+    monkeypatch.setattr(ai_engine.sys, "platform", "darwin")
+    monkeypatch.setattr(ai_engine.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    base = tmp_path / "Library/Application Support/Claude/claude-code"
+    old = _fake_exe(base / "2.1.260/claude.app/Contents/MacOS/claude")
+    new = _fake_exe(base / "2.1.286/claude.app/Contents/MacOS/claude")
+    os.utime(old, (1000, 1000))
+    os.utime(new, (2000, 2000))
+    assert ai_engine._which("claude") == str(new)
+
+
+def test_mac_path_wins_over_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(ai_engine, "_which", _REAL_WHICH)
+    monkeypatch.setattr(ai_engine.sys, "platform", "darwin")
+    monkeypatch.setattr(ai_engine.Path, "home", classmethod(lambda cls: tmp_path))
+    _fake_exe(tmp_path / ".local/bin/claude")
+    on_path = _fake_exe(tmp_path / "bin/claude")
+    monkeypatch.setenv("PATH", str(on_path.parent))
+    assert ai_engine._which("claude") == str(on_path)
+
+
+def test_mac_env_adds_user_bin_dirs_for_node_shims(tmp_path, monkeypatch):
+    monkeypatch.setattr(ai_engine.sys, "platform", "darwin")
+    monkeypatch.setattr(ai_engine.Path, "home", classmethod(lambda cls: tmp_path))
+    (tmp_path / ".nvm/versions/node/v22.1.0/bin").mkdir(parents=True)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    path = ai_engine._env()["PATH"].split(os.pathsep)
+    assert path[:2] == ["/usr/bin", "/bin"] and str(tmp_path / ".nvm/versions/node/v22.1.0/bin") in path
