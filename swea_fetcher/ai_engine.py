@@ -104,7 +104,7 @@ class AiResult:
 def _which(name: str) -> str | None:
     """PATH 우선 (Windows 는 PATHEXT 로 .cmd/.exe). Codex 는 PATH 에 없어도 앱·확장 번들의 codex.exe 를 찾는다."""
     found = shutil.which(name)
-    if found or name != "codex" or sys.platform != "win32":
+    if found or name != "codex" or sys.platform not in ("win32", "darwin"):
         return found
     return bundled_codex()
 
@@ -118,7 +118,23 @@ _CODEX_BUNDLES = (
 )
 
 
+_CODEX_BUNDLES_MAC = (
+    ("/Applications", "Codex.app/Contents/Resources/codex"),
+    ("/Applications", "Codex.app/Contents/MacOS/codex"),
+    ("~", ".vscode/extensions/openai.chatgpt-*/bin/macos-*/codex"),
+    ("~", ".cursor/extensions/openai.chatgpt-*/bin/macos-*/codex"),
+    ("/opt/homebrew/bin", "codex"),
+    ("/usr/local/bin", "codex"),
+)
+
+
 def bundled_codex() -> str | None:
+    if sys.platform == "darwin":
+        for base, pattern in _CODEX_BUNDLES_MAC:
+            hits = [p for p in Path(base).expanduser().glob(pattern) if p.is_file()]
+            if hits:
+                return str(max(hits, key=lambda p: p.stat().st_mtime))
+        return None
     for env, pattern in _CODEX_BUNDLES:
         base = os.environ.get(env)
         if not base:

@@ -5,9 +5,6 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -37,7 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...opener import OpenResult, editor_tooltip, open_folder, open_in_editor  # noqa: F401 — 재노출 (M13)
+from ...opener import OpenResult, _startfile, editor_tooltip, open_folder, open_in_editor  # noqa: F401 — 재노출 (M13)
 from .. import motion
 from ..theme import tokens
 from ..theme.bus import bus
@@ -1697,10 +1694,7 @@ def open_with_default_app(path: Path) -> bool:
 
 def _start(path: Path) -> bool:
     try:
-        if sys.platform == "win32":
-            os.startfile(str(path))  # noqa: S606
-        else:
-            subprocess.Popen(["xdg-open", str(path)])  # noqa: S603, S607
+        _startfile(path)
         return True
     except OSError:
         return False

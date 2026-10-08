@@ -37,6 +37,8 @@ def _identity(repo: Path) -> None:
 def _git_env(monkeypatch):
     """전역/시스템 git 설정과 자격증명 헬퍼가 끼어들지 않게 한다."""
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for k, v in (("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "user.useConfigOnly"), ("GIT_CONFIG_VALUE_0", "true")):
+        monkeypatch.setenv(k, v)  # macOS/Linux 는 호스트명으로 신원을 추측해 커밋이 되어버리므로 막는다
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.delenv("GIT_DIR", raising=False)
     monkeypatch.delenv("GIT_WORK_TREE", raising=False)
@@ -366,7 +368,9 @@ def test_non_fast_forward_reports_pull(repo, origin, tmp_path):
     assert _origin_log(origin)[0] == "elsewhere"
 
 
-def test_missing_identity_gives_config_hint(tmp_path, origin):
+def test_missing_identity_gives_config_hint(tmp_path, origin, monkeypatch):
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)  # 개발자 기기의 전역 user.name 을 가린다
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     work = tmp_path / "noid"
     _git(tmp_path, "clone", "-q", str(origin), str(work))
     for k in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "EMAIL"):

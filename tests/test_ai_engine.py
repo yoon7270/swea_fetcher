@@ -405,6 +405,7 @@ def _touch(p, mtime):
 
 
 def test_bundled_codex_prefers_app_then_newest(tmp_path, monkeypatch):
+    monkeypatch.setattr(ai_engine.sys, "platform", "win32")
     local, home = tmp_path / "local", tmp_path / "home"
     monkeypatch.setenv("LOCALAPPDATA", str(local))
     monkeypatch.setenv("USERPROFILE", str(home))

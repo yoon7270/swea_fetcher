@@ -40,6 +40,7 @@ def win(monkeypatch):
     ],
 )
 def test_detect_auto(monkeypatch, exe, kind):
+    monkeypatch.setattr(opener.sys, "platform", "win32")
     monkeypatch.setattr(opener, "_assoc_exe", lambda: exe)
     assert detect_editor("auto") == kind
 
@@ -59,6 +60,7 @@ def test_detect_forced_value_beats_auto(monkeypatch):
 
 
 def test_detect_invalid_value_is_auto(monkeypatch):
+    monkeypatch.setattr(opener.sys, "platform", "win32")
     monkeypatch.setattr(opener, "_assoc_exe", lambda: r"C:\Code.exe")
     assert detect_editor("emacs") == "vscode"
     assert detect_editor(None) == "vscode"
@@ -69,6 +71,7 @@ def test_labels_and_tooltip(monkeypatch):
     assert editor_label("pycharm") == "PyCharm"
     assert editor_label("default") == "기본 연결 프로그램"
     assert editor_label("???") == "기본 연결 프로그램"
+    monkeypatch.setattr(opener.sys, "platform", "win32")
     monkeypatch.setattr(opener, "_assoc_exe", lambda: r"C:\Code.exe")
     assert editor_tooltip("auto") == "열릴 프로그램: VS Code"
 

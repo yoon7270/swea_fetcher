@@ -44,7 +44,7 @@ def resolve_python(settings: Settings | None = None) -> str:
     frozen = bool(getattr(sys, "frozen", False))
     if not frozen:
         candidates.append(sys.executable)
-    for name in ("python", "python3", "py"):
+    for name in (("python3", "python") if sys.platform == "darwin" else ("python", "python3", "py")):
         found = shutil.which(name)
         if found:
             candidates.append(found)
@@ -54,7 +54,7 @@ def resolve_python(settings: Settings | None = None) -> str:
             return str(p)
     raise PythonNotFound(
         "풀이를 실행할 Python 을 찾지 못했습니다. Python 을 설치해 PATH 에 두거나, "
-        "설정 파일(.env)에 SWEA_PYTHON=C:\\...\\python.exe 를 추가하세요"
+        "설정 파일(.env)에 SWEA_PYTHON=<python 경로> 를 추가하세요"
     )
 
 

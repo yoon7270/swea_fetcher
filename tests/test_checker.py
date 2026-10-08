@@ -277,6 +277,7 @@ def test_resolve_python_not_found(settings, monkeypatch):
         checker.resolve_python(settings)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows 경로 표기 (py 런처)")
 def test_python_cmd_adds_minus_3_for_py_launcher():
     assert checker._python_cmd(r"C:\Windows\py.exe") == [r"C:\Windows\py.exe", "-3"]
     assert checker._python_cmd(r"C:\py\python.exe") == [r"C:\py\python.exe"]

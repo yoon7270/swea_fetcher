@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Callable
 
 log = logging.getLogger("swea_fetcher.opener")
@@ -89,7 +89,7 @@ def detect_editor(setting: str | None = "auto") -> str:
     except Exception as e:  # noqa: BLE001 — ctypes 오류 등 전부 default 로
         log.debug("기본 앱 조회 실패: %s", e)
         return "default"
-    return _kind_of_exe(Path(exe).name) if exe else "default"
+    return _kind_of_exe(PureWindowsPath(exe).name) if exe else "default"
 
 
 def editor_label(kind: str) -> str:
@@ -317,14 +317,38 @@ def open_folder(path: Path) -> bool:
 def _startfile(path: Path) -> None:
     if sys.platform == "win32":
         os.startfile(str(path))  # noqa: S606
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])  # noqa: S603, S607
     else:
         subprocess.Popen(["xdg-open", str(path)])  # noqa: S603, S607
+
+
+def _mac_app(setting: str | None) -> str | None:
+    """macOS: 열 앱 이름. auto 면 VS Code → PyCharm 순으로 설치된 것, 없으면 None (기본 앱)."""
+    s = normalize_setting(setting)
+    names = {"vscode": "Visual Studio Code", "pycharm": "PyCharm"}
+    if s == "default":
+        return None
+    cands = [names[s]] if s in names else list(names.values())
+    for n in cands:
+        for base in ("/Applications", str(Path.home() / "Applications")):
+            if (Path(base) / f"{n}.app").exists():
+                return n
+    return None
 
 
 def open_in_editor(problem_dir: Path, file: Path, setting: str | None = "auto") -> OpenResult:
     """풀이 파일을 에디터로 연다. 실패는 os.startfile 폴백, 최종 실패만 ok=False."""
     kind = "default"
     note = ""
+    if sys.platform == "darwin":
+        app = _mac_app(setting)
+        try:
+            if app:
+                subprocess.Popen(["open", "-a", app, str(file)])  # noqa: S603, S607
+                return OpenResult(True, "vscode" if app == "Visual Studio Code" else "pycharm")
+        except OSError as e:
+            log.debug("에디터 열기 실패, 기본 앱으로 폴백: %s", e)
     if sys.platform == "win32":
         try:
             kind = detect_editor(setting)

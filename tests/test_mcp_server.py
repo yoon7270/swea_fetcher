@@ -85,6 +85,7 @@ def test_stdio_subprocess_smoke(tmp_path):
                 lines.append(p.stdout.readline().decode("utf-8"))
     finally:
         p.stdin.close()
+        p.stdin = None  # POSIX 에서 communicate() 가 닫힌 stdin 을 flush 하지 않게
         rest, _err = p.communicate(timeout=60)
     lines += rest.decode("utf-8").splitlines()
     lines = [ln for ln in lines if ln.strip()]
