@@ -190,6 +190,7 @@ class MainWindow(QMainWindow):
         self.fetch_page.cached_problem_requested.connect(self._show_cached_problem)
         self.history_page.problem_requested.connect(self._open_recent_problem)
         self.problem_page.open_requested.connect(self._open_problem_by_number)
+        self.problem_page.check_requested.connect(self._goto_check)  # 문제 탭 [검증하기]
         self.settings_page.cache_settings_changed.connect(self.problem_page.refresh_footer)
         self.settings_page.settings_changed.connect(lambda: self.reload_settings(stay=True))
         self.history_page.check_requested.connect(self._goto_check)

@@ -186,6 +186,7 @@ class ProblemPage(QWidget):
     status_message = Signal(str)
     goto_requested = Signal(str)
     open_requested = Signal(int)  # 문제 번호로 열기 — 메인이 저장 폴더·캐시·SWEA 순으로 찾는다
+    check_requested = Signal(str, int)  # [검증하기] (주제, 번호) — 메인이 검증 탭에 채워 넘긴다
 
     def __init__(self, qsettings: QSettings, parent=None) -> None:
         super().__init__(parent)
@@ -257,14 +258,17 @@ class ProblemPage(QWidget):
         bar.setSpacing(tokens.BTN_GAP)
         self.open_dir_btn = Button("폴더 열기")
         self.open_py_btn = Button("에디터에서 열기")
+        self.check_btn = Button("검증하기")
+        self.check_btn.setToolTip("이 문제의 풀이를 검증 탭에서 실행할 수 있게 주제·번호를 채워 넘깁니다")
         self.zoom_out_btn = Button("글자 −")
         self.zoom_in_btn = Button("글자 +")
         self.zoom_out_btn.setToolTip(platform_text.keys("글자 작게 (Ctrl+−)"))
         self.zoom_in_btn.setToolTip(platform_text.keys("글자 크게 (Ctrl++)"))
-        for b in (self.open_dir_btn, self.open_py_btn, self.zoom_out_btn, self.zoom_in_btn):
+        for b in (self.open_dir_btn, self.open_py_btn, self.check_btn, self.zoom_out_btn, self.zoom_in_btn):
             set_class(b, "tonal")  # 바닥 위 버튼 (회색 secondary 는 바닥에 묻힌다)
         bar.addWidget(self.open_dir_btn)
         bar.addWidget(self.open_py_btn)
+        bar.addWidget(self.check_btn)
         bar.addStretch(1)
         bar.addWidget(self.zoom_out_btn)
         bar.addWidget(self.zoom_in_btn)
@@ -291,6 +295,7 @@ class ProblemPage(QWidget):
 
         self.open_dir_btn.clicked.connect(self._open_dir)
         self.open_py_btn.clicked.connect(self._open_py)
+        self.check_btn.clicked.connect(self._request_check)
         self.zoom_out_btn.clicked.connect(lambda: self._set_zoom(self._zoom - 1))
         self.zoom_in_btn.clicked.connect(lambda: self._set_zoom(self._zoom + 1))
         for seq in ("Ctrl++", "Ctrl+="):
@@ -370,6 +375,7 @@ class ProblemPage(QWidget):
         self._problem_dir = d if d is not None and d.is_dir() else None
         self.open_dir_btn.setVisible(self._problem_dir is not None)
         self.open_py_btn.setVisible(self._problem_dir is not None and (self._problem_dir / f"{self._problem_dir.name}.py").exists())
+        self.check_btn.setVisible(self._check_target() is not None)
 
     def _show(self, title: str, topic: str, where: str, content: ProblemContent | None, problem_dir: Path | None = None) -> None:
         self.title.setText(title)
@@ -391,6 +397,22 @@ class ProblemPage(QWidget):
     def _open_dir(self) -> None:
         if self._problem_dir is not None and open_in_explorer(self._problem_dir):
             self.status_message.emit("폴더를 열었습니다")
+
+    def _check_target(self) -> tuple[str, int] | None:
+        """[검증하기] 대상: 루트 안에 저장한 문제 폴더({주제}/{번호}/{번호}.py)일 때만 (주제, 번호). 주제는 `test/IM_test` 표기."""
+        d = self._problem_dir
+        if d is None or self.settings is None or not d.name.isdigit() or not (d / f"{d.name}.py").exists():
+            return None
+        try:
+            rel = d.parent.resolve().relative_to(Path(self.settings.root).resolve())
+        except (OSError, ValueError):
+            return None
+        return ("/".join(rel.parts), int(d.name)) if rel.parts else None
+
+    def _request_check(self) -> None:
+        t = self._check_target()
+        if t is not None:
+            self.check_requested.emit(*t)
 
     def _open_py(self) -> None:
         d = self._problem_dir

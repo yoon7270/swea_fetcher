@@ -130,7 +130,7 @@ class CheckPage(QWidget):
         self.topic.setObjectName("TopicCombo")
         self.topic.setEditable(True)
         self.topic.setMinimumWidth(160)
-        self.topic.lineEdit().setPlaceholderText("주제")
+        self.topic.lineEdit().setPlaceholderText("주제 (비우면 번호로 찾기)")
         self.topic.setAccessibleName("주제 폴더")
         self.num = QLineEdit()
         self.num.setObjectName("NumInput")
@@ -212,6 +212,7 @@ class CheckPage(QWidget):
         self.coach_tab.settings_requested.connect(lambda: self.goto_requested.emit("settings"))
         self.coach_tab.copy_clicked.connect(self._copy_coach_code)
         self.num.textEdited.connect(lambda _t: self._clear_invalid())
+        self.num.editingFinished.connect(self._autofill_topic)
         self.topic.lineEdit().textEdited.connect(lambda _t: self._clear_invalid())
 
     # --- 상태 ---------------------------------------------------------------------
@@ -237,7 +238,7 @@ class CheckPage(QWidget):
         return service.check_timeout(self.settings, problem_dir)[0]
 
     def _hint_text(self) -> str:
-        return f"또는 .py 파일이나 {{번호}} 폴더를 이 창에 끌어다 놓으세요 · 제한 시간은 문제에 적힌 Python 시간 (모르면 {DEFAULT_TIMEOUT:.0f}초)"
+        return f"번호만 넣어도 저장한 폴더를 찾아 주제를 채웁니다 · 또는 .py 파일이나 {{번호}} 폴더를 이 창에 끌어다 놓으세요 · 제한 시간은 문제에 적힌 Python 시간 (모르면 {DEFAULT_TIMEOUT:.0f}초)"
 
     def refresh_hint(self) -> None:
         self.hint.setText(self._hint_text())
@@ -282,6 +283,30 @@ class CheckPage(QWidget):
         names = ", ".join(Path(u.toLocalFile()).name for u in e.mimeData().urls())
         self.banner.show_message("warning", "{주제}\\{번호}\\ 폴더 안의 .py 파일(또는 폴더)을 끌어다 놓으세요", f"놓은 항목: {names}")
 
+    def _autofill_topic(self) -> None:
+        """번호만으로 검증: 지금 주제 폴더에 {번호}.py 가 없으면 루트에서 그 번호를 저장한 폴더를 찾아 주제를 채운다.
+        (주제 칸에는 마지막 저장 주제가 미리 들어 있어 비어 있지 않은 경우가 많다.) 못 찾으면 그대로 둔다."""
+        num_s = self.num.text().strip()
+        if self.settings is None or not num_s.isdigit() or int(num_s) <= 0:
+            return
+        num = int(num_s)
+        topic = self.topic.currentText().strip()
+        if topic:
+            try:
+                if (storage.resolve_problem_dir(self.settings.root, topic, num) / f"{num}.py").is_file():
+                    return
+            except ValueError:
+                pass
+        try:
+            found = service.find_problem(self.settings, num)
+        except OSError:
+            found = None
+        if found is not None and found.topic != topic:
+            if self.topic.findText(found.topic) < 0:
+                self.topic.addItem(found.topic)
+            self.topic.setCurrentText(found.topic)
+            self.status_message.emit(f"{num} 은 {found.topic} 폴더에 있어요")
+
     def _topic_for(self, topic_dir: Path) -> str:
         """드롭한 폴더의 주제: 루트 안이면 루트 기준 상대 경로(`test/IM_test`), 밖이면 폴더 이름만."""
         if self.settings is not None:
@@ -317,6 +342,7 @@ class CheckPage(QWidget):
         if self.settings is None:
             self.banner.show_message("error", "설정이 없습니다", "루트 폴더·SWEA ID·비밀번호를 먼저 저장하세요", [("settings", "설정으로 이동")])
             return
+        self._autofill_topic()
         topic = self.topic.currentText().strip()
         num_s = self.num.text().strip()
         self._clear_invalid()
@@ -431,6 +457,7 @@ class CheckPage(QWidget):
 
     # --- SWEA 제출 (M8) ------------------------------------------------------------------
     def _target_from_form(self) -> tuple[str, int] | None:
+        self._autofill_topic()
         topic = self.topic.currentText().strip()
         num_s = self.num.text().strip()
         self._clear_invalid()

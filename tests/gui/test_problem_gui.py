@@ -575,3 +575,63 @@ def test_recommend_click_on_already_saved_problem_does_not_save_again(main_windo
     w.growth_page.recommend_open_requested.emit(5432, "bfs")
     assert w.fetch_page._worker is None
     assert w.stack.currentWidget() is w.problem_page and not w.problem_page.open_dir_btn.isHidden()
+
+
+# --- 문제 → 검증 ------------------------------------------------------------------
+
+
+def test_problem_tab_check_button_fills_check_page(main_window, content):
+    """문제 탭 [검증하기]: 저장한 문제면 보이고, 누르면 검증 탭에 주제(중첩 표기)·번호가 채워진다."""
+    w = main_window
+    d = w.settings.root / "test" / "IM_test" / "25730"
+    d.mkdir(parents=True)
+    (d / "25730.py").write_text("print(1)\n", encoding="utf-8")
+    content_cache.save(w.settings, 25730, "test/IM_test", "항아리 게임", content)
+    cached = content_cache.load(w.settings, 25730)
+    pp = w.problem_page
+    pp.show_cached(cached, d)
+    assert not pp.check_btn.isHidden()
+    pp.check_btn.click()
+    assert w.stack.currentWidget() is w.check_page
+    assert w.check_page.topic.currentText() == "test/IM_test" and w.check_page.num.text() == "25730"
+
+
+def test_problem_tab_check_button_hidden_without_saved_folder(main_window, content):
+    w = main_window
+    content_cache.save(w.settings, 25730, "", "항아리 게임", content)
+    w.problem_page.show_cached(content_cache.load(w.settings, 25730), None)
+    assert w.problem_page.check_btn.isHidden()
+
+
+def test_check_page_number_only_finds_topic(main_window):
+    """검증 탭: 주제가 비었거나 다른 폴더여도 번호로 저장 폴더를 찾아 주제를 채운다."""
+    w = main_window
+    d = w.settings.root / "greedy" / "1234"
+    d.mkdir(parents=True)
+    (d / "1234.py").write_text("print(1)\n", encoding="utf-8")
+    (w.settings.root / "BFS").mkdir()
+    cp = w.check_page
+    for before in ("", "BFS"):
+        cp.topic.setCurrentText(before)
+        cp.num.setText("1234")
+        assert cp._target_from_form() == ("greedy", 1234)
+        assert cp.topic.currentText() == "greedy"
+
+
+def test_check_page_keeps_topic_when_solution_exists_there(main_window):
+    w = main_window
+    for t in ("a", "b"):
+        d = w.settings.root / t / "77"
+        d.mkdir(parents=True)
+        (d / "77.py").write_text("print(1)\n", encoding="utf-8")
+    cp = w.check_page
+    cp.topic.setCurrentText("a")
+    cp.num.setText("77")
+    assert cp._target_from_form() == ("a", 77)
+
+
+def test_check_page_unknown_number_leaves_topic(main_window):
+    cp = main_window.check_page
+    cp.topic.setCurrentText("")
+    cp.num.setText("999")
+    assert cp._target_from_form() is None and cp.err_label.isVisibleTo(cp)
