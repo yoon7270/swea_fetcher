@@ -524,6 +524,6 @@ def test_mac_env_adds_user_bin_dirs_for_node_shims(tmp_path, monkeypatch):
     monkeypatch.setattr(ai_engine.sys, "platform", "darwin")
     monkeypatch.setattr(ai_engine.Path, "home", classmethod(lambda cls: tmp_path))
     (tmp_path / ".nvm/versions/node/v22.1.0/bin").mkdir(parents=True)
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv("PATH", os.pathsep.join(["/usr/bin", "/bin"]))
     path = ai_engine._env()["PATH"].split(os.pathsep)
     assert path[:2] == ["/usr/bin", "/bin"] and str(tmp_path / ".nvm/versions/node/v22.1.0/bin") in path
