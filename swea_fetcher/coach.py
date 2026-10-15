@@ -55,6 +55,7 @@ class ReviewItem:
     title: str
     due: date
     overdue_days: int  # 도래했으면 >= 0, 아직이면 음수 (-2 = 2일 뒤)
+    last_result: str = ""  # 마지막 SWEA 채점 (ProblemRecord.last_result) — "pass" 가 아니면 다시 풀어야 한다
 
     @property
     def is_due(self) -> bool:
@@ -297,7 +298,7 @@ def review_items(settings: Settings, today: date | None = None) -> list[ReviewIt
             due = date.fromisoformat(rec.review_due)
         except ValueError:
             continue
-        items.append(ReviewItem(rec.num, rec.topic, rec.title, due, (t - due).days))
+        items.append(ReviewItem(rec.num, rec.topic, rec.title, due, (t - due).days, rec.last_result))
     items.sort(key=lambda i: (i.due, i.num))
     return items
 

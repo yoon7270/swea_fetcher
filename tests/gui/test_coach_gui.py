@@ -457,15 +457,31 @@ def test_review_card_more_and_hidden_when_empty(main_window):
     assert len(links) == 5 and any("외 2개" in lab.text() for lab in hp.review_card.findChildren(type(hp.count_label)))
 
 
-def test_review_card_click_targets_check_tab(main_window):
+def test_review_card_click_wrong_opens_problem_tab(main_window):
+    """마지막 채점이 오답인 복습 → 다시 풀어야 하니 문제 탭 (지문 요청)."""
     s = main_window.settings
     _review(s, 301, 0, "복습 대상")
     hp = main_window.history_page
     hp.refresh()
     from PySide6.QtWidgets import QPushButton
 
+    got = []
+    hp.problem_requested.connect(lambda t, n: got.append((t, n)))
+    hp.check_requested.connect(lambda t, n: pytest.fail("오답 복습은 검증 탭으로 가지 않아야 함"))
     hp.review_card.findChildren(QPushButton)[0].click()
-    assert main_window.check_page.num.text() == "301" and main_window.check_page.topic.currentText() == "sim"
+    assert got == [("sim", 301)]
+
+
+def test_review_card_click_pass_targets_check_tab(main_window):
+    s = main_window.settings
+    _review(s, 302, 1, "복습 대상")
+    coach.record_submit(s, 302, "sim", "복습 대상", SubmitResult(True, "Pass"))  # 도래 전 Pass 는 복습을 지우지 않음
+    hp = main_window.history_page
+    hp.refresh()
+    from PySide6.QtWidgets import QPushButton
+
+    hp.review_card.findChildren(QPushButton)[0].click()
+    assert main_window.check_page.num.text() == "302" and main_window.check_page.topic.currentText() == "sim"
 
 
 def test_badge_and_startup_message(main_window):

@@ -333,8 +333,13 @@ class HistoryPage(QWidget):
             btn = Button(f"{it.num}. {it.title or '—'}")
             set_class(btn, "link")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setToolTip("검증 탭에서 이 문제를 엽니다")
-            btn.clicked.connect(lambda _=False, i=it: self.check_requested.emit(i.topic, i.num))
+            # 마지막 채점이 Pass 면 코드만 다시 확인하면 되니 검증 탭, 아니면(오답·시간 초과…) 다시 풀어야 하니 문제 탭
+            if it.last_result == "pass":
+                btn.setToolTip("검증 탭에서 이 문제를 엽니다 (마지막 제출 Pass)")
+                btn.clicked.connect(lambda _=False, i=it: self.check_requested.emit(i.topic, i.num))
+            else:
+                btn.setToolTip("문제 탭에서 지문을 엽니다 — 다시 풀고 [검증하기] 로 이어 가세요")
+                btn.clicked.connect(lambda _=False, i=it: self.problem_requested.emit(i.topic, i.num))
             if it.overdue_days > 0:
                 status = f"{it.overdue_days}일 지남"
             elif it.overdue_days == 0:
