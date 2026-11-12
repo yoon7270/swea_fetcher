@@ -11,6 +11,7 @@ tokens 는 Qt 를 import 하지 않는다 — 시스템 다크 감지는 gui/the
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -289,7 +290,8 @@ def set_system_dark(value: bool) -> None:
 
 # 글꼴: Pretendard 번들(gui/theme/fonts.py 가 등록, 실패하면 Malgun Gothic 폴백) — 스펙 §16.3
 FONT_FAMILY = '"Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif'
-FONT_MONO = 'Menlo, Consolas, "Cascadia Mono", "D2Coding", monospace'
+# 없는 글꼴 이름이 섞이면 Qt 가 별칭 목록을 다시 만들며 경고 + 지연 (macOS 에 Consolas 없음) → OS 별로 실제 있는 것만
+FONT_MONO = 'Menlo, "D2Coding", monospace' if sys.platform == "darwin" else 'Consolas, "Cascadia Mono", "D2Coding", monospace'
 # 크기(pt). 96dpi 환산: 9pt=12px, 10pt≈13px, 10.5pt=14px, 12pt=16px, 17pt≈23px, 22pt≈29px
 FONT_SIZE_XS = 9  # 배지, 상태바, 표 머리글, 차트 축
 FONT_SIZE_SM = 10  # 힌트, 로그, 배너 본문
