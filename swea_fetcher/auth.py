@@ -51,7 +51,7 @@ _login_lock = threading.Lock()
 
 def _fingerprint(settings: Settings) -> str:
     """자격증명 지문. sha256(salt + id + NUL + pw). 프로세스 밖으로 내보내지 않는다."""
-    raw = _FP_SALT + settings.user_id.encode("utf-8") + b"\0" + settings.password.encode("utf-8")
+    raw = _FP_SALT + settings.user_id.encode("utf-8") + b"\0" + settings.secret().encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 
 
@@ -169,7 +169,7 @@ def _login_locked(session: requests.Session, settings: Settings, explicit: bool)
             LOGIN_URL,
             data={
                 "id": settings.user_id,
-                "pwd": settings.password,
+                "pwd": settings.secret(),
                 "lang": "ko_KR",
                 "clientTimezone": "Asia/Seoul",
             },

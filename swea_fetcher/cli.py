@@ -275,7 +275,7 @@ def _run_migrate(config_dir: Path) -> int:
     if not user_id:
         raise ConfigMissing(".env 에 SWEA_ID 가 없어 옮길 수 없습니다. `swea-fetch init` 을 실행하세요")
     if not plain:
-        already = bool(config.get_password(user_id))
+        already = config.has_password(user_id)
         print("[OK] .env 에 평문 비밀번호가 없습니다." + (" 자격 증명 관리자에 이미 저장돼 있습니다." if already else " 옮길 것이 없습니다."))
         return 0
     config.save_password(user_id, plain)

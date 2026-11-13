@@ -402,3 +402,32 @@ def test_recommend_settings_invalid_falls_back_to_default(root_dir, config_dir, 
         s = _load_ai(root_dir, config_dir, fake_keyring, SWEA_RECOMMEND="maybe", SWEA_RECOMMEND_AI="2")
     assert (s.recommend, s.recommend_ai) == (True, True)
     assert "SWEA_RECOMMEND " in caplog.text and "SWEA_RECOMMEND_AI" in caplog.text
+
+
+# --- macOS 키체인: 실행할 때마다 허용 창이 뜨지 않게 비밀번호는 로그인할 때만 읽는다 ---------------------
+
+
+def test_mac_keychain_defers_password_until_secret(env_with_id, config_dir, fake_keyring, monkeypatch):
+    fake_keyring.store[(KEYRING_SERVICE, DUMMY_ID)] = DUMMY_PW
+    monkeypatch.setattr(config, "_mac_lazy_keyring", lambda: True)
+    monkeypatch.setattr(config, "_mac_has_password", lambda uid: (KEYRING_SERVICE, uid) in fake_keyring.store)
+    s = config.load_settings(config_dir)
+    assert fake_keyring.calls == []  # 설정 로드만으로는 키체인 값을 읽지 않는다
+    assert s.password_source == "keyring"
+    assert s.secret() == DUMMY_PW
+    assert s.secret() == DUMMY_PW
+    assert fake_keyring.calls.count(("get", KEYRING_SERVICE, DUMMY_ID)) == 1  # 한 번만
+
+
+def test_mac_keychain_missing_entry_still_raises_at_load(env_with_id, config_dir, fake_keyring, monkeypatch):
+    monkeypatch.setattr(config, "_mac_lazy_keyring", lambda: True)
+    monkeypatch.setattr(config, "_mac_has_password", lambda uid: False)
+    with pytest.raises(ConfigMissing):
+        config.load_settings(config_dir)
+
+
+def test_mac_has_password_does_not_read_secret(fake_keyring, monkeypatch):
+    monkeypatch.setattr(config, "_mac_lazy_keyring", lambda: True)
+    monkeypatch.setattr(config, "_mac_has_password", lambda uid: True)
+    assert config.has_password(DUMMY_ID) is True
+    assert fake_keyring.calls == []

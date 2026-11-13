@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import sys
 from dataclasses import dataclass, field
+from typing import Callable
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -62,6 +64,14 @@ class Settings:
     recommend_ai: bool = True  # SWEA_RECOMMEND_AI: 추천에 AI 약점 분석 (M24). 동의(growth_consent_ok) 없이는 호출하지 않는다
     type_bg: bool = True  # SWEA_TYPE_BG: 앱이 한가할 때 백그라운드로 풀이 유형 분류 (M24.2). 동의 전에는 아무 것도 하지 않는다
     type_model: str = "auto"  # SWEA_TYPE_MODEL: 유형 분류 모델 auto | codex:<slug> | claude:haiku (M24.2, AI 코치 엔진 설정과 독립)
+    # macOS 키체인: 비밀번호는 실제 로그인할 때만 읽는다 (읽을 때마다 허용 창이 뜨므로). password 가 비어 있을 때 secret() 이 호출
+    password_loader: Callable[[], str] | None = field(default=None, repr=False, compare=False)
+
+    def secret(self) -> str:
+        """로그인에 쓸 비밀번호. 지연 로딩이면 처음 한 번만 키체인을 읽는다."""
+        if not self.password and self.password_loader is not None:
+            object.__setattr__(self, "password", self.password_loader())
+        return self.password
 
     @property
     def session_file(self) -> Path:
@@ -123,6 +133,47 @@ def get_password(user_id: str) -> str | None:
         return kr.get_password(KEYRING_SERVICE, user_id)
     except kr.errors.KeyringError as e:
         raise _keyring_unavailable(e) from e
+
+
+def _mac_lazy_keyring() -> bool:
+    """macOS 키체인 백엔드면 True — 비밀 값을 읽지 않고 항목 존재만 확인할 수 있다 (허용 창 없음)."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        return type(_keyring().get_keyring()).__module__.startswith("keyring.backends.macOS")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _mac_has_password(user_id: str) -> bool | None:
+    """`security find-generic-password` (-w 없이) 는 비밀 값을 읽지 않아 허용 창이 뜨지 않는다. 판단 불가면 None."""
+    try:
+        r = subprocess.run(
+            ["security", "find-generic-password", "-s", KEYRING_SERVICE, "-a", user_id],
+            capture_output=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.returncode == 0
+
+
+def _load_password_now(user_id: str) -> str:
+    password = get_password(user_id)
+    if not password:
+        raise ConfigMissing(
+            f"설정이 없습니다: {PASSWORD_KEY} (자격 증명 관리자 '{KEYRING_SERVICE}' 에 '{user_id}' 항목 없음). "
+            "`swea-fetch init` 을 실행하세요"
+        )
+    return password
+
+
+def has_password(user_id: str) -> bool:
+    """저장된 비밀번호가 있는지. macOS 에서는 키체인 허용 창 없이 확인한다."""
+    if _mac_lazy_keyring():
+        found = _mac_has_password(user_id)
+        if found is not None:
+            return found
+    return bool(get_password(user_id))
 
 
 def save_password(user_id: str, password: str) -> None:
@@ -315,6 +366,7 @@ def load_settings(config_dir: Path | None = None) -> Settings:
     # 비밀번호: 환경변수 → .env(경고) → keyring
     password: str | None
     source: str
+    lazy = False
     if os.environ.get(PASSWORD_KEY):
         password, source = os.environ[PASSWORD_KEY], "env"
     elif file_values.get(PASSWORD_KEY):
@@ -323,9 +375,11 @@ def load_settings(config_dir: Path | None = None) -> Settings:
             "평문 비밀번호가 %s 에 있습니다. `swea-fetch init --migrate` 를 실행하면 자격 증명 관리자로 옮깁니다",
             env_file,
         )
+    elif lazy := (_mac_lazy_keyring() and _mac_has_password(user_id) is True):
+        password, source = "", "keyring"  # 값은 로그인할 때 secret() 이 읽는다
     else:
         password, source = get_password(user_id), "keyring"
-    if not password:
+    if not password and not lazy:
         raise ConfigMissing(
             f"설정이 없습니다: {PASSWORD_KEY} (자격 증명 관리자 '{KEYRING_SERVICE}' 에 '{user_id}' 항목 없음). "
             "`swea-fetch init` 을 실행하세요"
@@ -335,6 +389,7 @@ def load_settings(config_dir: Path | None = None) -> Settings:
         root=root,
         user_id=user_id,
         password=password,
+        password_loader=(lambda: _load_password_now(user_id)) if lazy else None,
         input_name=get("SWEA_INPUT_NAME").strip() or "input.txt",
         output_name=get("SWEA_OUTPUT_NAME").strip() or "output.txt",
         config_dir=config_dir,

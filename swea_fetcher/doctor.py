@@ -133,7 +133,7 @@ def _keyring_row(settings: Settings | None, config_dir: Path) -> str:
     if not user_id:
         return "확인 불가 (SWEA_ID 없음)"
     try:
-        return "항목 있음" if config.get_password(user_id) else "항목 없음"
+        return "항목 있음" if config.has_password(user_id) else "항목 없음"
     except Exception as e:  # noqa: BLE001
         return f"확인 실패 ({type(e).__name__})"
 

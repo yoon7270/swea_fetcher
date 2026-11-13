@@ -825,7 +825,7 @@ class SettingsPage(QWidget):
         has_saved_pw = False
         if user_id and not password:
             try:
-                has_saved_pw = bool(config.get_password(user_id))
+                has_saved_pw = config.has_password(user_id)
             except Exception:  # noqa: BLE001 — keyring 접근 실패는 워커에서 다시 드러난다
                 has_saved_pw = False
         v = self._validate(need_pw=not password and not has_saved_pw)
