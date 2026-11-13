@@ -266,3 +266,33 @@ def test_folder_non_windows_uses_xdg_open(monkeypatch):
     monkeypatch.setattr(opener.subprocess, "Popen", lambda args, **kw: calls.append(args))
     assert opener.open_folder(PDIR) is True
     assert calls == [["xdg-open", str(PDIR)]]
+
+
+# --- macOS: VS Code 는 문제 폴더째 열어 탐색기에 같은 폴더 파일이 보이게 --------------------------
+
+
+def test_mac_vscode_opens_folder_and_file(tmp_path, monkeypatch):
+    app = tmp_path / "Visual Studio Code.app"
+    cli = app / "Contents/Resources/app/bin/code"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("")
+    monkeypatch.setattr(opener, "_mac_app_path", lambda name: app)
+    d, f = tmp_path / "BFS" / "5105", tmp_path / "BFS" / "5105" / "5105.py"
+    assert opener._mac_editor_args("Visual Studio Code", d, f) == [str(cli), str(d), "-g", str(f)]
+
+
+def test_mac_vscode_without_cli_still_passes_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(opener, "_mac_app_path", lambda name: None)
+    d, f = tmp_path / "d", tmp_path / "d" / "a.py"
+    assert opener._mac_editor_args("Visual Studio Code", d, f) == ["open", "-a", "Visual Studio Code", str(d), str(f)]
+
+
+def test_mac_open_in_editor_uses_folder_args(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(opener.sys, "platform", "darwin")
+    monkeypatch.setattr(opener, "_mac_app", lambda s: "Visual Studio Code")
+    monkeypatch.setattr(opener, "_mac_app_path", lambda name: None)
+    monkeypatch.setattr(opener.subprocess, "Popen", lambda args: calls.append(args))
+    d, f = tmp_path / "d", tmp_path / "d" / "a.py"
+    assert opener.open_in_editor(d, f, "vscode").kind == "vscode"
+    assert calls == [["open", "-a", "Visual Studio Code", str(d), str(f)]]

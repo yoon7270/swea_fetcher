@@ -337,6 +337,26 @@ def _mac_app(setting: str | None) -> str | None:
     return None
 
 
+def _mac_app_path(name: str) -> Path | None:
+    for base in ("/Applications", str(Path.home() / "Applications")):
+        p = Path(base) / f"{name}.app"
+        if p.exists():
+            return p
+    return None
+
+
+def _mac_editor_args(app: str, problem_dir: Path, file: Path) -> list[str]:
+    """macOS 에디터 실행 인자. VS Code 는 번들 CLI 로 문제 폴더를 함께 열어 탐색기에 같은 폴더 파일이 보이게 한다
+    (파일만 열면 탐색기에 '폴더 열기' 만 뜬다). 같은 폴더 창이 이미 있으면 VS Code 가 그 창을 재사용한다."""
+    if app == "Visual Studio Code":
+        root = _mac_app_path(app)
+        cli = root / "Contents/Resources/app/bin/code" if root else None
+        if cli and cli.is_file():
+            return [str(cli), str(problem_dir), "-g", str(file)]
+        return ["open", "-a", app, str(problem_dir), str(file)]
+    return ["open", "-a", app, str(file)]
+
+
 def open_in_editor(problem_dir: Path, file: Path, setting: str | None = "auto") -> OpenResult:
     """풀이 파일을 에디터로 연다. 실패는 os.startfile 폴백, 최종 실패만 ok=False."""
     kind = "default"
@@ -345,7 +365,7 @@ def open_in_editor(problem_dir: Path, file: Path, setting: str | None = "auto") 
         app = _mac_app(setting)
         try:
             if app:
-                subprocess.Popen(["open", "-a", app, str(file)])  # noqa: S603, S607
+                subprocess.Popen(_mac_editor_args(app, problem_dir, file))  # noqa: S603
                 return OpenResult(True, "vscode" if app == "Visual Studio Code" else "pycharm")
         except OSError as e:
             log.debug("에디터 열기 실패, 기본 앱으로 폴백: %s", e)
